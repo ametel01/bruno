@@ -67,7 +67,7 @@ export const AGENT_PHASES = Object.freeze([
 ]);
 
 /** Event types the helper server accepts from the browser over POST /events. */
-export const CLIENT_EVENT_TYPES = Object.freeze([
+const CLIENT_EVENT_TYPES = Object.freeze([
   'generate',
   'accept',
   'discard',
@@ -88,7 +88,7 @@ export const CLIENT_EVENT_TYPES = Object.freeze([
  * append the rest. An event type missing here lands as `unknown_event_type`
  * in the snapshot diagnostics.
  */
-export const JOURNAL_EVENT_TYPES = Object.freeze([
+const JOURNAL_EVENT_TYPES = Object.freeze([
   'generate',
   'variant_plan',
   'detector_waivers',
@@ -111,7 +111,7 @@ export const JOURNAL_EVENT_TYPES = Object.freeze([
 ]);
 
 /** Phases the session store assigns to a snapshot. */
-export const SESSION_PHASES = Object.freeze([
+const SESSION_PHASES = Object.freeze([
   'new',
   'generate_requested',
   'variants_ready',
@@ -148,7 +148,7 @@ export const GENERATION_FENCED_SESSION_PHASES = Object.freeze([
  * breadcrumb, not control flow. Two exceptions drive behavior and are split
  * out below.
  */
-export const CHECKPOINT_REASONS = Object.freeze([
+const CHECKPOINT_REASONS = Object.freeze([
   'generate_started',
   'variants_progress',
   'variants_ready',

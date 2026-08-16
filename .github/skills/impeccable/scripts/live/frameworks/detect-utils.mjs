@@ -48,7 +48,7 @@ export function fileExists(cwd, rel) {
   }
 }
 
-export function firstExistingFile(cwd, candidates) {
+function firstExistingFile(cwd, candidates) {
   for (const rel of candidates) {
     if (fileExists(cwd, rel)) return rel;
   }

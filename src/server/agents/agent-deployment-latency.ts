@@ -1,17 +1,17 @@
 import "server-only";
 
 import { sql } from "drizzle-orm";
-import type {
-  AgentDeploymentEnvironment,
-  AgentDeploymentOrigin,
-} from "@/src/server/agents/deployment-slo-identity";
-import { isRolloutConfigurationGeneration } from "@/src/server/agents/deployment-slo-identity";
 import {
   COLD_DEPLOYMENT_SLO_OBJECTIVE_MS,
   COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS,
   COLD_DEPLOYMENT_SLO_READY_REQUIRED,
   COLD_DEPLOYMENT_SLO_SAMPLE_SIZE,
 } from "@/src/server/agents/cold-deployment-slo-objective";
+import type {
+  AgentDeploymentEnvironment,
+  AgentDeploymentOrigin,
+} from "@/src/server/agents/deployment-slo-identity";
+import { isRolloutConfigurationGeneration } from "@/src/server/agents/deployment-slo-identity";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import { createAppLogger } from "@/src/server/logging/logger";
 
@@ -274,12 +274,16 @@ export function buildAgentDeploymentLatencyReport(
         left.id.localeCompare(right.id),
     )
     .map((deployment) => toLatencyRun(deployment, generatedAt));
-  const readyDurations = runs
-    .filter((run) => run.outcome === "ready" && run.totalDurationMs !== null)
-    .map((run) => run.totalDurationMs as number);
-  const failedDurations = runs
-    .filter((run) => run.outcome === "failed" && run.totalDurationMs !== null)
-    .map((run) => run.totalDurationMs as number);
+  const readyDurations: number[] = [];
+  const failedDurations: number[] = [];
+  for (const run of runs) {
+    if (run.outcome === "ready" && run.totalDurationMs !== null) {
+      readyDurations.push(run.totalDurationMs);
+    }
+    if (run.outcome === "failed" && run.totalDurationMs !== null) {
+      failedDurations.push(run.totalDurationMs);
+    }
+  }
   const ready = runs.filter((run) => run.outcome === "ready").length;
   const failed = runs.filter((run) => run.outcome === "failed").length;
   const incomplete = runs.filter((run) => run.outcome === "incomplete").length;
@@ -624,18 +628,26 @@ function buildAgentStageTimings(
 ): AgentDeploymentLatencyStageTiming[] {
   if (!createdAt) return [];
 
-  const ordered = events
-    .map((event) => ({
+  const ordered: Array<{
+    fromStage: string | null;
+    toStage: string | null;
+    at: string | null;
+  }> = [];
+  for (let index = 0; index < events.length; index += 1) {
+    if (!(index in events)) continue;
+    const event = events[index];
+    if (event === undefined) continue;
+    const mapped = {
       fromStage: normalizeLabel(event.fromStage),
       toStage: normalizeLabel(event.toStage),
       at: toIso(event.createdAt),
-    }))
-    .filter((event) => event.toStage)
-    .sort(
-      (left, right) =>
-        compareIso(left.at, right.at) ||
-        (left.fromStage ?? "").localeCompare(right.fromStage ?? ""),
-    );
+    };
+    if (mapped.toStage) ordered.push(mapped);
+  }
+  ordered.sort(
+    (left, right) =>
+      compareIso(left.at, right.at) || (left.fromStage ?? "").localeCompare(right.fromStage ?? ""),
+  );
   const seen = new Set<string>();
   const timings: AgentDeploymentLatencyStageTiming[] = [];
   let cursor = createdAt;
@@ -782,12 +794,16 @@ function summarizeCohort(
   const ready = cohortRuns.filter((run) => run.outcome === "ready").length;
   const failed = cohortRuns.filter((run) => run.outcome === "failed").length;
   const incomplete = cohortRuns.filter((run) => run.outcome === "incomplete").length;
-  const readyDurations = cohortRuns
-    .filter((run) => run.outcome === "ready" && run.totalDurationMs !== null)
-    .map((run) => run.totalDurationMs as number);
-  const failedDurations = cohortRuns
-    .filter((run) => run.outcome === "failed" && run.totalDurationMs !== null)
-    .map((run) => run.totalDurationMs as number);
+  const readyDurations: number[] = [];
+  const failedDurations: number[] = [];
+  for (const run of cohortRuns) {
+    if (run.outcome === "ready" && run.totalDurationMs !== null) {
+      readyDurations.push(run.totalDurationMs);
+    }
+    if (run.outcome === "failed" && run.totalDurationMs !== null) {
+      failedDurations.push(run.totalDurationMs);
+    }
+  }
 
   return {
     total: cohortRuns.length,

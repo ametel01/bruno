@@ -32,9 +32,9 @@ export async function cleanupProviderTrialCallbackAttribution(input: {
   ) {
     attributableRunnerIds.add(input.observedRunnerId);
   }
-  for (const runnerId of attributableRunnerIds) {
-    await input.revokeAndDeleteRunner(runnerId);
-  }
+  await Promise.all(
+    [...attributableRunnerIds].map((runnerId) => input.revokeAndDeleteRunner(runnerId)),
+  );
   switch (input.token.status) {
     case "pending":
       await input.revokePendingToken();

@@ -70,6 +70,6 @@ export const LIVE_UI_SURFACES = Object.freeze([
 ].map((surface) => Object.freeze({ ...surface, ids: Object.freeze(surface.ids) })));
 
 /** Every id any surface owns, de-duplicated, in surface order. */
-export const LIVE_UI_COMPONENT_IDS = Object.freeze([
+const LIVE_UI_COMPONENT_IDS = Object.freeze([
   ...new Set(LIVE_UI_SURFACES.flatMap((surface) => surface.ids)),
 ]);

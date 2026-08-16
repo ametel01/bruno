@@ -115,7 +115,7 @@ export function readDetectionConfig(root) {
   return config;
 }
 
-export function readRawDetectionConfig(root, opts = {}) {
+function readRawDetectionConfig(root, opts = {}) {
   const raw = safeReadJson(opts.local ? getLocalConfigPath(root) : getConfigPath(root));
   const config = cloneRawDetectionConfig();
   applyDetectionConfigSource(config, hookSection(raw));
@@ -123,7 +123,7 @@ export function readRawDetectionConfig(root, opts = {}) {
   return config;
 }
 
-export function writeDetectionConfig(root, detectorConfig, opts = {}) {
+function writeDetectionConfig(root, detectorConfig, opts = {}) {
   const filePath = opts.local ? getLocalConfigPath(root) : getConfigPath(root);
   if (opts.local) ensureConfigGitExclude(root);
   const existing = safeReadJson(filePath) || {};
@@ -560,7 +560,7 @@ function cleanIgnoreValueDisplay(value) {
  * The recorded design-hook decision: 'accepted' | 'declined' | undefined.
  * config.local.json (per-developer) overrides config.json.
  */
-export function getHookConsent(root) {
+function getHookConsent(root) {
   let consent;
   for (const filePath of [getConfigPath(root), getLocalConfigPath(root)]) {
     const hook = hookSection(safeReadJson(filePath));
@@ -573,7 +573,7 @@ export function getHookConsent(root) {
  * Persist the per-developer decision to config.local.json, preserving any
  * sibling keys, and ensure the file is gitignored.
  */
-export function setHookConsent(root, value) {
+function setHookConsent(root, value) {
   const filePath = getLocalConfigPath(root);
   const existing = safeReadJson(filePath) || {};
   const hook = hookSection(existing) || {};

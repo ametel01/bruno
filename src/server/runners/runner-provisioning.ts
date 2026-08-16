@@ -240,13 +240,14 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       return pending("external_wait");
     }
 
+    const sizeSlug = input.config.sizeSlug;
     const validatedResources = validateDigitalOceanProvisioningResources(input.config);
     if (!validatedResources.ok) {
       log(
         "provider_config_rejected",
         {
           issueCount: validatedResources.issues.length,
-          sizeSlug: input.config.sizeSlug,
+          sizeSlug,
           runnerMaxAgents: input.config.runnerMaxAgents,
         },
         "error",
@@ -460,7 +461,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
           : {}),
         bootMode: input.config.snapshotMode?.mode === "snapshot" ? "snapshot" : "stock",
         bootValidation: runnerBootstrapValidation(input.config),
-        sizeSlug: input.config.sizeSlug,
+        sizeSlug,
         now: input.now,
         log,
       });
@@ -469,7 +470,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       if (!(await automaticProviderEffectAllowed(input))) return pending("immediate");
       log("provider_create_started", {
         region: input.config.region,
-        sizeSlug: input.config.sizeSlug,
+        sizeSlug,
         image: selectedImage.image,
         sshKeyCount: sshAccess.sshKeyIds.length,
       });
@@ -477,7 +478,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
         {
           name: input.operationKey,
           region: input.config.region,
-          sizeSlug: input.config.sizeSlug,
+          sizeSlug,
           image: selectedImage.image,
           tags: operationTags,
           firewallName: DEFAULT_FIREWALL_NAME,
@@ -552,7 +553,8 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
 
       const startedAt = await setAutomaticProvisioningPhase(input, "tagging");
       if (!startedAt) return pending("external_wait");
-      const missingTags = operationTags.filter((tag) => !observed.value.tags.includes(tag));
+      const observedTagSet = new Set(observed.value.tags);
+      const missingTags = operationTags.filter((tag) => !observedTagSet.has(tag));
       if (missingTags.length === 0) {
         await completeAutomaticProvisioningPhase(input, {
           phase: "tagging",
@@ -656,7 +658,8 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
         return pending("observation_wait");
       }
 
-      if (!firewalled.value.providerFirewallId) {
+      const providerFirewallId = firewalled.value.providerFirewallId;
+      if (!providerFirewallId) {
         log("provider_firewall_missing_id", {}, "error");
         await markAutomaticProvisioningFailed(input, runner.providerResourceId);
         return {
@@ -672,11 +675,11 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
         nextPhase: endpointUrl ? "waiting_for_runner" : "bootstrapping",
         resource: firewalled.value,
         endpointUrl,
-        providerFirewallId: firewalled.value.providerFirewallId,
+        providerFirewallId,
         notBefore: startedAt,
       });
       log("provider_firewall_completed", {
-        providerFirewallId: firewalled.value.providerFirewallId,
+        providerFirewallId,
         endpointResolved: Boolean(endpointUrl),
       });
       return pending(endpointUrl ? "external_wait" : "external_wait");

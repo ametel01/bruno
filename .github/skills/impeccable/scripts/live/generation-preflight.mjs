@@ -13,7 +13,7 @@ const PREFLIGHT_TIMEOUT_MS = 15_000;
 const sourceResolutionCache = new Map();
 
 /** Test/lifecycle hook: drop all cached source resolutions. */
-export function clearSourceResolutionCache() {
+function clearSourceResolutionCache() {
   sourceResolutionCache.clear();
 }
 

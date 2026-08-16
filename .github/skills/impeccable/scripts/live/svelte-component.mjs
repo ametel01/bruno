@@ -42,7 +42,7 @@ export const SVELTE_COMPONENT_ROOT = 'node_modules/.impeccable-live';
 export const LEGACY_SVELTE_COMPONENT_ROOT = '.impeccable/live/previews';
 export const SVELTE_RUNTIME_FILE = `${SVELTE_COMPONENT_ROOT}/__runtime.js`;
 export const SVELTE_PROBE_FILE = `${SVELTE_COMPONENT_ROOT}/__probe.js`;
-export const DEFERRED_ACCEPTS_FILE = '.impeccable/live/deferred-svelte-component-accepts.json';
+const DEFERRED_ACCEPTS_FILE = '.impeccable/live/deferred-svelte-component-accepts.json';
 
 const MUSTACHE_RE = /\{([^{}]+)\}/g;
 
@@ -79,7 +79,7 @@ export function ensureRuntimeHelper(cwd = process.cwd()) {
 /**
  * Extract ordered unique mustache expressions from markup (not inside <!-- -->).
  */
-export function extractMustacheExpressions(text) {
+function extractMustacheExpressions(text) {
   const expressions = [];
   const seen = new Set();
   const lines = String(text || '').split('\n');
@@ -98,7 +98,7 @@ export function extractMustacheExpressions(text) {
   return expressions;
 }
 
-export function buildPropContract(expressions) {
+function buildPropContract(expressions) {
   return expressions.map((expr, index) => {
     const derived = derivePropName(expr, index);
     return {
@@ -117,7 +117,7 @@ function derivePropName(expr, index) {
   return `prop${index}`;
 }
 
-export function substituteExprsWithProps(markup, contract) {
+function substituteExprsWithProps(markup, contract) {
   let out = String(markup || '');
   for (const entry of contract) {
     out = out.split(entry.placeholder).join(`{${entry.prop}}`);
@@ -1295,7 +1295,7 @@ export function readDeferredAccepts(cwd = process.cwd()) {
   }
 }
 
-export function writeDeferredAccept(entry, cwd = process.cwd()) {
+function writeDeferredAccept(entry, cwd = process.cwd()) {
   const file = deferredAcceptsPath(cwd);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const data = readDeferredAccepts(cwd);

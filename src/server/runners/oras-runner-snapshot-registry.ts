@@ -86,19 +86,19 @@ export class OrasRunnerSnapshotRegistryAdapter implements RunnerSnapshotRegistry
       ]);
       const manifest = parseOciManifest(manifestBytes);
       const names = (await readdir(directory)).sort();
-      const files: RunnerSnapshotRegistryFile[] = [];
-
-      for (const name of names) {
-        const mediaType = manifest.layers.get(name);
-        if (!mediaType) {
-          throw new Error("Runner snapshot OCI manifest did not describe a retrieved file.");
-        }
-        files.push({
-          name,
-          mediaType,
-          contents: await readFile(join(directory, name), "utf8"),
-        });
-      }
+      const files: RunnerSnapshotRegistryFile[] = await Promise.all(
+        names.map(async (name) => {
+          const mediaType = manifest.layers.get(name);
+          if (!mediaType) {
+            throw new Error("Runner snapshot OCI manifest did not describe a retrieved file.");
+          }
+          return {
+            name,
+            mediaType,
+            contents: await readFile(join(directory, name), "utf8"),
+          };
+        }),
+      );
 
       return {
         ociReference,

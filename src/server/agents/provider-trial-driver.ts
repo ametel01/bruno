@@ -1183,7 +1183,7 @@ async function finalizeRun(
   const deploymentIds = cohortReport.slots.flatMap((slot) =>
     slot.deploymentId ? [slot.deploymentId] : [],
   );
-  const stageRuns = await Promise.all(
+  const stageRunsPromise = Promise.all(
     deploymentIds.map(async (deploymentId) => {
       const latency = await buildAgentDeploymentLatencyReportForDatabase(connection, {
         deploymentId,
@@ -1197,21 +1197,24 @@ async function finalizeRun(
       return exactRun;
     }),
   );
-  const slotCleanup = await buildSlotCleanupEvidence(connection, run.cohortId);
-  const authorizationEvidence = await connection.db
-    .select({
-      generation: providerTrialAuthorizationEvents.generation,
-      authorizationIdHash: providerTrialAuthorizationEvents.authorizationIdHash,
-      prerequisiteGateEvidenceDigest:
-        providerTrialAuthorizationEvents.prerequisiteGateEvidenceDigest,
-      deploymentChoicesDigest: providerTrialAuthorizationEvents.deploymentChoicesDigest,
-      renewedFromPausedAt: providerTrialAuthorizationEvents.renewedFromPausedAt,
-      renewedFromPauseReason: providerTrialAuthorizationEvents.renewedFromPauseReason,
-      authorizedAt: providerTrialAuthorizationEvents.authorizedAt,
-    })
-    .from(providerTrialAuthorizationEvents)
-    .where(eq(providerTrialAuthorizationEvents.cohortId, run.cohortId))
-    .orderBy(providerTrialAuthorizationEvents.generation);
+  const [stageRuns, slotCleanup, authorizationEvidence] = await Promise.all([
+    stageRunsPromise,
+    buildSlotCleanupEvidence(connection, run.cohortId),
+    connection.db
+      .select({
+        generation: providerTrialAuthorizationEvents.generation,
+        authorizationIdHash: providerTrialAuthorizationEvents.authorizationIdHash,
+        prerequisiteGateEvidenceDigest:
+          providerTrialAuthorizationEvents.prerequisiteGateEvidenceDigest,
+        deploymentChoicesDigest: providerTrialAuthorizationEvents.deploymentChoicesDigest,
+        renewedFromPausedAt: providerTrialAuthorizationEvents.renewedFromPausedAt,
+        renewedFromPauseReason: providerTrialAuthorizationEvents.renewedFromPauseReason,
+        authorizedAt: providerTrialAuthorizationEvents.authorizedAt,
+      })
+      .from(providerTrialAuthorizationEvents)
+      .where(eq(providerTrialAuthorizationEvents.cohortId, run.cohortId))
+      .orderBy(providerTrialAuthorizationEvents.generation),
+  ]);
   const report = {
     schemaVersion: PROVIDER_TRIAL_DRIVER_REPORT_SCHEMA_VERSION,
     generatedAt: now.toISOString(),

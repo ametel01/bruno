@@ -8,8 +8,8 @@ import { canCreateInsert } from './insert-ui.mjs';
 // The accepted protocol values come from the canonical vocabulary so the
 // validator, the store, the server, and the picker UI never drift. Imported
 // (not just re-exported) so they are also in scope for the validators below.
-import { AGENT_PHASES, CLIENT_EVENT_TYPES, VISUAL_ACTIONS } from './vocabulary.mjs';
-export { AGENT_PHASES, CLIENT_EVENT_TYPES, VISUAL_ACTIONS };
+import { AGENT_PHASES, VISUAL_ACTIONS } from './vocabulary.mjs';
+export { AGENT_PHASES, VISUAL_ACTIONS };
 
 const AGENT_PHASE_SET = new Set(AGENT_PHASES);
 

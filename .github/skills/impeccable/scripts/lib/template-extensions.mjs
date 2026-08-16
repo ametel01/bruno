@@ -114,7 +114,7 @@ export function resolveLiveTemplateExtensions(cwd = process.cwd()) {
 const extensionCache = new Map();
 
 /** Test seam: drop the memoized config so a fixture can rewrite config.json. */
-export function clearTemplateExtensionCache() {
+function clearTemplateExtensionCache() {
   extensionCache.clear();
 }
 

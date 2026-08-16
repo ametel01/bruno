@@ -6,7 +6,6 @@ import {
 } from "@/src/runner-service/constants";
 
 export const DIGITALOCEAN_RUNNER_HOST_MEMORY_RESERVE_MIB = 384;
-export const DIGITALOCEAN_LOW_MEMORY_SWAP_RESILIENCE_SIZE_SLUG = "s-1vcpu-512mb-10gb";
 export const PROVISIONAL_DIGITALOCEAN_RUNNER_SIZE_SLUG = "s-1vcpu-2gb";
 export const HERMES_DOCKER_CPU_NANO_UNITS = 1_000_000_000;
 export const MAX_HERMES_DOCKER_PIDS_LIMIT = 4096;

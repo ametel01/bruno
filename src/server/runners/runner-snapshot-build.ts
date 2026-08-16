@@ -925,21 +925,20 @@ async function pollSnapshotImageAvailability(input: {
       input.context,
     );
     if (found?.ok) {
-      if (found.value.id === input.snapshotActionId) {
+      const candidateSnapshotId = found.value.id;
+      if (candidateSnapshotId === input.snapshotActionId) {
         return { ok: false, snapshotId, imageReadAttempted };
       }
-      if (snapshotId !== null && found.value.id !== snapshotId) {
+      if (snapshotId !== null && candidateSnapshotId !== snapshotId) {
         return { ok: false, snapshotId, imageReadAttempted };
       }
-      snapshotId = found.value.id;
+      snapshotId = candidateSnapshotId;
 
       imageReadAttempted = true;
-      const availability = await input.provider.readImageAvailability?.(
-        { imageId: snapshotId },
-        input.context,
-      );
+      const availability: DigitalOceanProviderResult<DigitalOceanImageAvailability> | undefined =
+        await input.provider.readImageAvailability?.({ imageId: snapshotId }, input.context);
       if (availability?.ok) {
-        const image = availability.value;
+        const image: DigitalOceanImageAvailability = availability.value;
         if (
           image.id !== snapshotId ||
           image.name !== input.snapshotName ||
@@ -1818,7 +1817,8 @@ function sanitationPassed(
 }
 
 function containsAll(values: string[] | undefined, required: string[]): boolean {
-  return required.every((value) => values?.includes(value));
+  const valueSet = values === undefined ? undefined : new Set(values);
+  return required.every((value) => valueSet?.has(value) ?? false);
 }
 
 function isExplicitControllerCidr(value: string): boolean {

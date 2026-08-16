@@ -1,6 +1,7 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import Script from "next/script";
 import { AuthConfigurationUnavailable } from "@/app/_components/auth-configuration-unavailable";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import "@xterm/xterm/css/xterm.css";
@@ -60,7 +61,9 @@ export default function RootLayout({
         />
       </head>
       <body className={bodyFont.variable} data-impeccable-seed="b32744ed">
-        <script>{directionContractBootstrap}</script>
+        <Script id="direction-contract" strategy="afterInteractive">
+          {directionContractBootstrap}
+        </Script>
         {content}
       </body>
     </html>

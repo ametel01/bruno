@@ -1270,12 +1270,14 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
 
     if (!response.ok) return response;
 
-    const images = (response.value?.images ?? [])
-      .flatMap((image) => {
-        const availability = apiImageToImageAvailability(image);
-        return availability ? [availability] : [];
-      })
-      .filter((image) => image.name === input.name);
+    const images: DigitalOceanImageAvailability[] = [];
+    const sourceImages = response.value?.images ?? [];
+    for (let index = 0; index < sourceImages.length; index += 1) {
+      if (!(index in sourceImages)) continue;
+      const image = sourceImages[index];
+      const availability = apiImageToImageAvailability(image);
+      if (availability?.name === input.name) images.push(availability);
+    }
 
     return images.length === 1
       ? { ok: true, value: images[0] as DigitalOceanImageAvailability }

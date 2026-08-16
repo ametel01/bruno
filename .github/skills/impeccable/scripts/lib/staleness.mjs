@@ -474,7 +474,7 @@ export function checkProjectRoots({ patterns = [], candidates = [], configuredIn
  * than emitted at boot: the judgment call is whether the inherited record
  * actually describes that app.
  */
-export function describeWorkspaceContext(candidates = []) {
+function describeWorkspaceContext(candidates = []) {
   return candidates.map((candidate) => ({
     name: candidate.name,
     path: candidate.path,

@@ -2,16 +2,12 @@ import "server-only";
 
 import { createHash, randomUUID, sign, verify } from "node:crypto";
 import { asc, eq, sql } from "drizzle-orm";
-import {
-  COLD_DEPLOYMENT_SLO_OBJECTIVE_MS,
-  COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS,
-} from "@/src/server/agents/cold-deployment-slo-objective";
+import { COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS } from "@/src/server/agents/cold-deployment-slo-objective";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import { agentDeployments, providerTrialCohorts, providerTrialSlots } from "@/src/server/db/schema";
 
 export const PROVIDER_TRIAL_SLOT_COUNT = 30;
 export const PROVIDER_TRIAL_REPORT_SCHEMA_VERSION = "bruno.provider-trial-cohort.v2";
-export const PROVIDER_TRIAL_READY_WITHIN_MS = COLD_DEPLOYMENT_SLO_OBJECTIVE_MS;
 
 const SAFE_KEY_PATTERN = /^[a-z0-9][a-z0-9._:-]{7,127}$/;
 const SAFE_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;

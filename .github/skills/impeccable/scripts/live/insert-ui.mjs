@@ -15,7 +15,7 @@ export const PLACEHOLDER_MIN_WIDTH = 120;
  * @param {{ display?: string, flexDirection?: string, gridTemplateColumns?: string, gridAutoFlow?: string }} style
  * @returns {InsertAxis}
  */
-export function detectInsertAxisFromStyle(style) {
+function detectInsertAxisFromStyle(style) {
   const display = style?.display || 'block';
   if (display.includes('flex')) {
     const dir = style.flexDirection || 'row';
@@ -68,7 +68,7 @@ export function canCreateInsert({ prompt, comments, strokes }) {
 }
 
 /** Tooltip/title when Create is disabled. */
-export function insertCreateDisabledReason({ prompt, comments, strokes }) {
+function insertCreateDisabledReason({ prompt, comments, strokes }) {
   if (canCreateInsert({ prompt, comments, strokes })) return null;
   return 'Add a prompt or annotate the placeholder to create';
 }
@@ -91,7 +91,7 @@ export function insertLineCoords(rect, position, axis = 'column') {
 }
 
 /** Cursor while hovering an insert boundary. */
-export function cursorForInsertAxis(axis) {
+function cursorForInsertAxis(axis) {
   return axis === 'row' ? 'ew-resize' : 'ns-resize';
 }
 
@@ -198,7 +198,7 @@ export function hitSiblingInsertGap(clientX, clientY, siblings, opts = {}) {
 /**
  * Resolve insert hover target, side, axis, and indicator line for the pointer.
  */
-export function resolveInsertHover({ clientX, clientY, target, rect, axis, siblings }) {
+function resolveInsertHover({ clientX, clientY, target, rect, axis, siblings }) {
   const gap = hitSiblingInsertGap(clientX, clientY, siblings);
   if (gap) return gap;
 
@@ -212,7 +212,7 @@ export function resolveInsertHover({ clientX, clientY, target, rect, axis, sibli
  * Prefer implicit sizing (flex / %) so row inserts don't inherit the full parent width in px.
  * @returns {{ kind: 'flex', flex: string, minWidth: number } | { kind: 'percent' } | { kind: 'auto' } | { kind: 'explicit', width: number }}
  */
-export function placeholderSizing({ axis, parentDisplay, parentWidth, anchorFlex }) {
+function placeholderSizing({ axis, parentDisplay, parentWidth, anchorFlex }) {
   const display = parentDisplay || 'block';
   const w = Number.isFinite(parentWidth) ? parentWidth : 0;
 
@@ -239,7 +239,7 @@ export function placeholderSizing({ axis, parentDisplay, parentWidth, anchorFlex
 }
 
 /** Width kinds that need materializing to px before edge-resize. */
-export function placeholderWidthIsImplicit(kind) {
+function placeholderWidthIsImplicit(kind) {
   return kind === 'flex' || kind === 'percent' || kind === 'auto';
 }
 
@@ -257,7 +257,7 @@ export function clampPlaceholderSize(width, height, parentWidth, opts = {}) {
 }
 
 /** CSS cursor for a placeholder edge resize handle. */
-export function cursorForPlaceholderEdge(edge) {
+function cursorForPlaceholderEdge(edge) {
   if (edge === 'n' || edge === 's') return 'ns-resize';
   if (edge === 'e' || edge === 'w') return 'ew-resize';
   return 'default';
@@ -271,7 +271,7 @@ export function cursorForPlaceholderEdge(edge) {
  * @param {number} dy pointer delta Y since drag start
  * @param {number} parentWidth
  */
-export function resizePlaceholderFromEdge(start, edge, dx, dy, parentWidth, opts = {}) {
+function resizePlaceholderFromEdge(start, edge, dx, dy, parentWidth, opts = {}) {
   const base = {
     width: start.width,
     height: start.height,
@@ -304,7 +304,7 @@ export function resizePlaceholderFromEdge(start, edge, dx, dy, parentWidth, opts
 }
 
 /** Pick and insert toggles are independent but turning one ON turns the other OFF. */
-export function applyPickToggle(pickActive, insertActive) {
+function applyPickToggle(pickActive, insertActive) {
   const nextPick = !pickActive;
   return {
     pickActive: nextPick,
@@ -312,7 +312,7 @@ export function applyPickToggle(pickActive, insertActive) {
   };
 }
 
-export function applyInsertToggle(pickActive, insertActive) {
+function applyInsertToggle(pickActive, insertActive) {
   const nextInsert = !insertActive;
   return {
     pickActive: nextInsert ? false : pickActive,
@@ -323,7 +323,7 @@ export function applyInsertToggle(pickActive, insertActive) {
 /**
  * Build the browser generate payload for insert mode.
  */
-export function buildInsertGeneratePayload({
+function buildInsertGeneratePayload({
   id,
   count,
   pageUrl,
@@ -358,7 +358,7 @@ export function buildInsertGeneratePayload({
  * Whether a variant wrapper is currently shown (handles `hidden` and display:none).
  * @param {{ hidden?: boolean, style?: { display?: string } } | null | undefined} el
  */
-export function isVariantShown(el) {
+function isVariantShown(el) {
   if (!el) return false;
   if (el.hidden) return false;
   if (el.style?.display === 'none') return false;
@@ -370,7 +370,7 @@ export function isVariantShown(el) {
  * @param {{ hidden?: boolean, style?: { display?: string }, removeAttribute?: (name: string) => void, setAttribute?: (name: string, value?: string) => void } | null | undefined} el
  * @param {boolean} shown
  */
-export function setVariantShown(el, shown) {
+function setVariantShown(el, shown) {
   if (!el) return;
   if (shown) {
     el.removeAttribute?.('hidden');
@@ -392,7 +392,7 @@ export function setVariantShown(el, shown) {
  *   pickVariantContent?: (wrapper: unknown, index: number) => unknown,
  * }} opts
  */
-export function resolveInsertSessionAnchor(opts) {
+function resolveInsertSessionAnchor(opts) {
   const {
     wrapper,
     variantCount = 0,
@@ -422,7 +422,7 @@ export function resolveInsertSessionAnchor(opts) {
  * }} placeholder
  * @param {{ position: 'before' | 'after', layoutAxis?: 'row' | 'column' }} meta
  */
-export function buildInsertPlaceholderSnapshot(anchor, placeholder, { position, layoutAxis }) {
+function buildInsertPlaceholderSnapshot(anchor, placeholder, { position, layoutAxis }) {
   return {
     width: Math.round(placeholder.offsetWidth || 0),
     height: Math.round(placeholder.offsetHeight || PLACEHOLDER_DEFAULT_HEIGHT),
@@ -442,7 +442,7 @@ export function buildInsertPlaceholderSnapshot(anchor, placeholder, { position, 
  * @param {ReturnType<typeof buildInsertPlaceholderSnapshot> | null | undefined} snapshot
  * @param {Element | null | undefined} liveAnchor
  */
-export function findInsertAnchorInDom(doc, snapshot, liveAnchor = null) {
+function findInsertAnchorInDom(doc, snapshot, liveAnchor = null) {
   if (liveAnchor && doc.body.contains(liveAnchor)) return liveAnchor;
   if (!snapshot) return null;
   const tag = (snapshot.anchorTag || 'div').toLowerCase();

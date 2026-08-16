@@ -610,7 +610,9 @@ function isUniqueSlugList(value: unknown): value is string[] {
 }
 
 function sameStringSet(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value) => right.includes(value));
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((value) => rightSet.has(value));
 }
 
 function isIsoTimestamp(value: unknown): value is string {
