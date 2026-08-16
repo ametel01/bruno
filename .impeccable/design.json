@@ -1,325 +1,118 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-15T22:21:10Z",
+  "generatedAt": "2026-08-16T18:14:42Z",
   "title": "Design System: Bruno",
   "extensions": {
     "colorMeta": {
-      "editorial-blue": {
-        "role": "primary",
-        "displayName": "Electric Editorial Blue",
-        "canonical": "#155eef",
-        "tonalRamp": [
-          "oklch(15% 0.25 260)",
-          "oklch(27% 0.25 260)",
-          "oklch(39% 0.25 260)",
-          "oklch(51% 0.25 260)",
-          "oklch(63% 0.25 260)",
-          "oklch(75% 0.21 260)",
-          "oklch(87% 0.12 260)",
-          "oklch(95% 0.05 260)"
-        ]
-      },
-      "editorial-blue-deep": {
-        "role": "primary",
-        "displayName": "Deep Editorial Blue",
-        "canonical": "#0b3ea8",
-        "tonalRamp": [
-          "oklch(15% 0.2 260)",
-          "oklch(27% 0.2 260)",
-          "oklch(39% 0.2 260)",
-          "oklch(51% 0.2 260)",
-          "oklch(63% 0.19 260)",
-          "oklch(75% 0.16 260)",
-          "oklch(87% 0.09 260)",
-          "oklch(95% 0.04 260)"
-        ]
-      },
-      "citron-tab": {
-        "role": "secondary",
-        "displayName": "Citron Tab",
-        "canonical": "#dfff3f",
-        "tonalRamp": [
-          "oklch(15% 0.2 120)",
-          "oklch(27% 0.22 120)",
-          "oklch(39% 0.24 120)",
-          "oklch(51% 0.24 120)",
-          "oklch(63% 0.24 120)",
-          "oklch(75% 0.22 120)",
-          "oklch(87% 0.17 120)",
-          "oklch(95% 0.08 120)"
-        ]
-      },
-      "red-pencil": {
-        "role": "tertiary",
-        "displayName": "Dark Red Pencil",
-        "canonical": "#a92b2b",
-        "tonalRamp": [
-          "oklch(15% 0.15 27)",
-          "oklch(27% 0.18 27)",
-          "oklch(39% 0.19 27)",
-          "oklch(51% 0.19 27)",
-          "oklch(63% 0.17 27)",
-          "oklch(75% 0.13 27)",
-          "oklch(87% 0.07 27)",
-          "oklch(95% 0.03 27)"
-        ]
-      },
-      "ledger-ink": {
-        "role": "neutral",
-        "displayName": "Ledger Ink",
-        "canonical": "#172018",
-        "tonalRamp": [
-          "oklch(15% 0.02 145)",
-          "oklch(27% 0.02 145)",
-          "oklch(39% 0.02 145)",
-          "oklch(51% 0.02 145)",
-          "oklch(63% 0.018 145)",
-          "oklch(75% 0.015 145)",
-          "oklch(87% 0.01 145)",
-          "oklch(95% 0.006 145)"
-        ]
-      },
-      "body-ink": {
-        "role": "neutral",
-        "displayName": "Body Ink",
-        "canonical": "#4b544c",
-        "tonalRamp": [
-          "oklch(15% 0.015 145)",
-          "oklch(27% 0.015 145)",
-          "oklch(39% 0.015 145)",
-          "oklch(51% 0.015 145)",
-          "oklch(63% 0.013 145)",
-          "oklch(75% 0.011 145)",
-          "oklch(87% 0.008 145)",
-          "oklch(95% 0.004 145)"
-        ]
-      },
-      "paper": {
-        "role": "neutral",
-        "displayName": "Grid-Ruled Paper",
-        "canonical": "#f2f0e8",
-        "tonalRamp": [
-          "oklch(15% 0.02 95)",
-          "oklch(27% 0.02 95)",
-          "oklch(39% 0.02 95)",
-          "oklch(51% 0.02 95)",
-          "oklch(63% 0.02 95)",
-          "oklch(75% 0.018 95)",
-          "oklch(87% 0.015 95)",
-          "oklch(95% 0.012 95)"
-        ]
-      },
-      "white": {
-        "role": "neutral",
-        "displayName": "White",
-        "canonical": "#ffffff",
-        "tonalRamp": [
-          "oklch(15% 0 0)",
-          "oklch(27% 0 0)",
-          "oklch(39% 0 0)",
-          "oklch(51% 0 0)",
-          "oklch(63% 0 0)",
-          "oklch(75% 0 0)",
-          "oklch(87% 0 0)",
-          "oklch(100% 0 0)"
-        ]
-      },
-      "rule": {
-        "role": "neutral",
-        "displayName": "Ledger Rule",
-        "canonical": "rgb(23 32 24 / 20%)",
-        "tonalRamp": [
-          "oklch(15% 0.012 145)",
-          "oklch(27% 0.012 145)",
-          "oklch(39% 0.012 145)",
-          "oklch(51% 0.012 145)",
-          "oklch(63% 0.01 145)",
-          "oklch(75% 0.008 145)",
-          "oklch(87% 0.006 145)",
-          "oklch(95% 0.004 145)"
-        ]
-      },
-      "rule-soft": {
-        "role": "neutral",
-        "displayName": "Soft Ledger Rule",
-        "canonical": "rgb(23 32 24 / 10%)",
-        "tonalRamp": [
-          "oklch(15% 0.008 145)",
-          "oklch(27% 0.008 145)",
-          "oklch(39% 0.008 145)",
-          "oklch(51% 0.008 145)",
-          "oklch(63% 0.007 145)",
-          "oklch(75% 0.006 145)",
-          "oklch(87% 0.004 145)",
-          "oklch(95% 0.002 145)"
-        ]
-      }
+      "deep-charcoal": { "role": "primary", "displayName": "Deep Charcoal", "canonical": "#101314", "tonalRamp": ["oklch(15% 0.01 200)", "oklch(27% 0.01 200)", "oklch(39% 0.01 200)", "oklch(51% 0.01 200)", "oklch(63% 0.009 200)", "oklch(75% 0.007 200)", "oklch(87% 0.004 200)", "oklch(95% 0.002 200)"] },
+      "warm-espresso": { "role": "primary", "displayName": "Warm Espresso", "canonical": "#6b4d3c", "tonalRamp": ["oklch(15% 0.055 55)", "oklch(27% 0.065 55)", "oklch(39% 0.075 55)", "oklch(51% 0.08 55)", "oklch(63% 0.07 55)", "oklch(75% 0.055 55)", "oklch(87% 0.032 55)", "oklch(95% 0.014 55)"] },
+      "signal-mint": { "role": "secondary", "displayName": "Signal Mint", "canonical": "#59d6c5", "tonalRamp": ["oklch(15% 0.07 175)", "oklch(27% 0.1 175)", "oklch(39% 0.13 175)", "oklch(51% 0.15 175)", "oklch(63% 0.15 175)", "oklch(75% 0.13 175)", "oklch(87% 0.08 175)", "oklch(95% 0.035 175)"] },
+      "signal-mint-soft": { "role": "secondary", "displayName": "Soft Signal Mint", "canonical": "#dff6f1", "tonalRamp": ["oklch(15% 0.025 175)", "oklch(27% 0.035 175)", "oklch(39% 0.045 175)", "oklch(51% 0.05 175)", "oklch(63% 0.05 175)", "oklch(75% 0.045 175)", "oklch(87% 0.035 175)", "oklch(95% 0.02 175)"] },
+      "action-lime": { "role": "tertiary", "displayName": "Action Lime", "canonical": "#b8f34b", "tonalRamp": ["oklch(15% 0.11 125)", "oklch(27% 0.15 125)", "oklch(39% 0.19 125)", "oklch(51% 0.22 125)", "oklch(63% 0.23 125)", "oklch(75% 0.21 125)", "oklch(87% 0.14 125)", "oklch(95% 0.065 125)"] },
+      "action-lime-soft": { "role": "tertiary", "displayName": "Soft Action Lime", "canonical": "#e9fbc4", "tonalRamp": ["oklch(15% 0.04 125)", "oklch(27% 0.055 125)", "oklch(39% 0.07 125)", "oklch(51% 0.085 125)", "oklch(63% 0.09 125)", "oklch(75% 0.085 125)", "oklch(87% 0.065 125)", "oklch(95% 0.035 125)"] },
+      "stone": { "role": "neutral", "displayName": "Stone", "canonical": "#d8ccbd", "tonalRamp": ["oklch(15% 0.018 75)", "oklch(27% 0.022 75)", "oklch(39% 0.026 75)", "oklch(51% 0.03 75)", "oklch(63% 0.031 75)", "oklch(75% 0.028 75)", "oklch(87% 0.02 75)", "oklch(95% 0.01 75)"] },
+      "ivory": { "role": "neutral", "displayName": "Ivory", "canonical": "#f7f4ee", "tonalRamp": ["oklch(15% 0.012 85)", "oklch(27% 0.016 85)", "oklch(39% 0.02 85)", "oklch(51% 0.022 85)", "oklch(63% 0.022 85)", "oklch(75% 0.02 85)", "oklch(87% 0.015 85)", "oklch(95% 0.009 85)"] },
+      "warm-white": { "role": "neutral", "displayName": "Warm White", "canonical": "#fffdfa", "tonalRamp": ["oklch(15% 0.006 75)", "oklch(27% 0.008 75)", "oklch(39% 0.01 75)", "oklch(51% 0.012 75)", "oklch(63% 0.012 75)", "oklch(75% 0.01 75)", "oklch(87% 0.007 75)", "oklch(98% 0.003 75)"] },
+      "muted-ink": { "role": "neutral", "displayName": "Muted Ink", "canonical": "#6f6d68", "tonalRamp": ["oklch(15% 0.008 80)", "oklch(27% 0.009 80)", "oklch(39% 0.01 80)", "oklch(51% 0.011 80)", "oklch(63% 0.01 80)", "oklch(75% 0.008 80)", "oklch(87% 0.005 80)", "oklch(95% 0.002 80)"] },
+      "espresso-rule": { "role": "neutral", "displayName": "Espresso Rule", "canonical": "rgb(107 77 60 / 18%)", "tonalRamp": ["oklch(15% 0.018 55)", "oklch(27% 0.022 55)", "oklch(39% 0.026 55)", "oklch(51% 0.028 55)", "oklch(63% 0.024 55)", "oklch(75% 0.018 55)", "oklch(87% 0.01 55)", "oklch(95% 0.004 55)"] },
+      "charcoal-rule": { "role": "neutral", "displayName": "Charcoal Rule", "canonical": "rgb(16 19 20 / 20%)", "tonalRamp": ["oklch(15% 0.006 200)", "oklch(27% 0.007 200)", "oklch(39% 0.008 200)", "oklch(51% 0.008 200)", "oklch(63% 0.007 200)", "oklch(75% 0.005 200)", "oklch(87% 0.003 200)", "oklch(95% 0.001 200)"] }
     },
     "typographyMeta": {
-      "display": {
-        "displayName": "Display",
-        "purpose": "The single dominant promise or closing statement."
-      },
-      "headline": {
-        "displayName": "Headline",
-        "purpose": "Section arguments and spread titles."
-      },
-      "title": {
-        "displayName": "Title",
-        "purpose": "Decision, operating-loop, and row headings."
-      },
-      "body": {
-        "displayName": "Body",
-        "purpose": "Operational explanations and evidence."
-      },
-      "label": {
-        "displayName": "Label",
-        "purpose": "Metadata, policies, tabs, navigation, and process steps."
-      }
+      "display": { "displayName": "Display", "purpose": "Oversized promises and closing statements." },
+      "headline": { "displayName": "Headline", "purpose": "Section arguments and operating-model transitions." },
+      "title": { "displayName": "Title", "purpose": "Panel headings, loop names, and operational titles." },
+      "body": { "displayName": "Body", "purpose": "Narrative explanations and operational evidence." },
+      "label": { "displayName": "Label", "purpose": "Navigation, actions, metadata, tags, and policy states." }
     },
     "shadows": [
-      {
-        "name": "spread",
-        "value": "0 30px 70px rgb(23 32 24 / 10%)",
-        "purpose": "Separates a complete ledger spread from surrounding paper."
-      },
-      {
-        "name": "action-lift",
-        "value": "0 12px 28px rgb(21 94 239 / 24%)",
-        "purpose": "Appears only while the primary action rises on hover."
-      },
-      {
-        "name": "graph-emphasis",
-        "value": "0 22px 44px rgb(21 94 239 / 18%)",
-        "purpose": "Gives the Business Graph core one controlled focal plane."
-      }
+      { "name": "action-lift", "value": "0 14px 28px rgb(16 19 20 / 14%)", "purpose": "Lifts a compact dark action on hover." },
+      { "name": "proof-panel", "value": "0 34px 74px rgb(71 56 45 / 14%)", "purpose": "Gives the illustrative Action Inbox its product-panel depth." },
+      { "name": "section-panel", "value": "0 34px 74px rgb(71 56 45 / 12%)", "purpose": "Separates a large operating panel from the ivory canvas." },
+      { "name": "graph-core", "value": "0 26px 48px rgb(16 19 20 / 18%)", "purpose": "Focuses the circular center of the Business Graph." },
+      { "name": "orbit-contact", "value": "0 10px 20px rgb(71 56 45 / 8%)", "purpose": "Keeps small orbit labels legible above linework." }
     ],
     "motion": [
-      {
-        "name": "state-standard",
-        "value": "180ms ease-out",
-        "purpose": "Primary-action color, transform, and shadow transitions."
-      },
-      {
-        "name": "state-quick",
-        "value": "150ms ease-out",
-        "purpose": "Navigation and editorial-tab state changes."
-      },
-      {
-        "name": "route-advance",
-        "value": "linear",
-        "purpose": "Progressively reveals the operating route while keeping every stage visible; disabled for reduced motion."
-      }
+      { "name": "text-state", "value": "160ms ease-out", "purpose": "Navigation and inline-link color transitions." },
+      { "name": "control-state", "value": "180ms ease-out", "purpose": "Button color, border, shadow, and transform transitions." },
+      { "name": "business-orbit", "value": "11s linear infinite", "purpose": "Moves one mint signal around the Business Graph; disabled for reduced motion." }
     ],
     "breakpoints": [
-      {
-        "name": "stack",
-        "value": "980px"
-      },
-      {
-        "name": "mobile",
-        "value": "700px"
-      }
+      { "name": "stack", "value": "1120px" },
+      { "name": "mobile", "value": "720px" }
     ]
   },
   "components": [
     {
-      "name": "Primary Button",
+      "name": "Primary Pill Action",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The sole high-emphasis action for following or advancing the build.",
-      "html": "<a class=\"ds-btn-primary\" href=\"#\">FOLLOW THE BUILD <svg aria-hidden=\"true\" viewBox=\"0 0 20 20\"><path d=\"M4 10h11M10 5l5 5-5 5\"/></svg></a>",
-      "css": ".ds-btn-primary { display: inline-flex; min-height: 50px; align-items: center; justify-content: center; gap: 12px; padding: 0 19px; border: 0; border-radius: 0; background: #155eef; color: #ffffff; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; font-size: 0.82rem; font-weight: 900; letter-spacing: 0.04em; text-decoration: none; text-transform: uppercase; transition: background 180ms ease-out, transform 180ms ease-out, box-shadow 180ms ease-out; } .ds-btn-primary svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-linecap: square; stroke-width: 1.8; } .ds-btn-primary:hover { background: #0b3ea8; box-shadow: 0 12px 28px rgb(21 94 239 / 24%); transform: translateY(-2px); } .ds-btn-primary:focus-visible { outline: 3px solid #155eef; outline-offset: 4px; } .ds-btn-primary:active { transform: translateY(0); }"
+      "description": "The high-emphasis route into the shipped dashboard or next operating action.",
+      "html": "<a class=\"ds-button-primary\" href=\"#\">Open dashboard <svg aria-hidden=\"true\" viewBox=\"0 0 20 20\"><path d=\"M3 10h13M11 5l5 5-5 5\"/></svg></a>",
+      "css": ".ds-button-primary { display:inline-flex; min-height:50px; align-items:center; justify-content:center; gap:11px; padding:0 20px; border:1px solid transparent; border-radius:999px; background:#101314; color:#fffdfa; font-family:Inter,ui-sans-serif,system-ui,sans-serif; font-size:.82rem; font-weight:700; text-decoration:none; transition:background-color 180ms ease-out,box-shadow 180ms ease-out,transform 180ms ease-out; } .ds-button-primary svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:1.8; } .ds-button-primary:hover { background:#6b4d3c; box-shadow:0 16px 32px rgb(16 19 20 / 16%); transform:translateY(-2px); } .ds-button-primary:focus-visible { outline:3px solid #59d6c5; outline-offset:4px; } .ds-button-primary:active { transform:translateY(0); } @media (prefers-reduced-motion:reduce) { .ds-button-primary { transition:none; } }"
     },
     {
-      "name": "Editorial Tab",
-      "kind": "chip",
-      "refersTo": "editorial-tab",
-      "description": "A citron index tab for the next section or an explicit status.",
-      "html": "<a class=\"ds-editorial-tab\" href=\"#\">NEXT · OPERATING LOOPS <svg aria-hidden=\"true\" viewBox=\"0 0 20 20\"><path d=\"M4 10h11M10 5l5 5-5 5\"/></svg></a>",
-      "css": ".ds-editorial-tab { display: inline-flex; min-height: 34px; align-items: center; gap: 10px; padding: 7px 10px 6px; border: 0; border-bottom: 1px solid #a92b2b; border-radius: 0; background: #dfff3f; color: #172018; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; font-size: 0.68rem; font-weight: 900; letter-spacing: 0.06em; text-decoration: none; text-transform: uppercase; transition: color 150ms ease-out; } .ds-editorial-tab svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: square; stroke-width: 1.8; } .ds-editorial-tab:hover { color: #155eef; } .ds-editorial-tab:focus-visible { outline: 3px solid #155eef; outline-offset: 4px; } .ds-editorial-tab:active { color: #0b3ea8; }"
+      "name": "Secondary Pill Action",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A quieter parallel route such as creating an agent.",
+      "html": "<a class=\"ds-button-secondary\" href=\"#\">Create an agent</a>",
+      "css": ".ds-button-secondary { display:inline-flex; min-height:50px; align-items:center; justify-content:center; padding:0 20px; border:1px solid rgb(16 19 20 / 20%); border-radius:999px; background:rgb(255 253 250 / 58%); color:#101314; font-family:Inter,ui-sans-serif,system-ui,sans-serif; font-size:.82rem; font-weight:700; text-decoration:none; transition:background-color 180ms ease-out,border-color 180ms ease-out,transform 180ms ease-out; } .ds-button-secondary:hover { border-color:#101314; background:#fffdfa; transform:translateY(-2px); } .ds-button-secondary:focus-visible { outline:3px solid #59d6c5; outline-offset:4px; } .ds-button-secondary:active { transform:translateY(0); } @media (prefers-reduced-motion:reduce) { .ds-button-secondary { transition:none; } }"
     },
     {
       "name": "Landing Navigation",
       "kind": "nav",
       "refersTo": "nav-link",
-      "description": "Heavy uppercase navigation with a persistent blue bridge into the shipped dashboard.",
-      "html": "<nav class=\"ds-nav\" aria-label=\"Example navigation\"><a href=\"#\">HOW IT WORKS</a><a href=\"#\">OPERATING LOOPS</a><a href=\"#\">SIGN IN</a><a class=\"ds-nav-dashboard\" href=\"/dashboard\">OPEN DASHBOARD</a></nav>",
-      "css": ".ds-nav { display: flex; align-items: center; gap: 32px; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; } .ds-nav a { padding: 5px 3px 3px; border-radius: 0; color: #172018; text-decoration: none; text-decoration-color: #a92b2b; text-decoration-thickness: 1px; text-underline-offset: 0.24em; transition: background 150ms ease-out, text-decoration-color 150ms ease-out; } .ds-nav a:hover { background: #dfff3f; color: #172018; text-decoration-line: underline; } .ds-nav .ds-nav-dashboard { padding: 10px 12px 8px; background: #155eef; color: #ffffff; } .ds-nav .ds-nav-dashboard:hover { background: #0b3ea8; color: #ffffff; text-decoration-line: none; } .ds-nav a:focus-visible { outline: 3px solid #155eef; outline-offset: 4px; } .ds-nav a:active { color: #0b3ea8; }"
+      "description": "Quiet navigation balanced by a persistent dark dashboard action.",
+      "html": "<nav class=\"ds-navigation\"><a href=\"#\">How it works</a><a href=\"#\">Operating loops</a><a class=\"ds-navigation-action\" href=\"/dashboard\">Open dashboard</a></nav>",
+      "css": ".ds-navigation { display:flex; align-items:center; gap:32px; font-family:Inter,ui-sans-serif,system-ui,sans-serif; font-size:.78rem; font-weight:650; } .ds-navigation a { color:#101314; text-decoration:none; text-underline-offset:.24em; transition:color 160ms ease-out; } .ds-navigation a:hover { color:#6b4d3c; text-decoration-line:underline; } .ds-navigation a:focus-visible { outline:3px solid #59d6c5; outline-offset:4px; } .ds-navigation .ds-navigation-action { min-height:44px; display:inline-flex; align-items:center; padding:0 18px; border-radius:999px; background:#101314; color:#fffdfa; font-weight:700; } .ds-navigation .ds-navigation-action:hover { background:#6b4d3c; color:#fffdfa; text-decoration-line:none; }"
     },
     {
-      "name": "Decision Ledger Row",
+      "name": "Bruno Lockup",
       "kind": "custom",
-      "refersTo": "decision-row",
-      "description": "A numbered record that pairs evidence with an explicit action and policy state.",
-      "html": "<article class=\"ds-decision\"><span class=\"ds-decision-index\">01</span><div><h3>Potential sale</h3><p>A promising lead has been waiting five days for a reply.</p><footer><span>FOLLOW-UP PREPARED</span><strong>NEEDS YOUR APPROVAL</strong></footer></div></article>",
-      "css": ".ds-decision { display: grid; grid-template-columns: 44px 1fr; gap: 16px; padding: 22px 0 20px; border-bottom: 1px solid rgb(23 32 24 / 20%); border-radius: 0; background: #f2f0e8; color: #172018; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; } .ds-decision-index { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid #172018; background: #f2f0e8; font-size: 0.68rem; font-weight: 900; } .ds-decision h3 { margin: 0; font-size: 1.02rem; font-weight: 900; } .ds-decision p { margin: 8px 0 14px; color: #4b544c; font-size: 0.9rem; line-height: 1.5; } .ds-decision footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 18px; color: #0b3ea8; font-size: 0.68rem; letter-spacing: 0.04em; text-transform: uppercase; } .ds-decision footer strong { color: #172018; font-weight: 900; } .ds-decision:focus-within { outline: 3px solid #155eef; outline-offset: 4px; }"
+      "description": "The rounded Bruno mark with mint and lime operating signals.",
+      "html": "<span class=\"ds-bruno-lockup\"><svg aria-hidden=\"true\" viewBox=\"0 0 54 58\"><path d=\"M9 4h18c9 0 16 6 16 15 0 5-2 9-7 12 7 2 11 7 11 14 0 6-3 10-7 13H9V4Z\"/><path d=\"m15 17 10 8 10-8\"/><path d=\"M14 49c0-9 5-15 14-15 8 0 14 5 14 13 0 5-2 8-6 11H14v-9Z\"/><circle class=\"ds-bruno-mint\" cx=\"37\" cy=\"29\" r=\"5\"/><circle class=\"ds-bruno-lime\" cx=\"18\" cy=\"55\" r=\"5\"/></svg><span>Bruno<span class=\"ds-bruno-dot\">.</span></span></span>",
+      "css": ".ds-bruno-lockup { display:inline-flex; align-items:center; gap:10px; color:#101314; font-family:Satoshi,Inter,ui-sans-serif,system-ui,sans-serif; font-size:1.35rem; font-weight:700; letter-spacing:-.045em; line-height:1; } .ds-bruno-lockup svg { width:32px; height:34px; overflow:visible; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:3.1; } .ds-bruno-mint { fill:#59d6c5; stroke:#f7f4ee; stroke-width:2.8; } .ds-bruno-lime { fill:#b8f34b; stroke:#f7f4ee; stroke-width:2.8; } .ds-bruno-dot { color:#59d6c5; }"
+    },
+    {
+      "name": "Action Inbox Row",
+      "kind": "card",
+      "refersTo": "action-inbox-row",
+      "description": "A compact illustrative decision record with evidence, category, and timing.",
+      "html": "<article class=\"ds-inbox-row\"><span class=\"ds-inbox-icon\"><svg aria-hidden=\"true\" viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"14\" rx=\"2\"/><path d=\"m4 7 8 6 8-6\"/></svg></span><div><h3>Follow up with churned trial user</h3><p>High intent · Trial ended 2 days ago</p><span class=\"ds-inbox-tag\">CRM outreach</span></div><span class=\"ds-inbox-state\">Due today</span></article>",
+      "css": ".ds-inbox-row { display:grid; grid-template-columns:42px minmax(0,1fr) auto; gap:13px; align-items:center; padding:13px 14px; border:1px solid rgb(107 77 60 / 18%); border-radius:12px; background:#fffdfa; color:#101314; font-family:Inter,ui-sans-serif,system-ui,sans-serif; } .ds-inbox-icon { display:grid; width:42px; height:42px; place-items:center; border-radius:50%; background:#dff6f1; } .ds-inbox-icon svg { width:20px; height:20px; fill:none; stroke:#101314; stroke-linecap:round; stroke-linejoin:round; stroke-width:1.5; } .ds-inbox-row h3 { margin:0; font-size:.82rem; font-weight:650; line-height:1.3; } .ds-inbox-row p { margin:4px 0 8px; color:#6f6d68; font-size:.66rem; line-height:1.4; } .ds-inbox-tag { padding:4px 6px; border-radius:4px; background:#dff6f1; font-size:.58rem; font-weight:650; } .ds-inbox-state { color:#6f6d68; font-size:.61rem; white-space:nowrap; } .ds-inbox-row:focus-within { outline:3px solid #59d6c5; outline-offset:4px; }"
     },
     {
       "name": "Business Graph Core",
-      "kind": "card",
-      "refersTo": "graph-card",
-      "description": "The singular saturated system object inside a ruled graph field.",
-      "html": "<section class=\"ds-graph-core\"><svg aria-hidden=\"true\" viewBox=\"0 0 44 44\"><path d=\"M33 14a14 14 0 1 0 2.5 12\"/><path d=\"m28 8 6 6-7 4\"/><circle cx=\"22\" cy=\"22\" r=\"3\"/></svg><span>BUSINESS GRAPH</span><strong>What changed—and why it matters</strong></section>",
-      "css": ".ds-graph-core { display: grid; min-height: 220px; align-content: center; justify-items: center; padding: 28px; border: 2px solid #172018; border-radius: 0; background: #155eef; box-shadow: 0 22px 44px rgb(21 94 239 / 18%); color: #ffffff; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; text-align: center; } .ds-graph-core svg { width: 54px; height: 54px; margin-bottom: 22px; fill: none; stroke: currentColor; stroke-linecap: square; stroke-width: 1.4; } .ds-graph-core span { font-size: 0.72rem; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; } .ds-graph-core strong { max-width: 20ch; margin-top: 12px; font-size: 2rem; letter-spacing: -0.03em; line-height: 1.02; } .ds-graph-core:focus-within { outline: 3px solid #155eef; outline-offset: 4px; }"
+      "kind": "custom",
+      "refersTo": "business-graph-core",
+      "description": "The circular model connecting company state to one operating loop.",
+      "html": "<section class=\"ds-graph-core\"><span>Business Graph</span><strong>What changed—and why it matters</strong></section>",
+      "css": ".ds-graph-core { display:grid; width:240px; aspect-ratio:1; align-content:center; justify-items:center; padding:34px; border-radius:50%; background:#101314; box-shadow:0 26px 48px rgb(16 19 20 / 18%); color:#fffdfa; font-family:Inter,ui-sans-serif,system-ui,sans-serif; text-align:center; } .ds-graph-core span { color:#59d6c5; font-size:.66rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; } .ds-graph-core strong { max-width:14ch; margin-top:11px; font-family:Satoshi,Inter,ui-sans-serif,system-ui,sans-serif; font-size:1.45rem; letter-spacing:-.03em; line-height:1.1; }"
     },
     {
       "name": "Policy Row",
       "kind": "custom",
       "refersTo": "policy-row",
-      "description": "A readable business action paired with a non-color-dependent authority label.",
-      "html": "<div class=\"ds-policy-row\"><span>Send to an existing customer</span><strong>ASK ME</strong></div>",
-      "css": ".ds-policy-row { display: grid; grid-template-columns: 1.25fr 0.75fr; gap: 20px; padding: 15px 0; border-bottom: 1px solid #172018; border-radius: 0; background: #f2f0e8; color: #172018; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; font-size: 0.86rem; } .ds-policy-row strong { justify-self: start; color: #0b3ea8; font-size: 0.72rem; font-weight: 900; text-transform: uppercase; } .ds-policy-row:hover { background: linear-gradient(90deg, #dfff3f 0 4px, #f2f0e8 4px); } .ds-policy-row:focus-visible { outline: 3px solid #155eef; outline-offset: 4px; } .ds-policy-row:active strong { color: #155eef; }"
+      "description": "A legible business action paired with a written authority state.",
+      "html": "<div class=\"ds-policy-row\"><span>Send to an existing customer</span><strong>Ask me</strong></div>",
+      "css": ".ds-policy-row { display:grid; grid-template-columns:1.25fr .75fr; gap:20px; padding:16px 0; border-bottom:1px solid rgb(16 19 20 / 20%); background:#fffdfa; color:#101314; font-family:Inter,ui-sans-serif,system-ui,sans-serif; font-size:.82rem; } .ds-policy-row strong { color:#6b4d3c; font-size:.68rem; text-transform:uppercase; } .ds-policy-row:hover { border-color:#101314; } .ds-policy-row:focus-visible { outline:3px solid #59d6c5; outline-offset:4px; }"
     }
   ],
   "narrative": {
-    "northStar": "The Company Daybook",
-    "overview": "Bruno looks like the working daybook of a disciplined founder: grid-ruled paper, dark ledger ink, compressed display type, editorial annotations, and a small set of decisive signals. The mood is capable, candid, and operational rather than futuristic. Information feels edited into a daily record, not generated into a dashboard.\n\nThe system is dense but calm. Square rules and tabular alignment make decisions, policies, and outcomes easy to audit; electric blue carries the active operating route, citron marks navigation and status, and dark red behaves like a corrective pencil. It rejects the generic AI hero, gradient atmosphere, glass cards, and floating chat screenshot.",
-    "keyCharacteristics": [
-      "Warm grid-ruled stock with visible ledger structure.",
-      "Compressed League Gothic headlines against practical Avenir Next text.",
-      "Square corners, hard rules, and tabular alignment.",
-      "Electric editorial blue for action and system flow.",
-      "Citron tabs and red-pencil annotations used as rare signals."
-    ],
+    "northStar": "Calm Operations Brandboard",
+    "overview": "Bruno is a calm operating system, not an AI spectacle. Ivory and warm-white fields hold deep-charcoal Satoshi arguments, practical Inter copy, espresso rules, and rare mint or lime signals. The mood is capable, proactive, trustworthy, and operational: one quiet system keeping a one-person company in motion.\n\nThe system pairs generous open space with softly precise product panels. Circular network geometry links the Bruno mark, the Business Graph, and the page's orbital linework; rounded controls and fine warm rules make the interface feel approachable without becoming playful. It explicitly rejects AI glow, chatbot theater, glass effects, and ledger spectacle.\n\nThe shipped public landing page is the implementation ground truth for this direction. The finish review confirmed its type, material, first viewport, Bruno mark, orbital system, Action Inbox, narrative sequence, and routes; no visible overflow or clipped copy remained. Existing authenticated application surfaces have not yet migrated, so subsequent routes should adopt this system deliberately rather than being described as if they already match it.",
+    "keyCharacteristics": ["Ivory and stone material fields with deep-charcoal structure.", "Satoshi display type paired with highly legible Inter body copy.", "Rounded precision panels and pill-shaped actions.", "Mint and lime signals used as evidence-bearing accents, not atmosphere.", "Fine orbital linework and the circular Bruno signal pattern.", "Soft ambient depth, restrained motion, and explicit illustrative labels."],
     "rules": [
-      {
-        "name": "The Three-Marks Rule",
-        "body": "Blue means action or operating flow, citron means a tab or resolved emphasis, and red means annotation or prohibition; do not interchange them.",
-        "section": "colors"
-      },
-      {
-        "name": "The Two-Voice Rule",
-        "body": "League Gothic makes arguments; Avenir Next carries facts, actions, and evidence.",
-        "section": "typography"
-      },
-      {
-        "name": "The Finite Ledger Rule",
-        "body": "Every group needs an explicit start and end: a top rule, numbered rows, a closing rule, or a terminal highlighted step.",
-        "section": "layout"
-      },
-      {
-        "name": "The Flat Ledger Rule",
-        "body": "Elevate a whole spread or one active system object, never every record.",
-        "section": "elevation"
-      },
-      {
-        "name": "The Square Rule",
-        "body": "Do not round buttons, cards, tabs, tables, or status marks in the Company Daybook world.",
-        "section": "shapes"
-      }
+      { "name": "The Signal Pair Rule", "body": "Mint means activity, connection, or positive operating state; lime means action, completion, or concentrated emphasis. Neither is ambient decoration.", "section": "colors" },
+      { "name": "The Warm Structure Rule", "body": "Use espresso and stone for supporting structure so charcoal remains authoritative rather than visually relentless.", "section": "colors" },
+      { "name": "The Two-Speed Rule", "body": "Satoshi sets the direction; Inter explains the work. Do not substitute display drama for operational legibility.", "section": "typography" },
+      { "name": "The One-Loop Rule", "body": "Every composition should clarify one operating loop between company signal, founder judgment, Bruno action, and verified outcome.", "section": "layout" },
+      { "name": "The Proof-Before-Decoration Rule", "body": "Give the product panel enough scale and breathing room to be read as proof; orbital geometry supports that proof without competing with it.", "section": "layout" },
+      { "name": "The Ambient-Only Rule", "body": "Shadows should feel like diffuse room light. Never use glow, hard offset shadows, or elevation on every row.", "section": "elevation" },
+      { "name": "The Orbital Geometry Rule", "body": "Circles express connected state, ongoing work, and verification. Use them for marks, graph systems, signals, and icon fields—not as arbitrary decoration on every surface.", "section": "shapes" },
+      { "name": "The Rounded Precision Rule", "body": "Rounded forms stay clean and quiet: thin borders, no bubbly stacking, and no decorative radius changes between equivalent components.", "section": "shapes" }
     ],
-    "dos": [
-      "Do build hierarchy with paper rules, spacing, type contrast, and explicit labels.",
-      "Do keep policy, evidence, and verification states legible without color.",
-      "Do reserve saturated color for actions, routes, tabs, and annotations.",
-      "Do preserve the ruled-paper texture and square geometry across responsive layouts."
-    ],
-    "donts": [
-      "Don't use generic AI gradients, glassmorphism, glowing orbs, or a floating chat-window hero.",
-      "Don't turn every record into a rounded card or elevated tile.",
-      "Don't use blue, citron, or red as interchangeable decoration.",
-      "Don't fabricate dashboards, outcomes, testimonials, or implied product availability as visual proof."
-    ]
+    "dos": ["Do use the shipped landing as the ground truth while migrating other surfaces deliberately.", "Do let Satoshi, open ivory space, and one substantial proof panel establish the first visual impression.", "Do preserve the Bruno mark, circular signal geometry, and written labels whenever mint or lime communicates state.", "Do label illustrative product direction explicitly and keep routes to the shipped dashboard and agent creation clear.", "Do disable orbital animation and state transitions when reduced motion is requested."],
+    "donts": ["Don't use AI glow, chatbot-window theater, glassmorphism, or generic sparkle imagery.", "Don't revive the Company Daybook's ruled paper, compressed type, square controls, electric blue, citron tabs, or red-pencil annotations.", "Don't turn the circular system into decorative noise or place mint and lime everywhere.", "Don't imply that authenticated application surfaces already match this direction or that illustrative operating loops have shipped.", "Don't fabricate customers, testimonials, outcomes, availability, or other product proof."]
   }
 }

@@ -1,33 +1,37 @@
 /*
-THESIS: Bruno edits a founder's scattered company into one daily operating page, refusing the AI-category hero plus floating chat screenshot.
-OWN-WORLD: Grid-ruled stock, dark ledger ink, electric editorial blue, citron tabs, square rules, and compressed display lettering.
-STORY: See today's decisions, enter the shipped dashboard, understand the Business Graph behind them, then trust explicit policies and verification.
-FIRST VIEWPORT: A dated two-page spread pairs Bruno's promise with three illustrative decisions; the primary action opens the dashboard, agent creation is directly adjacent, and a graph route crosses the fold.
-FORM: The Company Daybook, grounded direction 1; seed 2b573c57.
+THESIS: Bruno keeps a one-person company in motion through one calm operating loop, refusing AI glow, chatbot theater, and ledger spectacle.
+OWN-WORLD: Ivory and stone fields, deep-charcoal Satoshi, warm espresso rules, mint and lime signals, orbital linework, and softly precise product panels.
+STORY: Understand Bruno’s role, see the Action Inbox and Business Graph at work, then enter the shipped dashboard or create an agent.
+FIRST VIEWPORT: A quiet navigation bar leads into an oversized promise and two clear actions beside a high-fidelity illustrative Action Inbox crossed by Bruno’s circular signal pattern.
+FORM: Calm Operations Brandboard, the user-pinned hard reference; seed b32744ed.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
 */
 
 import Link from "next/link";
+import { BrunoLogo } from "@/app/_components/bruno-logo";
 import styles from "./landing.module.css";
 
 const inboxItems = [
   {
-    signal: "Potential sale",
-    detail: "A promising lead has been waiting five days for a reply.",
-    action: "Follow-up prepared",
-    policy: "Needs your approval",
+    kind: "mail",
+    title: "Follow up with churned trial user",
+    detail: "High intent · Trial ended 2 days ago",
+    tag: "CRM outreach",
+    timing: "Due today",
   },
   {
-    signal: "Customer risk",
-    detail: "A cancellation followed two messages about API latency.",
-    action: "Context gathered",
-    policy: "Needs your judgment",
+    kind: "chart",
+    title: "Review MRR dip — May",
+    detail: "−3.1% vs April · Trend requires attention",
+    tag: "Analytics",
+    timing: "Due today",
   },
   {
-    signal: "Growth opportunity",
-    detail: "High-intent traffic is reaching a page that rarely converts.",
-    action: "Likely cause found",
-    policy: "Investigation ready",
+    kind: "message",
+    title: "Approve the customer recovery draft",
+    detail: "Cancellation followed two latency reports",
+    tag: "Needs judgment",
+    timing: "Ask first",
   },
 ] as const;
 
@@ -50,17 +54,17 @@ const operatingLoops = [
   ],
   [
     "Launch operator",
-    "A release triggers coordinated communication, observation, and an outcome report.",
+    "A release triggers communication, observation, and a verified outcome report.",
   ],
   [
     "Weekly CEO review",
-    "Revenue, product, customers, experiments, and commitments resolve into next actions.",
+    "Revenue, product, customers, and commitments resolve into concrete next actions.",
   ],
 ] as const;
 
 const policyRows = [
-  ["Read business systems", "Always allowed"],
-  ["Prepare a customer reply", "Always allowed"],
+  ["Read connected business systems", "Always allow"],
+  ["Prepare a customer reply", "Always allow"],
   ["Send to an existing customer", "Ask me"],
   ["Delete a company record", "Never"],
 ] as const;
@@ -77,17 +81,77 @@ const impactMeasures = [
 function ArrowIcon() {
   return (
     <svg aria-hidden="true" className={styles.arrowIcon} viewBox="0 0 20 20">
-      <path d="M4 10h11M10 5l5 5-5 5" />
+      <path d="M3 10h13M11 5l5 5-5 5" />
     </svg>
   );
 }
 
-function LoopMark() {
+function FeatureIcon({ name }: { name: "calm" | "proactive" | "trust" | "operate" }) {
+  if (name === "calm") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M3 7c3-2 5 2 9 0s6 2 9 0M3 12c3-2 5 2 9 0s6 2 9 0M3 17c3-2 5 2 9 0s6 2 9 0" />
+      </svg>
+    );
+  }
+
+  if (name === "proactive") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M4 12h15M14 6l6 6-6 6" />
+      </svg>
+    );
+  }
+
+  if (name === "trust") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M12 3 20 7v5c0 5-3 8-8 10-5-2-8-5-8-10V7l8-4Z" />
+      </svg>
+    );
+  }
+
   return (
-    <svg aria-hidden="true" className={styles.loopMark} viewBox="0 0 44 44">
-      <path d="M33 14a14 14 0 1 0 2.5 12" />
-      <path d="m28 8 6 6-7 4" />
-      <circle cx="22" cy="22" r="3" />
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7" />
+      <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+      <circle cx="12" cy="12" r="2" />
+    </svg>
+  );
+}
+
+function InboxIcon({ kind }: { kind: (typeof inboxItems)[number]["kind"] }) {
+  if (kind === "mail") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="m4 7 8 6 8-6" />
+      </svg>
+    );
+  }
+
+  if (kind === "chart") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M5 19V9M10 19V5M15 19v-7M20 19V3" />
+        <path d="m4 13 5-3 5 2 6-5" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M4 5h16v11H9l-5 4V5Z" />
+      <path d="M8 9h8M8 12h5" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m8 12 2.5 2.5L16 9" />
     </svg>
   );
 }
@@ -96,26 +160,36 @@ export default function Home() {
   return (
     <main className={styles.page} id="top">
       <header className={styles.siteHeader}>
-        <Link className={styles.wordmark} href="#top" aria-label="Bruno home">
-          Bruno<span aria-hidden="true">.</span>
+        <Link className={styles.brandLink} href="#top" aria-label="Bruno home">
+          <BrunoLogo className={styles.brandLockup} />
         </Link>
         <nav className={styles.siteNav} aria-label="Landing page navigation">
           <Link href="#how-it-works">How it works</Link>
           <Link href="#operating-loops">Operating loops</Link>
-          <Link href="/sign-in">Sign in</Link>
-          <Link className={styles.dashboardLink} href="/dashboard">
-            Open dashboard
-          </Link>
+          <Link href="#trust-model">Trust</Link>
         </nav>
+        <div className={styles.headerActions}>
+          <Link className={styles.signInLink} href="/sign-in">
+            Sign in
+          </Link>
+          <Link className={styles.headerCta} href="/dashboard">
+            Open dashboard
+            <ArrowIcon />
+          </Link>
+        </div>
       </header>
 
-      <section className={styles.heroSpread} aria-labelledby="landing-title">
-        <div className={styles.leftPage}>
-          <div className={styles.daybookMeta}>
-            <span>Founder daybook</span>
-            <span className={styles.developmentNote}>Product direction · in development</span>
-            <time dateTime="2026-08-16">16 · 08 · 26</time>
-          </div>
+      <section className={styles.hero} aria-labelledby="landing-title">
+        <div className={styles.heroPattern} aria-hidden="true">
+          <span className={styles.patternArcA} />
+          <span className={styles.patternArcB} />
+          <span className={styles.patternArcC} />
+          <span className={styles.patternNodeA} />
+          <span className={styles.patternNodeB} />
+          <span className={styles.patternNodeC} />
+        </div>
+
+        <div className={styles.heroCopyBlock}>
           <h1 id="landing-title">Bruno runs your one-person business with you.</h1>
           <p className={styles.heroCopy}>
             The operating system for a one-person company. Bruno understands what is happening,
@@ -127,151 +201,194 @@ export default function Home() {
               Open dashboard
               <ArrowIcon />
             </Link>
-            <Link className={styles.textAction} href="/agents#create-agent-title">
+            <Link className={styles.secondaryAction} href="/agents#create-agent-title">
               Create an agent
             </Link>
-            <a
-              className={styles.textAction}
-              href="https://github.com/ametel01/bruno"
-              rel="noreferrer"
-              target="_blank"
-            >
-              Follow the build
-            </a>
           </div>
-          <p className={styles.truthNote}>
-            Available today: create and operate agents in Bruno’s dashboard. The new command center
-            and operating loops shown here are the approved direction—not a claim that they are
-            already shipped.
-          </p>
+          <a
+            className={styles.buildLink}
+            href="https://github.com/ametel01/bruno"
+            rel="noreferrer"
+            target="_blank"
+          >
+            Follow the build
+            <ArrowIcon />
+          </a>
         </div>
 
-        <div className={styles.rightPage}>
-          <div className={styles.inboxHeading}>
+        <div className={styles.productProof}>
+          <div className={styles.proofTopbar}>
+            <BrunoLogo className={styles.proofBrand} />
+            <span>Today</span>
+            <span className={styles.addButton} aria-hidden="true">
+              +
+            </span>
+          </div>
+          <div className={styles.proofHeading}>
             <div>
-              <h2>Good morning, Alex. Three things need you.</h2>
+              <h2>Action Inbox</h2>
+              <p>Founder decisions, prepared before they reach you.</p>
             </div>
-            <span className={styles.syntheticStamp}>Illustrative data</span>
+            <span>Illustrative data</span>
+          </div>
+          <div className={styles.proofStatus}>
+            <div>
+              <span>Needs you</span>
+              <strong>3 decisions</strong>
+            </div>
+            <div>
+              <span>Bruno is doing</span>
+              <strong>4 active loops</strong>
+            </div>
+            <div>
+              <span>Authority</span>
+              <strong>Ask first</strong>
+            </div>
           </div>
           <ol className={styles.inboxList}>
             {inboxItems.map((item, index) => (
-              <li key={item.signal}>
-                <span className={styles.itemNumber}>{String(index + 1).padStart(2, "0")}</span>
-                <div className={styles.inboxBody}>
-                  <h3>{item.signal}</h3>
+              <li key={item.title}>
+                <span className={styles.inboxIcon} data-tone={index === 1 ? "lime" : "mint"}>
+                  <InboxIcon kind={item.kind} />
+                </span>
+                <div>
+                  <h3>{item.title}</h3>
                   <p>{item.detail}</p>
-                  <div className={styles.inboxOutcome}>
-                    <span>{item.action}</span>
-                    <strong>{item.policy}</strong>
-                  </div>
+                  <span className={styles.itemTag} data-tone={index === 1 ? "lime" : "mint"}>
+                    {item.tag}
+                  </span>
+                </div>
+                <div className={styles.itemState}>
+                  <span>{item.timing}</span>
+                  <CheckIcon />
                 </div>
               </li>
             ))}
           </ol>
-          <div className={styles.doneLine}>
-            <span>Done by Bruno</span>
-            <strong>Four routine loops closed</strong>
-            <span>Illustrative</span>
-          </div>
         </div>
 
-        <div className={styles.graphRibbon}>
-          <span>Stripe</span>
-          <span>Gmail</span>
-          <span>GitHub</span>
-          <span>Analytics</span>
-          <strong>One living company model</strong>
+        <p className={styles.truthNote}>
+          Available today: create and operate agents in Bruno’s dashboard. The command center and
+          operating loops shown here are the approved direction—not a claim that they are already
+          shipped.
+        </p>
+      </section>
+
+      <section className={styles.attributes} aria-label="Bruno brand principles">
+        <div>
+          <span className={styles.attributeIcon} data-tone="mint">
+            <FeatureIcon name="calm" />
+          </span>
+          <strong>Calm</strong>
+          <p>Edited attention, not another noisy feed.</p>
+        </div>
+        <div>
+          <span className={styles.attributeIcon} data-tone="stone">
+            <FeatureIcon name="proactive" />
+          </span>
+          <strong>Proactive</strong>
+          <p>Work arrives prepared, not waiting for a prompt.</p>
+        </div>
+        <div>
+          <span className={styles.attributeIcon} data-tone="stone">
+            <FeatureIcon name="trust" />
+          </span>
+          <strong>Trustworthy</strong>
+          <p>Every action stays inside an explicit policy.</p>
+        </div>
+        <div>
+          <span className={styles.attributeIcon} data-tone="lime">
+            <FeatureIcon name="operate" />
+          </span>
+          <strong>Operational</strong>
+          <p>Loops close, results are checked, state moves on.</p>
         </div>
       </section>
 
       <section className={styles.mechanismSection} id="how-it-works" aria-labelledby="graph-title">
-        <Link className={styles.sectionTab} href="#operating-loops">
-          Next · operating loops
-          <ArrowIcon />
-        </Link>
-        <div className={styles.sectionHeading}>
-          <h2 id="graph-title">Your company becomes a working model.</h2>
+        <div className={styles.mechanismCopy}>
+          <h2 id="graph-title">One company. One working model.</h2>
           <p>
-            Not chat history. Not a bag of integrations. A persistent Business Graph that connects
-            goals, customers, conversations, revenue, product, releases, metrics, commitments,
-            experiments, and open loops.
+            Not chat history. Not a bag of integrations. Bruno’s persistent Business Graph connects
+            customers, conversations, revenue, product, releases, commitments, and open loops—then
+            keeps them current as the business changes.
           </p>
+          <Link className={styles.inlineAction} href="/dashboard">
+            See the operating surface
+            <ArrowIcon />
+          </Link>
         </div>
 
-        <div className={styles.graphField}>
+        <figure className={styles.graphModel}>
+          <figcaption className="visually-hidden">Business Graph operating cycle</figcaption>
           <div className={styles.graphSources}>
-            <span>Conversations</span>
-            <span>Revenue</span>
-            <span>Product</span>
-            <span>Commitments</span>
+            <span>Gmail</span>
+            <span>Stripe</span>
+            <span>GitHub</span>
+            <span>Analytics</span>
           </div>
-          <div className={styles.graphCore}>
-            <LoopMark />
-            <span>Business Graph</span>
-            <strong>What changed—and why it matters</strong>
+          <div className={styles.graphOrbit}>
+            <div className={styles.graphCore}>
+              <BrunoLogo className={styles.graphMark} compact />
+              <span>Business Graph</span>
+              <strong>What changed—and why it matters</strong>
+            </div>
+            <span className={styles.orbitNode} data-position="top">
+              Understand
+            </span>
+            <span className={styles.orbitNode} data-position="right">
+              Act
+            </span>
+            <span className={styles.orbitNode} data-position="bottom">
+              Verify
+            </span>
+            <span className={styles.orbitNode} data-position="left">
+              Update
+            </span>
+            <span className={styles.orbitSignal} aria-hidden="true" />
           </div>
-          <div className={styles.graphOutputs}>
+          <div className={styles.graphOutcome}>
             <span>Decision</span>
             <span>Action</span>
             <span>Verified outcome</span>
           </div>
-          <div className={styles.graphRoute} aria-hidden="true" />
-        </div>
-
-        <ol className={styles.processLine} aria-label="Bruno operating cycle">
-          <li>
-            <span>Business changes</span>
-          </li>
-          <li>
-            <span>Bruno understands</span>
-          </li>
-          <li>
-            <span>Acts within policy</span>
-          </li>
-          <li>
-            <span>Verifies the result</span>
-          </li>
-          <li>
-            <span>Updates company state</span>
-          </li>
-        </ol>
+        </figure>
       </section>
 
       <section className={styles.loopsSection} id="operating-loops" aria-labelledby="loops-title">
-        <div className={styles.loopsIntro}>
-          <h2 id="loops-title">Six loops. Run exceptionally well.</h2>
+        <div className={styles.loopsHeading}>
+          <h2 id="loops-title">The work that keeps a small company alive.</h2>
           <p>
-            Bruno starts with the work solo SaaS founders repeat every week—not a marketplace of a
-            hundred disconnected skills.
+            Bruno begins with six operating loops a solo SaaS founder already repeats every week,
+            then runs each one with persistent context and a clear finish line.
           </p>
-          <Link className={styles.sectionTab} href="#trust-model">
-            Next · policies &amp; impact
-            <ArrowIcon />
-          </Link>
         </div>
-        <ol className={styles.loopLedger}>
+        <ol className={styles.loopList}>
           {operatingLoops.map(([title, description], index) => (
             <li key={title}>
               <span>{String(index + 1).padStart(2, "0")}</span>
               <h3>{title}</h3>
               <p>{description}</p>
+              <ArrowIcon />
             </li>
           ))}
         </ol>
       </section>
 
-      <section className={styles.trustSpread} id="trust-model" aria-labelledby="trust-title">
-        <div className={styles.policyPage}>
+      <section className={styles.trustSection} id="trust-model" aria-labelledby="trust-title">
+        <div className={styles.policyPanel}>
           <h2 id="trust-title">Autonomy you can read.</h2>
           <p>
             Authority is a business policy: always allow, ask, or never allow. Bruno can earn more
             autonomy, but it cannot silently take it.
           </p>
           <table className={styles.policyTable}>
-            <caption className="visually-hidden">Example email policy</caption>
+            <caption className="visually-hidden">
+              Illustrative customer communication policy
+            </caption>
             <thead>
               <tr>
-                <th scope="col">Email action</th>
+                <th scope="col">Action</th>
                 <th scope="col">Policy</th>
               </tr>
             </thead>
@@ -286,36 +403,35 @@ export default function Home() {
               ))}
             </tbody>
           </table>
-          <p className={styles.exampleLabel}>Illustrative policy model</p>
+          <span className={styles.exampleLabel}>Illustrative policy model</span>
         </div>
 
-        <div className={styles.impactPage}>
+        <div className={styles.impactPanel}>
           <h2>Measured like an employee.</h2>
           <p>
-            Bruno reports the business outcomes it influenced instead of making model usage the
-            headline.
+            Bruno reports business outcomes instead of making model usage the headline. No figure
+            appears until the product can support it with evidence.
           </p>
-          <ul className={styles.impactList}>
+          <ul>
             {impactMeasures.map((measure) => (
               <li key={measure}>
+                <CheckIcon />
                 <span>{measure}</span>
-                <span aria-hidden="true" />
               </li>
             ))}
           </ul>
-          <p className={styles.impactTruth}>
-            No outcome figures are shown until Bruno can measure them with real product evidence.
-          </p>
         </div>
       </section>
 
       <section className={styles.closingSection} aria-labelledby="closing-title">
+        <div className={styles.closingPattern} aria-hidden="true" />
+        <BrunoLogo className={styles.closingMark} compact />
         <div>
           <h2 id="closing-title">Stop prompting. Start managing.</h2>
           <p>The founder sets the goals, policies, and judgment. Bruno keeps the company moving.</p>
         </div>
         <div className={styles.closingActions}>
-          <Link className={styles.primaryAction} href="/dashboard">
+          <Link className={styles.darkAction} href="/dashboard">
             Open dashboard
             <ArrowIcon />
           </Link>
@@ -324,11 +440,9 @@ export default function Home() {
       </section>
 
       <footer className={styles.siteFooter}>
-        <Link className={styles.wordmark} href="#top">
-          Bruno<span aria-hidden="true">.</span>
-        </Link>
+        <BrunoLogo className={styles.footerBrand} />
         <p>The operating system for a one-person company.</p>
-        <span>Product direction · 2026</span>
+        <span>Built to operate.</span>
       </footer>
     </main>
   );

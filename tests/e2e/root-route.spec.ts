@@ -61,7 +61,7 @@ test("/ renders the public Bruno product direction", async ({ page }) => {
 
   expect(await page.evaluate(() => document.body.firstChild?.nodeType)).toBe(8);
   expect(await page.evaluate(() => document.body.firstChild?.textContent)).toContain(
-    "seed 2b573c57",
+    "seed b32744ed",
   );
   await expect(
     page.getByRole("heading", { name: "Bruno runs your one-person business with you." }),

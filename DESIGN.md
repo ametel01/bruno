@@ -1,237 +1,267 @@
 ---
 name: Bruno
-description: The Company Daybook for a one-person company.
+description: Calm operations for a one-person company.
 colors:
-  editorial-blue: "#155eef"
-  editorial-blue-deep: "#0b3ea8"
-  citron-tab: "#dfff3f"
-  red-pencil: "#a92b2b"
-  ledger-ink: "#172018"
-  body-ink: "#4b544c"
-  paper: "#f2f0e8"
-  white: "#ffffff"
-  rule: "rgb(23 32 24 / 20%)"
-  rule-soft: "rgb(23 32 24 / 10%)"
+  deep-charcoal: "#101314"
+  warm-espresso: "#6b4d3c"
+  signal-mint: "#59d6c5"
+  signal-mint-soft: "#dff6f1"
+  action-lime: "#b8f34b"
+  action-lime-soft: "#e9fbc4"
+  stone: "#d8ccbd"
+  ivory: "#f7f4ee"
+  warm-white: "#fffdfa"
+  muted-ink: "#6f6d68"
+  espresso-rule: "rgb(107 77 60 / 18%)"
+  charcoal-rule: "rgb(16 19 20 / 20%)"
 typography:
   display:
-    fontFamily: "League Gothic, sans-serif"
-    fontSize: "clamp(3.5rem, 6.5vw, 6rem)"
-    fontWeight: 400
-    lineHeight: 0.88
-    letterSpacing: "-0.025em"
+    fontFamily: "Satoshi, Inter, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "clamp(4rem, 6.5vw, 6rem)"
+    fontWeight: 650
+    lineHeight: 0.94
+    letterSpacing: "-0.04em"
   headline:
-    fontFamily: "League Gothic, sans-serif"
-    fontSize: "clamp(3rem, 6vw, 5.8rem)"
-    fontWeight: 400
-    lineHeight: 0.96
-    letterSpacing: "-0.02em"
+    fontFamily: "Satoshi, Inter, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "clamp(3.2rem, 5.6vw, 5.6rem)"
+    fontWeight: 650
+    lineHeight: 0.98
+    letterSpacing: "-0.04em"
   title:
-    fontFamily: "Avenir Next, Avenir, Segoe UI, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "1.02rem"
-    fontWeight: 900
+    fontFamily: "Satoshi, Inter, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "1rem"
+    fontWeight: 650
     lineHeight: 1.2
+    letterSpacing: "-0.02em"
   body:
-    fontFamily: "Avenir Next, Avenir, Segoe UI, ui-sans-serif, system-ui, sans-serif"
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
     fontSize: "1rem"
     fontWeight: 400
-    lineHeight: 1.65
+    lineHeight: 1.72
   label:
-    fontFamily: "Avenir Next, Avenir, Segoe UI, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "0.72rem"
-    fontWeight: 900
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+    fontSize: "0.78rem"
+    fontWeight: 650
     lineHeight: 1.2
-    letterSpacing: "0.06em"
 rounded:
-  square: "0"
+  tag: "4px"
+  status: "10px"
+  card: "12px"
+  panel: "22px"
+  section: "26px"
+  pill: "999px"
+  circle: "50%"
 spacing:
-  xs: "6px"
-  sm: "10px"
+  xs: "9px"
+  sm: "12px"
   md: "18px"
-  lg: "28px"
-  xl: "48px"
-  ledger: "76px"
+  lg: "24px"
+  xl: "34px"
 components:
   button-primary:
-    backgroundColor: "{colors.editorial-blue}"
-    textColor: "{colors.white}"
+    backgroundColor: "{colors.deep-charcoal}"
+    textColor: "{colors.warm-white}"
     typography: "{typography.label}"
-    rounded: "{rounded.square}"
-    padding: "0 19px"
+    rounded: "{rounded.pill}"
+    padding: "0 20px"
     height: "50px"
   button-primary-hover:
-    backgroundColor: "{colors.editorial-blue-deep}"
-    textColor: "{colors.white}"
+    backgroundColor: "{colors.warm-espresso}"
+    textColor: "{colors.warm-white}"
     typography: "{typography.label}"
-    rounded: "{rounded.square}"
-    padding: "0 19px"
+    rounded: "{rounded.pill}"
+    padding: "0 20px"
     height: "50px"
-  editorial-tab:
-    backgroundColor: "{colors.citron-tab}"
-    textColor: "{colors.ledger-ink}"
+  button-secondary:
+    backgroundColor: "rgb(255 253 250 / 58%)"
+    textColor: "{colors.deep-charcoal}"
     typography: "{typography.label}"
-    rounded: "{rounded.square}"
-    padding: "7px 10px 6px"
-    height: "34px"
+    rounded: "{rounded.pill}"
+    padding: "0 20px"
+    height: "50px"
   nav-link:
-    textColor: "{colors.ledger-ink}"
+    textColor: "{colors.deep-charcoal}"
     typography: "{typography.label}"
-    rounded: "{rounded.square}"
-    padding: "5px 3px 3px"
-  decision-row:
-    backgroundColor: "{colors.paper}"
-    textColor: "{colors.ledger-ink}"
-    rounded: "{rounded.square}"
-    padding: "22px 0 20px"
-  graph-card:
-    backgroundColor: "{colors.editorial-blue}"
-    textColor: "{colors.white}"
-    rounded: "{rounded.square}"
-    padding: "28px"
+  signal-tag:
+    backgroundColor: "{colors.signal-mint-soft}"
+    textColor: "{colors.deep-charcoal}"
+    rounded: "{rounded.tag}"
+    padding: "4px 6px"
+  action-inbox-panel:
+    backgroundColor: "rgb(255 253 250 / 94%)"
+    textColor: "{colors.deep-charcoal}"
+    rounded: "{rounded.panel}"
+  action-inbox-row:
+    backgroundColor: "{colors.warm-white}"
+    textColor: "{colors.deep-charcoal}"
+    rounded: "{rounded.card}"
+    padding: "13px 14px"
+  business-graph-core:
+    backgroundColor: "{colors.deep-charcoal}"
+    textColor: "{colors.warm-white}"
+    rounded: "{rounded.circle}"
+    padding: "34px"
   policy-row:
-    backgroundColor: "{colors.paper}"
-    textColor: "{colors.ledger-ink}"
-    rounded: "{rounded.square}"
-    padding: "15px 0"
+    backgroundColor: "{colors.warm-white}"
+    textColor: "{colors.deep-charcoal}"
+    padding: "16px 0"
 ---
 
 # Design System: Bruno
 
 ## Overview
 
-**Creative North Star: "The Company Daybook"**
+**Creative North Star: "Calm Operations Brandboard"**
 
-Bruno looks like the working daybook of a disciplined founder: grid-ruled paper, dark ledger ink, compressed display type, editorial annotations, and a small set of decisive signals. The mood is capable, candid, and operational rather than futuristic. Information feels edited into a daily record, not generated into a dashboard.
+Bruno is a calm operating system, not an AI spectacle. Ivory and warm-white fields hold deep-charcoal Satoshi arguments, practical Inter copy, espresso rules, and rare mint or lime signals. The mood is capable, proactive, trustworthy, and operational: one quiet system keeping a one-person company in motion.
 
-The system is dense but calm. Square rules and tabular alignment make decisions, policies, and outcomes easy to audit; electric blue carries the active operating route, citron marks navigation and status, and dark red behaves like a corrective pencil. It rejects the generic AI hero, gradient atmosphere, glass cards, and floating chat screenshot.
+The system pairs generous open space with softly precise product panels. Circular network geometry links the Bruno mark, the Business Graph, and the page's orbital linework; rounded controls and fine warm rules make the interface feel approachable without becoming playful. It explicitly rejects AI glow, chatbot theater, glass effects, and ledger spectacle.
+
+The shipped public landing page is the implementation ground truth for this direction. The finish review confirmed its type, material, first viewport, Bruno mark, orbital system, Action Inbox, narrative sequence, and routes; no visible overflow or clipped copy remained. Existing authenticated application surfaces have not yet migrated, so subsequent routes should adopt this system deliberately rather than being described as if they already match it.
 
 **Key Characteristics:**
 
-- Warm grid-ruled stock with visible ledger structure.
-- Compressed League Gothic headlines against practical Avenir Next text.
-- Square corners, hard rules, and tabular alignment.
-- Electric editorial blue for action and system flow.
-- Citron tabs and red-pencil annotations used as rare signals.
+- Ivory and stone material fields with deep-charcoal structure.
+- Satoshi display type paired with highly legible Inter body copy.
+- Rounded precision panels and pill-shaped actions.
+- Mint and lime signals used as evidence-bearing accents, not atmosphere.
+- Fine orbital linework and the circular Bruno signal pattern.
+- Soft ambient depth, restrained motion, and explicit illustrative labels.
 
 ## Colors
 
-The palette reads as an annotated company ledger: warm paper and near-black ink carry most of the page, with three editorial signals reserved for meaning.
+The palette is a warm operational neutral field sharpened by dark structure and two compact, high-clarity signals.
 
 ### Primary
 
-- **Electric Editorial Blue** (#155eef): Use for primary actions, process routes, graph cores, active outcomes, and keyboard focus.
-- **Deep Editorial Blue** (#0b3ea8): Use for hovered actions and quieter blue text that still needs stronger contrast.
+- **Deep Charcoal** (#101314): The main text, dark action, graph-core, icon, and high-contrast structural color.
+- **Warm Espresso** (#6b4d3c): A warmer active state for dark actions and the semantic color for judgment, policy, and quiet emphasis.
 
 ### Secondary
 
-- **Citron Tab** (#dfff3f): Use for adhesive-tab navigation, development status, the terminal step of a process, and text selection.
+- **Signal Mint** (#59d6c5): The primary system signal for focus, orbital activity, logo detail, connectors, and positive operating motion.
+- **Soft Signal Mint** (#dff6f1): A low-intensity field behind mint-coded icons and tags.
 
 ### Tertiary
 
-- **Dark Red Pencil** (#a92b2b): Use for illustrative stamps, prohibitions, and corrective underlines; it signals caution rather than brand action.
+- **Action Lime** (#b8f34b): The resolved action field, closing surface, selection color, and high-energy logo detail.
+- **Soft Action Lime** (#e9fbc4): A restrained field behind lime-coded analytics and status cues.
 
 ### Neutral
 
-- **Ledger Ink** (#172018): The dominant text, rule, and dark-surface color.
-- **Body Ink** (#4b544c): Long-form explanatory copy that should sit behind headlines.
-- **Grid-Ruled Paper** (#f2f0e8): The default canvas and the material basis of the system.
-- **White** (#ffffff): Text on saturated action and graph surfaces.
-- **Ledger Rule** (rgb(23 32 24 / 20%)): Structural dividers rather than decorative framing.
-- **Soft Ledger Rule** (rgb(23 32 24 / 10%)): Baseline-grid lines and quiet internal structure.
+- **Stone** (#d8ccbd): Orbital lines, nodes, and material boundaries that should remain visible but quiet.
+- **Ivory** (#f7f4ee): The default page canvas and the warm space between operational objects.
+- **Warm White** (#fffdfa): Product-panel and row surfaces, plus text on charcoal.
+- **Muted Ink** (#6f6d68): Supporting copy, metadata, and secondary status language.
+- **Espresso Rule** (rgb(107 77 60 / 18%)): Fine dividers and panel outlines on ivory or warm white.
+- **Charcoal Rule** (rgb(16 19 20 / 20%)): Stronger table, list, and control outlines when structure needs more contrast.
 
-**The Three-Marks Rule.** Blue means action or operating flow, citron means a tab or resolved emphasis, and red means annotation or prohibition; do not interchange them.
+**The Signal Pair Rule.** Mint means activity, connection, or positive operating state; lime means action, completion, or concentrated emphasis. Neither is ambient decoration.
+
+**The Warm Structure Rule.** Use espresso and stone for supporting structure so charcoal remains authoritative rather than visually relentless.
 
 ## Typography
 
-**Display Font:** League Gothic (with sans-serif fallback)
+**Display Font:** Satoshi (with Inter and system sans-serif fallbacks)
 
-**Body Font:** Avenir Next (with Avenir, Segoe UI, and system sans-serif fallbacks)
+**Body Font:** Inter (with ui-sans-serif and system sans-serif fallbacks)
 
-**Label Font:** Avenir Next (with the same practical fallback stack)
-
-**Character:** League Gothic gives Bruno the urgency of a marked-up business front page. Avenir Next keeps operational copy, policy rows, labels, and navigation compact and matter-of-fact.
+**Character:** Satoshi gives Bruno a geometric, contemporary voice with enough warmth for oversized promises. Inter carries operational details, labels, policies, and proof with clarity at compact sizes.
 
 ### Hierarchy
 
-- **Display** (League Gothic, weight 400, fluid 3.5–6rem, line-height 0.88): The single dominant promise or closing statement; balance line breaks and keep the measure short.
-- **Headline** (League Gothic, weight 400, fluid 3–5.8rem, line-height 0.96): Section arguments and spread titles.
-- **Title** (Avenir Next, weight 900, 1.02rem, line-height 1.2): Decisions, loops, and row headings.
-- **Body** (Avenir Next, weight 400, 1rem, line-height 1.65): Explanations kept to around 58–65 characters where practical.
-- **Label** (Avenir Next, weight 900, 0.72rem, tracking 0.06em, uppercase): Metadata, policies, tabs, and process steps.
+- **Display** (weight 650, fluid 4–6rem, line-height 0.94, tracking -0.04em): Oversized promises and closing statements; keep the measure near ten characters per line where the copy allows.
+- **Headline** (weight 650, fluid 3.2–5.6rem, line-height 0.98, tracking -0.04em): Section arguments and the major operating model transitions.
+- **Title** (weight 650, 1rem, line-height 1.2, tracking -0.02em): Panel headings, loop names, and compact operational titles.
+- **Body** (weight 400, 1rem, line-height 1.72): Explanations and narrative copy, usually constrained to about 61–66 characters.
+- **Label** (weight 650, 0.78rem, line-height 1.2): Navigation, actions, metadata, tags, policy states, and compact proof labels. Uppercase is reserved for status or evidence labels, not applied by default.
 
-**The Two-Voice Rule.** League Gothic makes arguments; Avenir Next carries facts, actions, and evidence.
+**The Two-Speed Rule.** Satoshi sets the direction; Inter explains the work. Do not substitute display drama for operational legibility.
 
 ## Layout
 
-Use a centered page frame with narrow outer gutters and a maximum width near 1500px. Build composition from ruled spreads, ledger rows, and asymmetric editorial grids rather than floating card stacks. A 28px baseline grid is the recurring paper texture; primary section spacing is generous so dense records arrive in finite, legible groups.
+Use a centered content frame capped at 1360px with 24px desktop gutters. Major passages are spacious, often separated by 120–210px of vertical breathing room, while product proof stays compact inside panels. Wide layouts pair a focused argument with an operational model, using asymmetric columns rather than equal card grids.
 
-At wide widths, pair related arguments in two columns and allow a central fold or route to connect them. Below 980px, spreads become a single column and graph structures stack. Below 700px, preserve the paper rules, reduce gutters to 12px per side, collapse navigation to the essential action, and turn horizontal process sequences into vertical ledgers. Do not hide status labels or rely on color alone.
+At 1120px, navigation simplifies and two-column hero, mechanism, loop, trust, and closing compositions stack or reflow. At 720px, outer gutters reduce to 14px; primary and secondary hero actions become full-width; proof metrics, inbox rows, graph sources, policy tables, outcome lists, and the footer collapse without hiding status or truth labels.
 
-**The Finite Ledger Rule.** Every group needs an explicit start and end: a top rule, numbered rows, a closing rule, or a terminal highlighted step.
+**The One-Loop Rule.** Every composition should clarify one operating loop between company signal, founder judgment, Bruno action, and verified outcome.
+
+**The Proof-Before-Decoration Rule.** Give the product panel enough scale and breathing room to be read as proof; orbital geometry supports that proof without competing with it.
 
 ## Elevation & Depth
 
-The system is flat by default. Depth comes from overlapping ruled paper, a visible center fold, and occasional restrained ambient shadows on an entire spread or the active Business Graph core. Interactive lift is limited to the primary action; ordinary rows, tabs, and panels remain flush.
+Depth is ambient and selective. Ivory remains flat; warm-white product panels receive broad low-contrast shadows, small orbit nodes receive a lighter contact shadow, and dark graph cores receive controlled lift. Borders and tonal contrast do most of the structural work.
 
 ### Shadow Vocabulary
 
-- **Spread shadow** (`0 30px 70px rgb(23 32 24 / 10%)`): separates a complete ledger spread from the surrounding paper.
-- **Action lift** (`0 12px 28px rgb(21 94 239 / 24%)`): appears only when the primary action rises on hover.
-- **Graph emphasis** (`0 22px 44px rgb(21 94 239 / 18%)`): gives the operating model one controlled focal plane.
+- **Action lift** (`0 14px 28px rgb(16 19 20 / 14%)` or `0 16px 32px rgb(16 19 20 / 16%)`): Appears only when a primary dark action rises on hover.
+- **Proof panel** (`0 34px 74px rgb(71 56 45 / 14%)`): Gives the illustrative Action Inbox its high-fidelity product depth.
+- **Section panel** (`0 34px 74px rgb(71 56 45 / 12%)`): Separates a large two-part operating panel from the ivory canvas.
+- **Graph core** (`0 26px 48px rgb(16 19 20 / 18%)`): Focuses the circular center of the Business Graph.
+- **Orbit contact** (`0 10px 20px rgb(71 56 45 / 8%)`): Keeps small orbit labels legible above linework.
 
-**The Flat Ledger Rule.** Elevate a whole spread or one active system object, never every record.
+**The Ambient-Only Rule.** Shadows should feel like diffuse room light. Never use glow, hard offset shadows, or elevation on every row.
 
 ## Shapes
 
-Corners are square. One-pixel ledger rules, two-pixel emphasis rules, square number boxes, rectangular tabs, and clipped page edges provide the form language. Icons use thin square-ended strokes. The only irregular gesture is the slightly rotated red-pencil stamp, which should feel manually applied rather than playful.
+The form language combines highly rounded rectangular panels with exact circles. Primary sections use 22–26px corners, operational rows use 10–12px corners, tags use 4px corners, and actions or compact source labels use full pill shapes. The Bruno mark and Business Graph core introduce circular nodes and rings; fine one-pixel espresso or stone lines connect them.
 
-**The Square Rule.** Do not round buttons, cards, tabs, tables, or status marks in the Company Daybook world.
+**The Orbital Geometry Rule.** Circles express connected state, ongoing work, and verification. Use them for marks, graph systems, signals, and icon fields—not as arbitrary decoration on every surface.
+
+**The Rounded Precision Rule.** Rounded forms stay clean and quiet: thin borders, no bubbly stacking, and no decorative radius changes between equivalent components.
 
 ## Components
 
 ### Buttons
 
-- **Shape:** Square, compact, and typographically heavy.
-- **Primary:** Electric blue with white uppercase label text and a small rightward line arrow.
-- **Hover / Focus:** Darken to deep blue, lift by 2px, and add the action shadow. Keyboard focus is a 3px blue outline with a 4px offset.
-- **Text action:** Ledger ink, heavy body type, and a simple underline; keep it visually subordinate to the primary action.
+- **Shape:** Full pill with a 50px default height and 20px horizontal padding; the compact header variant is 44px high.
+- **Primary:** Deep charcoal with warm-white text, a rounded line arrow, and one clear destination.
+- **Hover / Focus:** Shift to warm espresso, rise 2px, and gain an ambient action shadow over 180ms. Keyboard focus is a 3px mint outline with a 4px offset; active returns to the baseline.
+- **Secondary:** A translucent warm-white field with a charcoal rule. Hover resolves to solid warm white, strengthens the border, and rises 2px.
 
-### Editorial Tabs
+### Chips
 
-- **Style:** Citron rectangle, uppercase heavy label, square edges, and a dark red-pencil bottom rule.
-- **State:** On hover, the label shifts to editorial blue; the tab does not lift or gain a shadow.
+- **Style:** Compact mint-soft or lime-soft fields with dark text. Small operational tags use a 4px radius; source, state, and orbit labels use pill geometry.
+- **State:** Color always accompanies a written label. Mint and lime variants retain the Signal Pair Rule.
 
 ### Cards / Containers
 
-- **Corner Style:** Square.
-- **Background:** Paper for records and saturated blue for the central Business Graph object.
-- **Shadow Strategy:** Flat unless the container is the whole spread or the singular active graph core.
-- **Border:** One-pixel ledger rules; use two pixels only for a strong sectional boundary or graph core.
-- **Internal Padding:** Compact rows use the medium rhythm; major graph objects use the large rhythm.
+- **Corner Style:** Product panels use 22–26px radii; compact metrics and records use 10–12px radii.
+- **Background:** Warm white over ivory, with deep charcoal reserved for the Business Graph core and outcome-bearing contrast panels.
+- **Shadow Strategy:** Broad, low-opacity ambient shadows only on major proof or section panels; ordinary rows rely on thin rules.
+- **Border:** One-pixel espresso rules, with stronger charcoal rules for tables and controls.
+- **Internal Padding:** Compact records use 12–18px; major panels use 24–88px according to hierarchy and viewport.
 
 ### Navigation
 
-Use heavy uppercase labels with wide spacing between destinations. Links remain ink-colored and unboxed at rest; hover adds a citron field and red underline. The application bridge is the exception: “Open dashboard” uses the blue action field so the shipped product is always findable. On small screens, retain the wordmark and dashboard action while in-page destinations and the separate sign-in link yield to the document flow.
+Navigation is quiet Inter at compact size and medium-heavy weight. Links are unboxed at rest, move to espresso with an underline on hover, and keep a visible mint focus outline. The Bruno lockup anchors the left edge; the dark pill action anchors the path into the shipped dashboard. On narrow screens, in-page links and sign-in yield while the brand and dashboard route remain.
 
-### Decision Ledger
+### Bruno Mark
 
-Each decision is a numbered row with a square index, heavy title, plain-language evidence, and an explicit outcome plus policy label. Rules—not card backgrounds—separate records. Illustrative or unverified content receives a visible red-pencil stamp or text label.
+The mark is a rounded monoline `B` with an internal chevron and lower loop, punctuated by mint and lime circular signals. Render it in deep charcoal on light fields or warm white in the graph core; preserve round stroke caps and the two signal colors. It may appear as a lockup or as the compact icon, but its geometry should not be redrawn as a generic sparkle or bot face.
 
-### Business Graph Core
+### Action Inbox
 
-The graph core is the singular saturated-blue object inside a ruled field. It pairs a simple loop mark with one concise explanation, while a blue route connects sources to decisions, actions, and verified outcomes.
+The Action Inbox is the canonical proof panel: a rounded warm-white shell, quiet top bar, explicit “Illustrative data” label, three status summaries, and compact decision rows. Each row combines a circular signal icon, clear title and evidence, a written tag, and a written timing or authority state. Illustrative product direction must remain visibly labeled and must not be presented as shipped functionality.
+
+### Business Graph
+
+The graph is a circular operating model with a deep-charcoal core, mint system label, nested stone rings, written orbit nodes, and one moving mint signal. Source systems enter on one side and decisions, actions, and verified outcomes leave on the other. The orbit runs for 11 seconds linearly and becomes static under reduced-motion preference.
 
 ## Do's and Don'ts
 
 ### Do:
 
-- **Do** build hierarchy with paper rules, spacing, type contrast, and explicit labels.
-- **Do** keep policy, evidence, and verification states legible without color.
-- **Do** reserve saturated color for actions, routes, tabs, and annotations.
-- **Do** preserve the ruled-paper texture and square geometry across responsive layouts.
+- **Do** use the shipped landing as the ground truth while migrating other surfaces deliberately.
+- **Do** let Satoshi, open ivory space, and one substantial proof panel establish the first visual impression.
+- **Do** preserve the Bruno mark, circular signal geometry, and written labels whenever mint or lime communicates state.
+- **Do** label illustrative product direction explicitly and keep routes to the shipped dashboard and agent creation clear.
+- **Do** disable orbital animation and state transitions when reduced motion is requested.
 
 ### Don't:
 
-- **Don't** use generic AI gradients, glassmorphism, glowing orbs, or a floating chat-window hero.
-- **Don't** turn every record into a rounded card or elevated tile.
-- **Don't** use blue, citron, or red as interchangeable decoration.
-- **Don't** fabricate dashboards, outcomes, testimonials, or implied product availability as visual proof.
+- **Don't** use AI glow, chatbot-window theater, glassmorphism, or generic sparkle imagery.
+- **Don't** revive the Company Daybook's ruled paper, compressed type, square controls, electric blue, citron tabs, or red-pencil annotations.
+- **Don't** turn the circular system into decorative noise or place mint and lime everywhere.
+- **Don't** imply that authenticated application surfaces already match this direction or that illustrative operating loops have shipped.
+- **Don't** fabricate customers, testimonials, outcomes, availability, or other product proof.

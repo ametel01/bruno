@@ -1,22 +1,22 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
-import { League_Gothic } from "next/font/google";
+import { Inter } from "next/font/google";
 import { AuthConfigurationUnavailable } from "@/app/_components/auth-configuration-unavailable";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import "@xterm/xterm/css/xterm.css";
 import "./globals.css";
 
-const displayFont = League_Gothic({
+const bodyFont = Inter({
   subsets: ["latin"],
-  variable: "--font-bruno-display",
+  variable: "--font-bruno-body",
 });
 
 const DIRECTION_CONTRACT = [
-  "THESIS: Bruno edits a founder's scattered company into one daily operating page, refusing both the AI-category hero and the generic card dashboard.",
-  "OWN-WORLD: Grid-ruled stock, dark ledger ink, electric editorial blue, citron tabs, square rules, and compressed display lettering.",
-  "STORY: Understand Bruno, then operate through decisions, active work, recent records, and a bounded systems appendix.",
-  "FIRST VIEWPORT: The landing opens as a dated spread; Founder Dispatch opens with company pulse and decisions; Agent Roster and Workspace Ledger open with live operating state before controls.",
-  "FORM: The Company Daybook with Founder Dispatch, Agent Roster, and Workspace Ledger; landing seed 2b573c57, operating-surface seed c9dd9100.",
+  "THESIS: Bruno keeps a one-person company in motion through one calm operating loop, refusing AI glow, chatbot theater, and ledger spectacle.",
+  "OWN-WORLD: Ivory and stone fields, deep-charcoal Satoshi, warm espresso rules, mint and lime signals, orbital linework, and softly precise product panels.",
+  "STORY: Understand Bruno's role, see the Action Inbox and Business Graph at work, then enter the shipped dashboard or create an agent.",
+  "FIRST VIEWPORT: A quiet navigation bar leads into an oversized promise and two clear actions beside a high-fidelity illustrative Action Inbox crossed by Bruno's circular signal pattern.",
+  "FORM: Calm Operations Brandboard, the user-pinned hard reference; landing seed b32744ed. Existing authenticated surfaces migrate in later phases.",
   "FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md",
 ].join("\n");
 
@@ -51,7 +51,14 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className={displayFont.variable} data-impeccable-seed="2b573c57">
+      <head>
+        <link rel="preconnect" href="https://api.fontshare.com" />
+        <link
+          href="https://api.fontshare.com/v2/css?f[]=satoshi@500,600,700&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className={bodyFont.variable} data-impeccable-seed="b32744ed">
         <script>{directionContractBootstrap}</script>
         {content}
       </body>
