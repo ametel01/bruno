@@ -43,7 +43,7 @@ describe("runner snapshot build orchestration", () => {
     expect(syntax).toMatchObject({ status: 0, stderr: "" });
   });
 
-  it("treats an empty Bruno Docker-network set as successful cleanup", () => {
+  it("treats an empty Bruno.Ai Docker-network set as successful cleanup", () => {
     const userData = buildSnapshotBuilderBootstrap({
       runnerImage: RUNNER_IMAGE,
       runnerVersion: "abc123",
@@ -469,7 +469,7 @@ cleanup_snapshot_builder_networks`,
     });
   });
 
-  it("rejects an optimized Hermes image without exact platform identity or outside Bruno GHCR", async () => {
+  it("rejects an optimized Hermes image without exact platform identity or outside Bruno.Ai GHCR", async () => {
     for (const input of [
       { hermesImage: OPTIMIZED_HERMES_IMAGE },
       {

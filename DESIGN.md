@@ -1,6 +1,6 @@
 ---
-name: Bruno
-description: Calm operations for a one-person company.
+name: Bruno.Ai
+description: An always-on, self-improving operator for a one-person company.
 colors:
   deep-charcoal: "#101314"
   warm-espresso: "#6b4d3c"
@@ -107,17 +107,17 @@ components:
     padding: "16px 0"
 ---
 
-# Design System: Bruno
+# Design System: Bruno.Ai
 
 ## Overview
 
 **Creative North Star: "Calm Operations Brandboard"**
 
-Bruno is a calm operating system, not an AI spectacle. Ivory and warm-white fields hold deep-charcoal Satoshi arguments, practical Inter copy, espresso rules, and rare mint or lime signals. The mood is capable, proactive, trustworthy, and operational: one quiet system keeping a one-person company in motion.
+Bruno.Ai is a calm, always-on AI agent, not an AI spectacle. It runs 24/7 and learns from founder interactions, corrections, approvals, policies, and verified outcomes so each operating loop improves the next. That learning improves execution but never silently expands authority. Ivory and warm-white fields hold deep-charcoal Satoshi arguments, practical Inter copy, espresso rules, and rare mint or lime signals. The mood is capable, proactive, trustworthy, and operational: one quiet system keeping a one-person company in motion.
 
-The system pairs generous open space with softly precise product panels. Circular network geometry links the Bruno mark, the Business Graph, and the page's orbital linework; rounded controls and fine warm rules make the interface feel approachable without becoming playful. It explicitly rejects AI glow, chatbot theater, glass effects, and ledger spectacle.
+The system pairs generous open space with softly precise product panels. Circular network geometry links the Bruno.Ai mark, the Business Graph, and the page's orbital linework; rounded controls and fine warm rules make the interface feel approachable without becoming playful. It explicitly rejects AI glow, chatbot theater, glass effects, and ledger spectacle.
 
-The shipped public landing page is the implementation ground truth for this direction. The finish review confirmed its type, material, first viewport, Bruno mark, orbital system, Action Inbox, narrative sequence, and routes; no visible overflow or clipped copy remained. Existing authenticated application surfaces have not yet migrated, so subsequent routes should adopt this system deliberately rather than being described as if they already match it.
+The shipped public landing page is the implementation ground truth for this direction. The finish review recorded a ship disposition after persistence and fidelity passes reached the ceiling with no material fix: keep the oversized 24/7 promise, exact Bruno.Ai lockup, first-viewport Action Inbox with its explicit “Illustrative data” boundary, orbital system, narrative sequence, authority-policy treatment, and routes. Existing authenticated application surfaces have not yet migrated, so subsequent routes should adopt this system deliberately rather than being described as if they already match it.
 
 **Key Characteristics:**
 
@@ -125,7 +125,8 @@ The shipped public landing page is the implementation ground truth for this dire
 - Satoshi display type paired with highly legible Inter body copy.
 - Rounded precision panels and pill-shaped actions.
 - Mint and lime signals used as evidence-bearing accents, not atmosphere.
-- Fine orbital linework and the circular Bruno signal pattern.
+- Fine orbital linework and the circular Bruno.Ai signal pattern.
+- Written always-on and learning states that show better execution without silently expanding authority.
 - Soft ambient depth, restrained motion, and explicit illustrative labels.
 
 ## Colors
@@ -166,7 +167,7 @@ The palette is a warm operational neutral field sharpened by dark structure and 
 
 **Body Font:** Inter (with ui-sans-serif and system sans-serif fallbacks)
 
-**Character:** Satoshi gives Bruno a geometric, contemporary voice with enough warmth for oversized promises. Inter carries operational details, labels, policies, and proof with clarity at compact sizes.
+**Character:** Satoshi gives Bruno.Ai a geometric, contemporary voice with enough warmth for oversized promises. Inter carries operational details, labels, policies, and proof with clarity at compact sizes.
 
 ### Hierarchy
 
@@ -184,7 +185,7 @@ Use a centered content frame capped at 1360px with 24px desktop gutters. Major p
 
 At 1120px, navigation simplifies and two-column hero, mechanism, loop, trust, and closing compositions stack or reflow. At 720px, outer gutters reduce to 14px; primary and secondary hero actions become full-width; proof metrics, inbox rows, graph sources, policy tables, outcome lists, and the footer collapse without hiding status or truth labels.
 
-**The One-Loop Rule.** Every composition should clarify one operating loop between company signal, founder judgment, Bruno action, and verified outcome.
+**The One-Loop Rule.** Every composition should clarify one continuous operating loop between company signal, founder interaction, Bruno.Ai learning and action, and a verified outcome that improves the next attempt.
 
 **The Proof-Before-Decoration Rule.** Give the product panel enough scale and breathing room to be read as proof; orbital geometry supports that proof without competing with it.
 
@@ -204,7 +205,7 @@ Depth is ambient and selective. Ivory remains flat; warm-white product panels re
 
 ## Shapes
 
-The form language combines highly rounded rectangular panels with exact circles. Primary sections use 22–26px corners, operational rows use 10–12px corners, tags use 4px corners, and actions or compact source labels use full pill shapes. The Bruno mark and Business Graph core introduce circular nodes and rings; fine one-pixel espresso or stone lines connect them.
+The form language combines highly rounded rectangular panels with exact circles. Primary sections use 22–26px corners, operational rows use 10–12px corners, tags use 4px corners, and actions or compact source labels use full pill shapes. The Bruno.Ai mark and Business Graph core introduce circular nodes and rings; fine one-pixel espresso or stone lines connect them.
 
 **The Orbital Geometry Rule.** Circles express connected state, ongoing work, and verification. Use them for marks, graph systems, signals, and icon fields—not as arbitrary decoration on every surface.
 
@@ -234,9 +235,9 @@ The form language combines highly rounded rectangular panels with exact circles.
 
 ### Navigation
 
-Navigation is quiet Inter at compact size and medium-heavy weight. Links are unboxed at rest, move to espresso with an underline on hover, and keep a visible mint focus outline. The Bruno lockup anchors the left edge; the dark pill action anchors the path into the shipped dashboard. On narrow screens, in-page links and sign-in yield while the brand and dashboard route remain.
+Navigation is quiet Inter at compact size and medium-heavy weight. Links are unboxed at rest, move to espresso with an underline on hover, and keep a visible mint focus outline. The Bruno.Ai lockup anchors the left edge; the dark pill action anchors the path into the shipped dashboard. On narrow screens, in-page links and sign-in yield while the brand and dashboard route remain.
 
-### Bruno Mark
+### Bruno.Ai Mark
 
 The mark is a rounded monoline `B` with an internal chevron and lower loop, punctuated by mint and lime circular signals. Render it in deep charcoal on light fields or warm white in the graph core; preserve round stroke caps and the two signal colors. It may appear as a lockup or as the compact icon, but its geometry should not be redrawn as a generic sparkle or bot face.
 
@@ -246,7 +247,13 @@ The Action Inbox is the canonical proof panel: a rounded warm-white shell, quiet
 
 ### Business Graph
 
-The graph is a circular operating model with a deep-charcoal core, mint system label, nested stone rings, written orbit nodes, and one moving mint signal. Source systems enter on one side and decisions, actions, and verified outcomes leave on the other. The orbit runs for 11 seconds linearly and becomes static under reduced-motion preference.
+The graph is a circular operating model with a deep-charcoal core, mint system label, nested stone rings, written Observe, Learn, Act, and Verify nodes, and one moving mint signal. Source systems and founder interactions enter on one side; decisions, actions, and verified outcomes leave on the other and improve the next cycle. The orbit runs for 11 seconds linearly and becomes static under reduced-motion preference.
+
+### Authority Policies
+
+Policy rows pair each legible business action with one written authority state: always allow, ask, or never allow. Learning improves execution but never silently expands authority; permissions remain explicit, readable, and separate from what Bruno.Ai learns through founder interactions, corrections, approvals, policies, and verified outcomes.
+
+**The Explicit Authority Rule.** Never use a learning, confidence, or completion signal to imply broader permission. Show authority as a written business policy independent of the Observe, Learn, Act, and Verify cycle.
 
 ## Do's and Don'ts
 
@@ -254,7 +261,9 @@ The graph is a circular operating model with a deep-charcoal core, mint system l
 
 - **Do** use the shipped landing as the ground truth while migrating other surfaces deliberately.
 - **Do** let Satoshi, open ivory space, and one substantial proof panel establish the first visual impression.
-- **Do** preserve the Bruno mark, circular signal geometry, and written labels whenever mint or lime communicates state.
+- **Do** preserve the Bruno.Ai mark, circular signal geometry, and written labels whenever mint or lime communicates state.
+- **Do** make 24/7 operation and learning from founder interaction explicit near the first product promise.
+- **Do** show that learning improves execution while authority stays an explicit always allow, ask, or never allow policy.
 - **Do** label illustrative product direction explicitly and keep routes to the shipped dashboard and agent creation clear.
 - **Do** disable orbital animation and state transitions when reduced motion is requested.
 

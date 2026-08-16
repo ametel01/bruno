@@ -1,4 +1,4 @@
-# Bruno Business Viability Assessment
+# Bruno.Ai Business Viability Assessment
 
 Assessment date: 2026-08-05
 
@@ -7,7 +7,7 @@ Assessment date: 2026-08-05
 **Proceed to a constrained paid private beta. Do not proceed to a broad launch or expand the
 feature surface until demand and support economics are demonstrated.**
 
-Bruno is a credible **B+ learning vehicle with A-candidate potential**. The repository shows
+Bruno.Ai is a credible **B+ learning vehicle with A-candidate potential**. The repository shows
 that the core product is substantially implemented: one-click agent creation, provider setup,
 Telegram integration paths, runner provisioning, lifecycle controls, monitoring, approvals,
 backups, cost tracking, and user isolation exist or are in final acceptance. The principal
@@ -20,7 +20,7 @@ and support experiment with five solo founders.
 
 ## Business profile
 
-- **Product:** Bruno, a hosted, supervised personal AI assistant powered by Hermes.
+- **Product:** Bruno.Ai, a hosted, supervised personal AI assistant powered by Hermes.
 - **Primary customer:** Solo founders, initially narrowed to solo B2B consultants and fractional
   operators who already use AI regularly.
 - **Secondary customer:** Small agencies, only after the single-user product is validated.
@@ -38,10 +38,10 @@ and support experiment with five solo founders.
 
 ## Strategic correction
 
-The original [PRD](./PRD.md) frames Bruno primarily as a Hermes fleet control plane. The
+The original [PRD](./PRD.md) frames Bruno.Ai primarily as a Hermes fleet control plane. The
 customer thesis developed during this assessment is narrower:
 
-> Bruno gives a solo founder a useful, supervised personal business assistant without requiring
+> Bruno.Ai gives a solo founder a useful, supervised personal business assistant without requiring
 > them to understand servers, gateways, agent frameworks, permissions, or recovery.
 
 The control plane remains valuable infrastructure, but it should not be the lead customer promise.
@@ -54,12 +54,12 @@ Solo founders buy completed work and peace of mind, not fleet management.
 > anything leaves your account.
 
 This positioning is deliberately narrower than “one-click personal assistant.” The latter describes
-installation, which competitors increasingly commoditize. Bruno must compete on **time to first
+installation, which competitors increasingly commoditize. Bruno.Ai must compete on **time to first
 useful outcome**, ongoing reliability, and operational trust.
 
 ## Market demand assessment
 
-Current evidence supports demand for AI assistance, but not yet demand for Bruno specifically.
+Current evidence supports demand for AI assistance, but not yet demand for Bruno.Ai specifically.
 
 ### Positive indicators
 
@@ -104,7 +104,7 @@ requiring multi-client isolation during the initial beta.
 
 ## Competitive assessment
 
-| Alternative | Proven strength | Gap Bruno can test | Threat |
+| Alternative | Proven strength | Gap Bruno.Ai can test | Threat |
 | --- | --- | --- | --- |
 | Lindy | Two-minute setup, email/calendar/follow-up workflows, messaging, and broad integrations | Deeper role-specific onboarding, owned runtime, and visible operational receipts | Very high |
 | ChatGPT | Distribution, memory, connected apps, scheduled tasks, recurring agent work, and action confirmations | A continuously operated assistant configured around one business role | Very high |
@@ -121,9 +121,9 @@ Relevant product references: [Lindy](https://docs.lindy.ai/),
 [Hermes Desktop](https://github.com/NousResearch/hermes-agent/blob/main/apps/desktop/README.md), and
 [DigitalOcean Hermes](https://docs.digitalocean.com/products/marketplace/catalog/hermes-agent/).
 
-Bruno should not compete on general intelligence, number of integrations, VPS price, BYOK,
+Bruno.Ai should not compete on general intelligence, number of integrations, VPS price, BYOK,
 fleet size, or installation speed. Major platforms can bundle those advantages. The defensible
-claim to test is that Bruno delivers a better first outcome and a more trustworthy ongoing
+claim to test is that Bruno.Ai delivers a better first outcome and a more trustworthy ongoing
 operation for a narrow customer role.
 
 ## Revenue potential
@@ -144,7 +144,7 @@ Sources: [DigitalOcean Droplet pricing](https://www.digitalocean.com/pricing/dro
 The repository now defaults provisionally to the $12 2 GiB Droplet because the 512 MiB and 1 GiB
 profiles cannot satisfy the configured Hermes memory limit plus the runner/OS reserve in physical
 RAM. Regional availability and live one-agent observation remain separately authorized proof
-points. At this profile, $30 is too thin for a support-heavy service. Bruno would need a higher
+points. At this profile, $30 is too thin for a support-heavy service. Bruno.Ai would need a higher
 price, safe runner sharing, or a more constrained service.
 
 ### Revenue milestones
@@ -184,7 +184,7 @@ Claude Max with extra usage credits, plus standard API keys.
 | P1 | Reliability | Hermes, OAuth, Telegram, or runners fail unpredictably | Medium-high | High |
 | P1 | Competition | A larger platform bundles the differentiated behavior | High | High |
 | P1 | Financial | Required runner size and support erase the $30 margin | Medium-high | High |
-| P2 | Dependency | Hermes or provider authentication changes underneath Bruno | Medium | High |
+| P2 | Dependency | Hermes or provider authentication changes underneath Bruno.Ai | Medium | High |
 
 At an assumed founder-engineering value of $50 per hour, ten minutes of monthly support costs $8.33
 per customer, fifteen minutes costs $12.50, and thirty minutes costs $25. The scalable target must
@@ -227,7 +227,7 @@ apps, marketplaces, and advanced plan structures.
 - After the first two pilots, founder-assisted onboarding falls below 20 minutes.
 - Recurring support trends toward less than ten minutes per user per month.
 - The provisional $12 2 GiB runner operates reliably for the validated workflow.
-- At least one user asks Bruno to take on additional recurring work.
+- At least one user asks Bruno.Ai to take on additional recurring work.
 
 ### Reposition or stop criteria
 
@@ -243,7 +243,7 @@ apps, marketplaces, and advanced plan structures.
 
 **Proceed—but proceed to paid validation, not further speculative construction.**
 
-Bruno has sufficient technical substance, a plausible customer problem, favorable unit economics
+Bruno.Ai has sufficient technical substance, a plausible customer problem, favorable unit economics
 on the smallest validated runner tiers, and a founder capable of delivering the product. It does
 not yet have product-market evidence, a repeatable customer segment, a distribution advantage, or
 proven support economics.

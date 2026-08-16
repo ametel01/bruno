@@ -1,6 +1,6 @@
 # Authentication modes
 
-Bruno resolves one server-only `BRUNO_AUTH_MODE` policy before browser requests reach the
+Bruno.Ai resolves one server-only `BRUNO_AUTH_MODE` policy before browser requests reach the
 application user resolver. Request hosts and forwarded headers never select the mode.
 
 Browser runner settings and APIs resolve that configured application user once, then scope runner

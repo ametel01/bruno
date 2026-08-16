@@ -644,7 +644,7 @@ describe.sequential("runner provisioning service", () => {
       status: "provision_failed",
       provisioningStatus: "failed",
       provisioningError:
-        "DigitalOcean Droplet deleted-droplet-1 is no longer available for runner registration. Bruno marked the stale runner failed and will create a new runner.",
+        "DigitalOcean Droplet deleted-droplet-1 is no longer available for runner registration. Bruno.Ai marked the stale runner failed and will create a new runner.",
     });
   });
 
@@ -793,7 +793,7 @@ describe.sequential("runner provisioning service", () => {
         provisioning: {
           status: "failed",
           error:
-            "Automatic cleanup could not confirm deletion for DigitalOcean Droplet manual-cleanup-1. In DigitalOcean, delete only that Droplet after confirming it has the Bruno runner tags, then create a new runner.",
+            "Automatic cleanup could not confirm deletion for DigitalOcean Droplet manual-cleanup-1. In DigitalOcean, delete only that Droplet after confirming it has the Bruno.Ai runner tags, then create a new runner.",
           completedAt: expect.any(String),
         },
       },

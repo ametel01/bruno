@@ -178,7 +178,7 @@ describe("agent deployment presentation", () => {
       kind: "recovery",
       heading: "Preparing your agent",
       label: "Preparing your agent",
-      description: "Bruno is preparing replacement capacity automatically.",
+      description: "Bruno.Ai is preparing replacement capacity automatically.",
     });
     expect(deploymentExperienceStageState(presentation, "preparing")).toBe("current");
     expect(JSON.stringify({ parsed: parsed.deployment, presentation })).not.toMatch(

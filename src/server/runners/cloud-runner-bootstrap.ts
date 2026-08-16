@@ -46,7 +46,7 @@ export const DEFAULT_CLOUD_RUNNER_HOST = "127.0.0.1";
 export const DEFAULT_CLOUD_RUNNER_CONTAINER_HOST = "0.0.0.0";
 export const DEFAULT_CLOUD_RUNNER_PORT = 3045;
 export const DEFAULT_CLOUD_RUNNER_CONTAINER_NAME = "bruno-runner";
-export const DEFAULT_CLOUD_RUNNER_NAME = "Bruno Cloud Runner";
+export const DEFAULT_CLOUD_RUNNER_NAME = "Bruno.Ai Cloud Runner";
 export const DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET = "/var/run/docker.sock";
 export const BOOTSTRAP_REDACTION = "[redacted]";
 

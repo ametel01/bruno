@@ -12,10 +12,10 @@ const bodyFont = Inter({
 });
 
 const DIRECTION_CONTRACT = [
-  "THESIS: Bruno keeps a one-person company in motion through one calm operating loop, refusing AI glow, chatbot theater, and ledger spectacle.",
+  "THESIS: Bruno.Ai is the always-on AI agent that keeps a one-person company in motion, learns from the founder, and improves through one calm operating loop.",
   "OWN-WORLD: Ivory and stone fields, deep-charcoal Satoshi, warm espresso rules, mint and lime signals, orbital linework, and softly precise product panels.",
-  "STORY: Understand Bruno's role, see the Action Inbox and Business Graph at work, then enter the shipped dashboard or create an agent.",
-  "FIRST VIEWPORT: A quiet navigation bar leads into an oversized promise and two clear actions beside a high-fidelity illustrative Action Inbox crossed by Bruno's circular signal pattern.",
+  "STORY: Understand Bruno.Ai's 24/7 role and learning loop, see the Action Inbox and Business Graph at work, then enter the shipped dashboard or create an agent.",
+  "FIRST VIEWPORT: A quiet navigation bar leads into an always-on promise and two clear actions beside a high-fidelity illustrative Action Inbox crossed by Bruno.Ai's circular signal pattern.",
   "FORM: Calm Operations Brandboard, the user-pinned hard reference; landing seed b32744ed. Existing authenticated surfaces migrate in later phases.",
   "FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md",
 ].join("\n");
@@ -23,8 +23,9 @@ const DIRECTION_CONTRACT = [
 const directionContractBootstrap = `document.body.prepend(document.createComment(${JSON.stringify(DIRECTION_CONTRACT)}));`;
 
 export const metadata: Metadata = {
-  title: "Bruno",
-  description: "Bruno is the operating system for a one-person company.",
+  title: "Bruno.Ai",
+  description:
+    "Bruno.Ai is the always-on AI agent that learns how to run your one-person company with you.",
 };
 
 export default function RootLayout({

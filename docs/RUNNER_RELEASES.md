@@ -220,7 +220,7 @@ requires authenticated registration, heartbeat, readiness, exact runner release 
 same release/snapshot evidence expected by the control plane. The release-attested path does not
 start a duplicate synthetic Hermes fixture on an Owner cold deployment.
 
-At Agent Deployment acceptance, Bruno persists the exact dispatch mode, provider mode and region,
+At Agent Deployment acceptance, Bruno.Ai persists the exact dispatch mode, provider mode and region,
 runner size and images, Snapshot bundle and trust inputs, Verified Release bundle and trust inputs,
 validation mode, and Rollout Configuration generation. Retry, reconciler crash recovery, and runner
 replacement combine those immutable non-secret choices with the credentials currently authorized
@@ -250,7 +250,7 @@ access, it writes an allowlisted local `user_data_started` stage and records eac
 boundary locally. It records `bootstrap_started` before package installation, then runs the immutable
 runner image's Docker, Hermes fixture, detailed-health, synthetic model canary,
 Telegram-configuration, and fixture-cleanup checks, and requires every component to pass. An empty
-set of Bruno Docker networks is a successful cleanup condition. After cloud-init completes, the
+set of Bruno.Ai Docker networks is a successful cleanup condition. After cloud-init completes, the
 controller invokes a one-shot finalizer over the already-established SSH session. The finalizer
 removes cloud-init state and the temporary authorized SSH key, verifies the machine identity is
 empty, and only then returns boot and sanitation evidence over that same connection for snapshot

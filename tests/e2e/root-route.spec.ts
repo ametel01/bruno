@@ -56,7 +56,7 @@ for (const route of shellRoutes) {
   });
 }
 
-test("/ renders the public Bruno product direction", async ({ page }) => {
+test("/ renders the public Bruno.Ai product direction", async ({ page }) => {
   await page.goto("/");
 
   expect(await page.evaluate(() => document.body.firstChild?.nodeType)).toBe(8);
@@ -64,7 +64,7 @@ test("/ renders the public Bruno product direction", async ({ page }) => {
     "seed b32744ed",
   );
   await expect(
-    page.getByRole("heading", { name: "Bruno runs your one-person business with you." }),
+    page.getByRole("heading", { name: "Bruno.Ai runs your business with you. 24/7." }),
   ).toBeVisible();
   const hero = page.locator('section[aria-labelledby="landing-title"]');
   await expect(hero.getByRole("link", { exact: true, name: "Open dashboard" })).toHaveAttribute(

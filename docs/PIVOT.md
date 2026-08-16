@@ -1,6 +1,6 @@
-**Hostinger is killing the original version of Bruno. It is not killing the opportunity.**
+**Hostinger is killing the original version of Bruno.Ai. It is not killing the opportunity.**
 
-If Bruno remains:
+If Bruno.Ai remains:
 
 > “The Vercel for personal agents — deploy Hermes/OpenClaw on a VPS without setup”
 
@@ -8,42 +8,43 @@ then I would pivot now. Hostinger has effectively commoditized that layer. Manag
 
 That is not a fight I would choose as a solo founder.
 
-But there is a better Bruno hiding one layer above it.
+But there is a better Bruno.Ai hiding one layer above it.
 
 ## The key repositioning
 
-Don't sell:
+Don't sell the infrastructure-only version of the promise:
 
 > **“Your own AI agent running 24/7.”**
 
 Sell:
 
-> **“Bruno runs your one-person business with you.”**
+> **“Bruno.Ai runs your one-person business with you, 24/7—and gets better as it learns from you.”**
 
 The distinction is substantial.
 
-Hostinger gives someone **agent infrastructure and capabilities**. Bruno should give someone an **operating system for their business**.
+Hostinger gives someone **agent infrastructure and capabilities**. Bruno.Ai should give someone an
+**always-running, self-improving operator for their business**.
 
 A founder shouldn't need to understand Hermes, OpenClaw, MCP, cron, skills, subagents, models, context windows or VPSs.
 
 They should connect their business and then see:
 
-> **Bruno found 3 things that need your attention today. Two are ready for approval. One has already been handled.**
+> **Bruno.Ai found 3 things that need your attention today. Two are ready for approval. One has already been handled.**
 
 That's a product.
 
 ---
 
-## Where Bruno should move
+## Where Bruno.Ai should move
 
-| Layer          | Hostinger/Hermes         | Bruno                            |
+| Layer          | Hostinger/Hermes         | Bruno.Ai                            |
 | -------------- | ------------------------ | -------------------------------- |
 | Infrastructure | VPS/container            | Invisible                        |
 | Agent runtime  | Hermes/OpenClaw          | Invisible/interchangeable        |
 | Models         | Hundreds                 | Automatically selected           |
 | Integrations   | 1,000+                   | Only business-critical ones      |
 | Memory         | General long-term memory | **Structured company memory**    |
-| Tasks          | User asks/schedules work | **Bruno discovers work**         |
+| Tasks          | User asks/schedules work | **Bruno.Ai discovers work**         |
 | Automation     | Cron/workflows           | **Business-event driven**        |
 | Multi-agent    | Subagents/Kanban         | Invisible implementation         |
 | Control        | Chat/agent dashboard     | **Founder command center**       |
@@ -51,9 +52,13 @@ That's a product.
 | Measurement    | Usage/credits            | **Money/time/results generated** |
 | Product        | AI agent                 | **AI operator**                  |
 
+Self-improvement here is operational, not uncontrolled: every founder interaction, correction,
+approval, policy change, and verified outcome should improve Bruno.Ai's company model and next
+attempt without silently increasing its permissions.
+
 Hostinger's current business-agent experience is still largely organized around selecting an expert, chatting with it, or invoking structured skills. It is powerful, and it can take actions through external apps, but the product documentation does not describe a unified persistent business-state model or a system centered around continuously discovering and closing business loops. That's the opening I would attack. ([Hostinger][2])
 
-## Bruno's core innovation: the **Business Graph**
+## Bruno.Ai's core innovation: the **Business Graph**
 
 This is what I would build that Hermes itself does not give you.
 
@@ -70,7 +75,7 @@ Customer support
 Website
 ```
 
-Bruno constructs a persistent model:
+Bruno.Ai constructs a persistent model:
 
 ```text
 Company
@@ -90,7 +95,7 @@ Company
 
 This is fundamentally different from LLM memory.
 
-Bruno knows:
+Bruno.Ai knows:
 
 > We promised John a response Friday.
 
@@ -108,7 +113,7 @@ That becomes your moat.
 
 ---
 
-# Bruno shouldn't wait for prompts
+# Bruno.Ai shouldn't wait for prompts
 
 This is probably the biggest conceptual change I'd make.
 
@@ -124,12 +129,12 @@ Hermes:
 Founder → task → agent → tools → result
 ```
 
-**Bruno:**
+**Bruno.Ai:**
 
 ```text
 Business changes
       ↓
-Bruno observes
+Bruno.Ai observes
       ↓
 understands significance
       ↓
@@ -139,12 +144,15 @@ prepares / executes action
       ↓
 verifies outcome
       ↓
-updates company state
+learns from founder feedback + outcome
+      ↓
+updates company state and next approach
       ↓
 tells founder only when necessary
 ```
 
-The founder becomes the manager rather than the prompt writer.
+The founder becomes the manager rather than the prompt writer. Bruno.Ai remains on duty 24/7,
+carrying what it learns from one operating loop into the next.
 
 ---
 
@@ -172,13 +180,13 @@ Those are things a solo founder can imagine paying $30–100/month for.
 
 ---
 
-# Give Bruno an **Action Inbox**
+# Give Bruno.Ai an **Action Inbox**
 
-I think this could become Bruno's signature UX.
+I think this could become Bruno.Ai's signature UX.
 
 Not primarily chat.
 
-Imagine opening Bruno and seeing:
+Imagine opening Bruno.Ai and seeing:
 
 ```text
 Good morning Alex.
@@ -191,7 +199,7 @@ $ Potential sale
 Sarah from Acme hasn't replied in 5 days.
 Worth: ~$2,400/year
 
-Bruno prepared a follow-up.
+Bruno.Ai prepared a follow-up.
 
 [Review]     [Send]
 
@@ -201,7 +209,7 @@ Bruno prepared a follow-up.
 Pro account cancelled yesterday.
 Customer mentioned API latency twice.
 
-Bruno prepared a retention email.
+Bruno.Ai prepared a retention email.
 
 [Review]     [Ignore]
 
@@ -211,7 +219,7 @@ Bruno prepared a retention email.
 Your comparison page received 312 visits
 but converted at 0.6%.
 
-Bruno found one likely problem.
+Bruno.Ai found one likely problem.
 
 [Investigate]
 ```
@@ -237,7 +245,7 @@ A chatbox does not.
 
 One of the biggest unsolved problems with autonomous agents is trust. There are current Hermes/OpenClaw users explicitly describing reliability, persistence, configuration and approval concerns; these are anecdotal community signals rather than controlled evidence, but the pattern is useful. ([Reddit][3])
 
-Bruno could make autonomy understandable:
+Bruno.Ai could make autonomy understandable:
 
 ```text
 EMAIL
@@ -259,17 +267,17 @@ Change subscription           Ask me
 
 Then gradually:
 
-> “You approved this exact action 19 times. Allow Bruno to handle it automatically?”
+> “You approved this exact action 19 times. Allow Bruno.Ai to handle it automatically?”
 
 That's much more approachable than agent permissions or shell-command approvals.
 
 ---
 
-# And measure Bruno like an employee
+# And measure Bruno.Ai like an employee
 
 Another potential differentiator:
 
-### Bruno Impact
+### Bruno.Ai Impact
 
 ```text
 THIS MONTH
@@ -282,7 +290,7 @@ $420 churn recovered
 8 support issues resolved
 14 customer insights discovered
 
-Bruno cost
+Bruno.Ai cost
 $49 subscription
 $17.82 AI usage
 ```
@@ -293,7 +301,7 @@ Don't show users:
 
 Show:
 
-> **Bruno recovered $420 this month.**
+> **Bruno.Ai recovered $420 this month.**
 
 That's how you defend pricing.
 
@@ -301,12 +309,12 @@ That's how you defend pricing.
 
 # I would also stop making Hermes the product
 
-Architecturally, I'd make Bruno **runtime-agnostic**.
+Architecturally, I'd make Bruno.Ai **runtime-agnostic**.
 
 Today:
 
 ```text
-Bruno
+Bruno.Ai
   ↓
 Hermes
 ```
@@ -314,7 +322,7 @@ Hermes
 Eventually:
 
 ```text
-                 Bruno
+                 Bruno.Ai
                    │
           Business Brain
                    │
@@ -327,7 +335,7 @@ Eventually:
 
 Hostinger already bundles Hermes and OpenClaw, which is a warning: **the agent runtime itself is becoming interchangeable infrastructure.** ([Hostinger][1])
 
-Bruno should own:
+Bruno.Ai should own:
 
 **context + policies + business state + workflows + UX + outcomes.**
 
@@ -368,7 +376,7 @@ marketing
 analytics
 ```
 
-Once Bruno understands that environment extremely well, you expand into agencies, creators, consultants, e-commerce, etc.
+Once Bruno.Ai understands that environment extremely well, you expand into agencies, creators, consultants, e-commerce, etc.
 
 Trying to make a generic personal agent puts you directly against Hostinger, OpenClaw, Hermes, ChatGPT and everyone else.
 
@@ -393,7 +401,7 @@ CONNECT YOUR COMPANY
         ↓
 Gmail + Stripe + GitHub + Analytics
         ↓
-Bruno spends 5 minutes understanding it
+Bruno.Ai spends 5 minutes understanding it
         ↓
 YOUR COMPANY TODAY
 
@@ -406,18 +414,18 @@ Product issues detected     2
 
 ─────────────────────────────
 
-Bruno found 5 things worth doing.
+Bruno.Ai found 5 things worth doing.
 
 [Review actions]
 ```
 
-Then Bruno starts operating.
+Then Bruno.Ai starts operating.
 
 That is meaningfully different.
 
 ---
 
-## So: is Hostinger killing Bruno?
+## So: is Hostinger killing Bruno.Ai?
 
 **It killed one thesis:**
 
@@ -431,9 +439,9 @@ The opportunity I see is one step further:
 
 > **Hostinger gives you an AI agent.**
 >
-> **Bruno gives you an AI employee that already understands how to run your company.**
+> **Bruno.Ai gives you an always-on AI employee that learns how to run your company with you.**
 
-That's the Bruno I would build.
+That's the Bruno.Ai I would build.
 
 And I would change the internal product mantra from **“Vercel for AI agents”** to:
 

@@ -31,7 +31,7 @@ function manifestDescriptor(
 }
 
 describe("Hermes image identity", () => {
-  it("allows an exact Bruno GHCR index and platform digest", () => {
+  it("allows an exact Bruno.Ai GHCR index and platform digest", () => {
     expect(validateHermesImageIdentity(IMAGE, AMD64_DIGEST)).toEqual({
       reference: IMAGE,
       indexDigest: INDEX_DIGEST,

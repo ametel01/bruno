@@ -366,7 +366,7 @@ describe("Hermes staging verification gate", () => {
       nextAction: {
         kind: "operator_telegram",
         challengeId: initialChallengeId,
-        text: `Bruno Hermes initial acceptance ${initialChallengeId}`,
+        text: `Bruno.Ai Hermes initial acceptance ${initialChallengeId}`,
         purpose: "initial",
         expiresAt: "2030-01-01T00:05:00.000Z",
       },
@@ -388,7 +388,7 @@ describe("Hermes staging verification gate", () => {
         nextAction: {
           kind: "operator_telegram",
           challengeId: restartChallengeId,
-          text: `Bruno Hermes post-restart acceptance ${restartChallengeId}`,
+          text: `Bruno.Ai Hermes post-restart acceptance ${restartChallengeId}`,
           purpose: "post_restart",
           expiresAt: "2030-01-01T00:10:00.000Z",
         },
@@ -479,7 +479,7 @@ describe("Hermes staging verification gate", () => {
         nextAction: {
           kind: "operator_telegram",
           challengeId,
-          text: `Bruno Hermes initial acceptance ${challengeId}`,
+          text: `Bruno.Ai Hermes initial acceptance ${challengeId}`,
           purpose: "initial",
           expiresAt: "2030-01-01T00:05:00.000Z",
         },

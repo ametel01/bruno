@@ -1532,7 +1532,7 @@ async function initializeProvisioningRunner(
     .insert(runners)
     .values({
       userId: work.userId,
-      name: "Bruno Deployment Runner",
+      name: "Bruno.Ai Deployment Runner",
       kind: DIGITALOCEAN_RUNNER_KIND,
       status: "provisioning",
       provider: DIGITALOCEAN_PROVIDER,

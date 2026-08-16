@@ -53,7 +53,7 @@ describe("fake DigitalOcean provider", () => {
     });
 
     const created = await provider.createRunner({
-      name: "Bruno Cloud Runner",
+      name: "Bruno.Ai Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-1gb",
       image: "ubuntu-24-04-x64",
@@ -69,7 +69,7 @@ describe("fake DigitalOcean provider", () => {
         providerFirewallId: null,
         providerFirewallName: null,
         publicIpv4: "203.0.113.10",
-        name: "Bruno Cloud Runner",
+        name: "Bruno.Ai Cloud Runner",
         region: "sfo3",
         sizeSlug: "s-1vcpu-1gb",
         image: "ubuntu-24-04-x64",
@@ -127,7 +127,7 @@ describe("fake DigitalOcean provider", () => {
 
     await expect(
       createFailure.createRunner({
-        name: "Bruno Cloud Runner",
+        name: "Bruno.Ai Cloud Runner",
         region: "sfo3",
         sizeSlug: "s-1vcpu-1gb",
         image: "ubuntu-24-04-x64",
@@ -556,7 +556,7 @@ describe("DigitalOcean API provider", () => {
     });
 
     const created = await provider.createRunner({
-      name: "Bruno Cloud Runner",
+      name: "Bruno.Ai Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
@@ -614,7 +614,7 @@ describe("DigitalOcean API provider", () => {
       "droplets.delete",
     ]);
     expect(calls[0]?.body).toMatchObject({
-      name: "bruno-cloud-runner",
+      name: "bruno-ai-cloud-runner",
       region: "sfo3",
       size: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
@@ -811,7 +811,7 @@ describe("DigitalOcean API provider", () => {
     });
 
     const result = await provider.createRunner({
-      name: "Bruno Cloud Runner",
+      name: "Bruno.Ai Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-1gb",
       image: "ubuntu-24-04-x64",
@@ -937,7 +937,7 @@ describe("DigitalOcean API provider", () => {
     });
 
     const created = await provider.createRunner({
-      name: "Bruno Cloud Runner",
+      name: "Bruno.Ai Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",

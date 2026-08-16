@@ -59,7 +59,7 @@ flow cannot be claimed from those component tests.
 
 Email-code, Google, Apple, current-user, and sign-out browser success remain part of issue #239's
 hosted development acceptance. Issue #232 completed the prerequisite development setup: a dedicated
-Bruno development Clerk app is explicitly linked, verified email-code and development
+Bruno.Ai development Clerk app is explicitly linked, verified email-code and development
 Google/Apple provider configuration are enabled, required local `.env.local` variable names are
 present, and the sanitized `clerk doctor --json` gate passed for that linked development app. That
 setup evidence is not hosted provider-flow success. Hosted smoke still requires a supported browser
@@ -121,7 +121,7 @@ clerk doctor --json
 capability gate is expected to stop before Playwright when approved provider credentials are
 absent. Base `bun run verify` deliberately excludes provider-backed E2E.
 
-On 2026-07-12, the dedicated Bruno development Clerk setup from issue #232 is complete and its
+On 2026-07-12, the dedicated Bruno.Ai development Clerk setup from issue #232 is complete and its
 sanitized `clerk doctor --json` gate passes. The optional repository harness is implemented but
 has not run against the linked development instance. Issue #239 remains open because hosted browser
 email-code, Google, Apple, current-user, and sign-out smoke still need approved isolated identities

@@ -243,7 +243,7 @@ describe("Hermes staging acceptance orchestration", () => {
     expect(challenge).toEqual({
       purpose: "initial",
       challengeId: "2e401e1b-2eb4-588f-a2e7-c43086352d1a",
-      text: "Bruno Hermes initial acceptance 2e401e1b-2eb4-588f-a2e7-c43086352d1a",
+      text: "Bruno.Ai Hermes initial acceptance 2e401e1b-2eb4-588f-a2e7-c43086352d1a",
       digest: "sha256:847b6eeb0795cef7d123100f8531ac903a6cd1e77634dbbc7dcf5de8d6e02108",
       expiresAt: new Date("2026-08-03T10:05:00.000Z"),
     });

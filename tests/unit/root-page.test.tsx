@@ -343,11 +343,13 @@ describe("product shell routes", () => {
     mocks.notFound.mockClear();
   });
 
-  it("renders the public Bruno product direction without fabricated proof", () => {
+  it("renders the public Bruno.Ai product direction without fabricated proof", () => {
     const html = renderToStaticMarkup(createElement(Home));
 
-    expect(html).toContain("Bruno runs your one-person business with you.");
-    expect(html).toContain("The operating system for a one-person company.");
+    expect(html).toContain("Bruno.Ai runs your business with you. 24/7.");
+    expect(html).toContain("Your always-on AI agent for a one-person company.");
+    expect(html).toContain("It learns from every interaction");
+    expect(html).toContain("Learning improves how Bruno.Ai works");
     expect(html).toContain("Illustrative data");
     expect(html).toContain("not a claim that they are already shipped");
     expect(html).toContain('href="/dashboard"');

@@ -3,7 +3,7 @@
 Runner-image publication, disposable-Droplet canary requirements, gradual promotion, and
 artifact-backed rollback are documented in [Runner releases](RUNNER_RELEASES.md).
 
-Bruno keeps two distinct Playwright gates. Both use the unchanged desktop and mobile projects in `playwright.config.ts`.
+Bruno.Ai keeps two distinct Playwright gates. Both use the unchanged desktop and mobile projects in `playwright.config.ts`.
 
 ## Agent Deployment latency benchmark
 
@@ -72,7 +72,7 @@ spend, dedicated benchmark Owner and Telegram bot, cleanup policy, and retained-
 ### Run the authorized issue #299 Provider Trial
 
 The operator command is intentionally split into three gates. Its default `preflight` command is
-zero-effect. `initialize` creates only the dedicated non-Clerk Bruno Owner, immutable cohort, slots,
+zero-effect. `initialize` creates only the dedicated non-Clerk Bruno.Ai Owner, immutable cohort, slots,
 and driver row in PostgreSQL. `run` is the sole live command and consumes the original 30 slots
 sequentially until the run completes or pauses.
 
@@ -116,7 +116,7 @@ bun --env-file=.env.local --env-file=.env.provider-trial.local \
 ```
 
 The issue #299 scope is compiled into the command: `sfo3`, `s-1vcpu-2gb`, 30 slots, at most one
-billable Droplet at a time, 16 cents reserved per slot, and 500 cents total. The Bruno benchmark
+billable Droplet at a time, 16 cents reserved per slot, and 500 cents total. The Bruno.Ai benchmark
 Owner is an isolated application principal, not the DigitalOcean account owner. Cleanup can act
 only on the exact runner, Droplet, and firewall tuple linked to the cohort. Missing or ambiguous
 ownership evidence pauses the ledger. Successful cleanup deletes every trial workload, active
@@ -483,7 +483,7 @@ The optional gate requires these capability names, supplied only through the loc
 
 Its sanitized preflight reports missing capability names and exits before starting the app or
 browser. Playwright supplies the operator credentials only as in-memory HTTP credentials scoped
-to the local Bruno origin, so the test can reach the protected development pages without
+to the local Bruno.Ai origin, so the test can reach the protected development pages without
 sending Basic credentials to Clerk's cross-origin requests; they are never printed or persisted.
 The package script pins both Playwright and Next.js to the same `localhost` port because Next.js
 16's development render proxy resolves that hostname internally; keep the script's loopback
@@ -593,7 +593,7 @@ sentinel value is a blocker, not a passing smoke.
    prompts for a staging-only name and username, and copy the resulting token
    directly into an ignored local or hosted secret store. Bot creation,
    privacy-mode changes, and Telegram account management are not automated by
-   Bruno. If the token is exposed, revoke it in BotFather before continuing.
+   Bruno.Ai. If the token is exposed, revoke it in BotFather before continuing.
 2. Ensure no other running agent, gateway, webhook, or polling process uses that
    bot. Ready-mode creation rejects a token fingerprint already active for
    another agent, and concurrent polling with one token is unsupported.

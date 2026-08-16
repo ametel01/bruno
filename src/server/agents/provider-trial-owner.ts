@@ -60,7 +60,7 @@ async function assertIsolatedOwner(tx: Transaction, userId: string): Promise<voi
     .where(eq(users.id, userId))
     .limit(1);
   if (!owner || owner.clerkUserId !== null) {
-    throw new Error("Provider Trial benchmark Owner is not an isolated Bruno principal.");
+    throw new Error("Provider Trial benchmark Owner is not an isolated Bruno.Ai principal.");
   }
   const shared = await tx
     .select({ key: appMetadata.key })

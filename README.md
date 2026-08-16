@@ -1,9 +1,14 @@
-# Bruno
+# Bruno.Ai
 
-Bruno is a platform for easy deployment and hosting of always-on AI personal assistants. Its web
-control plane lets people create, configure, run, observe, approve, back up, and recover persistent
-Hermes agents. The Next.js application owns the user-facing dashboard and control APIs; PostgreSQL
-stores durable state; separate runner services execute each agent in an isolated Docker container.
+Bruno.Ai is the 24/7, always-running AI agent for a one-person company. It learns from the founder's
+interactions, corrections, approvals, policies, and verified outcomes so it can improve how it
+handles recurring work without silently expanding its authority.
+
+This repository currently provides the web control plane for creating, configuring, running,
+observing, approving, backing up, and recovering persistent Hermes agents—the infrastructure
+foundation for that product direction. The Next.js application owns the user-facing dashboard and
+control APIs; PostgreSQL stores durable state; separate runner services execute each agent in an
+isolated Docker container.
 
 The project is under active development. See [milestones](./docs/MILESTONES.md) for the product
 roadmap.
@@ -198,7 +203,7 @@ See [Authentication modes](./docs/AUTHENTICATION.md) and the
 | `CRON_SECRET` | Hosted reconciliation and wakeup operations | A 32–256 character bearer-safe secret used by Vercel to authorize deployment/runtime reconciliation and operator-only exhausted-wakeup inspection/replay routes. |
 | `BRUNO_DEPLOYMENT_DISPATCH_MODE` | No | `cron` by default; set exactly `qstash` only with the complete dedicated QStash configuration. PostgreSQL remains authoritative. |
 | `BRUNO_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS` | No | Atomic retryable QStash publication bound from 1 through 100; defaults to `12`. Authentication and payload rejections exhaust immediately. |
-| `QSTASH_TOKEN` | QStash dispatch | Dedicated publication token; must not reuse Bruno operator, cron, or runner credentials. |
+| `QSTASH_TOKEN` | QStash dispatch | Dedicated publication token; must not reuse Bruno.Ai operator, cron, or runner credentials. |
 | `QSTASH_CURRENT_SIGNING_KEY` | QStash dispatch | Current callback verification key. |
 | `QSTASH_NEXT_SIGNING_KEY` | QStash dispatch | Distinct next callback verification key for rotation. |
 

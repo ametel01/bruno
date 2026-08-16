@@ -14,7 +14,7 @@ related_targets: ["app/settings/_components/runner-management-controls.tsx","app
 
 ## Visitor and job
 
-- A solo SaaS founder checking the operational capacity behind Bruno and managing the access needed to keep it running.
+- A solo SaaS founder checking the operational capacity behind Bruno.Ai and managing the access needed to keep it running.
 - Let the founder scan live runner state, provision capacity, register a runner, rotate or revoke credentials, and distinguish shipped controls from planned company settings.
 - Keep the reading order stable: Workspace Settings, Runner Fleet, Runner Management, then one bounded System Appendix.
 

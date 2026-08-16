@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-16T18:14:42Z",
-  "title": "Design System: Bruno",
+  "generatedAt": "2026-08-16T18:47:41Z",
+  "title": "Design System: Bruno.Ai",
   "extensions": {
     "colorMeta": {
       "deep-charcoal": { "role": "primary", "displayName": "Deep Charcoal", "canonical": "#101314", "tonalRamp": ["oklch(15% 0.01 200)", "oklch(27% 0.01 200)", "oklch(39% 0.01 200)", "oklch(51% 0.01 200)", "oklch(63% 0.009 200)", "oklch(75% 0.007 200)", "oklch(87% 0.004 200)", "oklch(95% 0.002 200)"] },
@@ -67,10 +67,10 @@
       "css": ".ds-navigation { display:flex; align-items:center; gap:32px; font-family:Inter,ui-sans-serif,system-ui,sans-serif; font-size:.78rem; font-weight:650; } .ds-navigation a { color:#101314; text-decoration:none; text-underline-offset:.24em; transition:color 160ms ease-out; } .ds-navigation a:hover { color:#6b4d3c; text-decoration-line:underline; } .ds-navigation a:focus-visible { outline:3px solid #59d6c5; outline-offset:4px; } .ds-navigation .ds-navigation-action { min-height:44px; display:inline-flex; align-items:center; padding:0 18px; border-radius:999px; background:#101314; color:#fffdfa; font-weight:700; } .ds-navigation .ds-navigation-action:hover { background:#6b4d3c; color:#fffdfa; text-decoration-line:none; }"
     },
     {
-      "name": "Bruno Lockup",
+      "name": "Bruno.Ai Lockup",
       "kind": "custom",
-      "description": "The rounded Bruno mark with mint and lime operating signals.",
-      "html": "<span class=\"ds-bruno-lockup\"><svg aria-hidden=\"true\" viewBox=\"0 0 54 58\"><path d=\"M9 4h18c9 0 16 6 16 15 0 5-2 9-7 12 7 2 11 7 11 14 0 6-3 10-7 13H9V4Z\"/><path d=\"m15 17 10 8 10-8\"/><path d=\"M14 49c0-9 5-15 14-15 8 0 14 5 14 13 0 5-2 8-6 11H14v-9Z\"/><circle class=\"ds-bruno-mint\" cx=\"37\" cy=\"29\" r=\"5\"/><circle class=\"ds-bruno-lime\" cx=\"18\" cy=\"55\" r=\"5\"/></svg><span>Bruno<span class=\"ds-bruno-dot\">.</span></span></span>",
+      "description": "The rounded Bruno.Ai mark with mint and lime operating signals.",
+      "html": "<span class=\"ds-bruno-lockup\"><svg aria-hidden=\"true\" viewBox=\"0 0 54 58\"><path d=\"M9 4h18c9 0 16 6 16 15 0 5-2 9-7 12 7 2 11 7 11 14 0 6-3 10-7 13H9V4Z\"/><path d=\"m15 17 10 8 10-8\"/><path d=\"M14 49c0-9 5-15 14-15 8 0 14 5 14 13 0 5-2 8-6 11H14v-9Z\"/><circle class=\"ds-bruno-mint\" cx=\"37\" cy=\"29\" r=\"5\"/><circle class=\"ds-bruno-lime\" cx=\"18\" cy=\"55\" r=\"5\"/></svg><span>Bruno<span class=\"ds-bruno-dot\">.</span>Ai</span></span>",
       "css": ".ds-bruno-lockup { display:inline-flex; align-items:center; gap:10px; color:#101314; font-family:Satoshi,Inter,ui-sans-serif,system-ui,sans-serif; font-size:1.35rem; font-weight:700; letter-spacing:-.045em; line-height:1; } .ds-bruno-lockup svg { width:32px; height:34px; overflow:visible; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:3.1; } .ds-bruno-mint { fill:#59d6c5; stroke:#f7f4ee; stroke-width:2.8; } .ds-bruno-lime { fill:#b8f34b; stroke:#f7f4ee; stroke-width:2.8; } .ds-bruno-dot { color:#59d6c5; }"
     },
     {
@@ -85,34 +85,35 @@
       "name": "Business Graph Core",
       "kind": "custom",
       "refersTo": "business-graph-core",
-      "description": "The circular model connecting company state to one operating loop.",
-      "html": "<section class=\"ds-graph-core\"><span>Business Graph</span><strong>What changed—and why it matters</strong></section>",
+      "description": "The circular core of the Observe, Learn, Act, and Verify cycle connecting company state to one operating loop.",
+      "html": "<section class=\"ds-graph-core\"><span>Business Graph</span><strong>What changed, what it learned, and why it matters</strong></section>",
       "css": ".ds-graph-core { display:grid; width:240px; aspect-ratio:1; align-content:center; justify-items:center; padding:34px; border-radius:50%; background:#101314; box-shadow:0 26px 48px rgb(16 19 20 / 18%); color:#fffdfa; font-family:Inter,ui-sans-serif,system-ui,sans-serif; text-align:center; } .ds-graph-core span { color:#59d6c5; font-size:.66rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; } .ds-graph-core strong { max-width:14ch; margin-top:11px; font-family:Satoshi,Inter,ui-sans-serif,system-ui,sans-serif; font-size:1.45rem; letter-spacing:-.03em; line-height:1.1; }"
     },
     {
       "name": "Policy Row",
       "kind": "custom",
       "refersTo": "policy-row",
-      "description": "A legible business action paired with a written authority state.",
+      "description": "A legible business action paired with a written authority state that learning never silently expands.",
       "html": "<div class=\"ds-policy-row\"><span>Send to an existing customer</span><strong>Ask me</strong></div>",
       "css": ".ds-policy-row { display:grid; grid-template-columns:1.25fr .75fr; gap:20px; padding:16px 0; border-bottom:1px solid rgb(16 19 20 / 20%); background:#fffdfa; color:#101314; font-family:Inter,ui-sans-serif,system-ui,sans-serif; font-size:.82rem; } .ds-policy-row strong { color:#6b4d3c; font-size:.68rem; text-transform:uppercase; } .ds-policy-row:hover { border-color:#101314; } .ds-policy-row:focus-visible { outline:3px solid #59d6c5; outline-offset:4px; }"
     }
   ],
   "narrative": {
     "northStar": "Calm Operations Brandboard",
-    "overview": "Bruno is a calm operating system, not an AI spectacle. Ivory and warm-white fields hold deep-charcoal Satoshi arguments, practical Inter copy, espresso rules, and rare mint or lime signals. The mood is capable, proactive, trustworthy, and operational: one quiet system keeping a one-person company in motion.\n\nThe system pairs generous open space with softly precise product panels. Circular network geometry links the Bruno mark, the Business Graph, and the page's orbital linework; rounded controls and fine warm rules make the interface feel approachable without becoming playful. It explicitly rejects AI glow, chatbot theater, glass effects, and ledger spectacle.\n\nThe shipped public landing page is the implementation ground truth for this direction. The finish review confirmed its type, material, first viewport, Bruno mark, orbital system, Action Inbox, narrative sequence, and routes; no visible overflow or clipped copy remained. Existing authenticated application surfaces have not yet migrated, so subsequent routes should adopt this system deliberately rather than being described as if they already match it.",
-    "keyCharacteristics": ["Ivory and stone material fields with deep-charcoal structure.", "Satoshi display type paired with highly legible Inter body copy.", "Rounded precision panels and pill-shaped actions.", "Mint and lime signals used as evidence-bearing accents, not atmosphere.", "Fine orbital linework and the circular Bruno signal pattern.", "Soft ambient depth, restrained motion, and explicit illustrative labels."],
+    "overview": "Bruno.Ai is a calm, always-on AI agent, not an AI spectacle. It runs 24/7 and learns from founder interactions, corrections, approvals, policies, and verified outcomes so each operating loop improves the next. That learning improves execution but never silently expands authority. Ivory and warm-white fields hold deep-charcoal Satoshi arguments, practical Inter copy, espresso rules, and rare mint or lime signals. The mood is capable, proactive, trustworthy, and operational: one quiet system keeping a one-person company in motion.\n\nThe system pairs generous open space with softly precise product panels. Circular network geometry links the Bruno.Ai mark, the Business Graph, and the page's orbital linework; rounded controls and fine warm rules make the interface feel approachable without becoming playful. It explicitly rejects AI glow, chatbot theater, glass effects, and ledger spectacle.\n\nThe shipped public landing page is the implementation ground truth for this direction. The finish review recorded a ship disposition after persistence and fidelity passes reached the ceiling with no material fix: keep the oversized 24/7 promise, exact Bruno.Ai lockup, first-viewport Action Inbox with its explicit “Illustrative data” boundary, orbital system, narrative sequence, authority-policy treatment, and routes. Existing authenticated application surfaces have not yet migrated, so subsequent routes should adopt this system deliberately rather than being described as if they already match it.",
+    "keyCharacteristics": ["Ivory and stone material fields with deep-charcoal structure.", "Satoshi display type paired with highly legible Inter body copy.", "Rounded precision panels and pill-shaped actions.", "Mint and lime signals used as evidence-bearing accents, not atmosphere.", "Fine orbital linework and the circular Bruno.Ai signal pattern.", "Written always-on and learning states that show better execution without silently expanding authority.", "Soft ambient depth, restrained motion, and explicit illustrative labels."],
     "rules": [
       { "name": "The Signal Pair Rule", "body": "Mint means activity, connection, or positive operating state; lime means action, completion, or concentrated emphasis. Neither is ambient decoration.", "section": "colors" },
       { "name": "The Warm Structure Rule", "body": "Use espresso and stone for supporting structure so charcoal remains authoritative rather than visually relentless.", "section": "colors" },
       { "name": "The Two-Speed Rule", "body": "Satoshi sets the direction; Inter explains the work. Do not substitute display drama for operational legibility.", "section": "typography" },
-      { "name": "The One-Loop Rule", "body": "Every composition should clarify one operating loop between company signal, founder judgment, Bruno action, and verified outcome.", "section": "layout" },
+      { "name": "The One-Loop Rule", "body": "Every composition should clarify one continuous operating loop between company signal, founder interaction, Bruno.Ai learning and action, and a verified outcome that improves the next attempt.", "section": "layout" },
       { "name": "The Proof-Before-Decoration Rule", "body": "Give the product panel enough scale and breathing room to be read as proof; orbital geometry supports that proof without competing with it.", "section": "layout" },
       { "name": "The Ambient-Only Rule", "body": "Shadows should feel like diffuse room light. Never use glow, hard offset shadows, or elevation on every row.", "section": "elevation" },
       { "name": "The Orbital Geometry Rule", "body": "Circles express connected state, ongoing work, and verification. Use them for marks, graph systems, signals, and icon fields—not as arbitrary decoration on every surface.", "section": "shapes" },
-      { "name": "The Rounded Precision Rule", "body": "Rounded forms stay clean and quiet: thin borders, no bubbly stacking, and no decorative radius changes between equivalent components.", "section": "shapes" }
+      { "name": "The Rounded Precision Rule", "body": "Rounded forms stay clean and quiet: thin borders, no bubbly stacking, and no decorative radius changes between equivalent components.", "section": "shapes" },
+      { "name": "The Explicit Authority Rule", "body": "Never use a learning, confidence, or completion signal to imply broader permission. Show authority as a written business policy independent of the Observe, Learn, Act, and Verify cycle.", "section": "components" }
     ],
-    "dos": ["Do use the shipped landing as the ground truth while migrating other surfaces deliberately.", "Do let Satoshi, open ivory space, and one substantial proof panel establish the first visual impression.", "Do preserve the Bruno mark, circular signal geometry, and written labels whenever mint or lime communicates state.", "Do label illustrative product direction explicitly and keep routes to the shipped dashboard and agent creation clear.", "Do disable orbital animation and state transitions when reduced motion is requested."],
+    "dos": ["Do use the shipped landing as the ground truth while migrating other surfaces deliberately.", "Do let Satoshi, open ivory space, and one substantial proof panel establish the first visual impression.", "Do preserve the Bruno.Ai mark, circular signal geometry, and written labels whenever mint or lime communicates state.", "Do make 24/7 operation and learning from founder interaction explicit near the first product promise.", "Do show that learning improves execution while authority stays an explicit always allow, ask, or never allow policy.", "Do label illustrative product direction explicitly and keep routes to the shipped dashboard and agent creation clear.", "Do disable orbital animation and state transitions when reduced motion is requested."],
     "donts": ["Don't use AI glow, chatbot-window theater, glassmorphism, or generic sparkle imagery.", "Don't revive the Company Daybook's ruled paper, compressed type, square controls, electric blue, citron tabs, or red-pencil annotations.", "Don't turn the circular system into decorative noise or place mint and lime everywhere.", "Don't imply that authenticated application surfaces already match this direction or that illustrative operating loops have shipped.", "Don't fabricate customers, testimonials, outcomes, availability, or other product proof."]
   }
 }

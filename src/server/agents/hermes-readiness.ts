@@ -79,7 +79,7 @@ function runnerRequirement(
       id: "runner",
       label: "Runner",
       status: "ready",
-      message: "No runner is assigned yet; Bruno will select an eligible runner on start.",
+      message: "No runner is assigned yet; Bruno.Ai will select an eligible runner on start.",
       updatedAt: null,
     };
   }

@@ -1,4 +1,4 @@
-# Bruno Hermes Fleet Control Plane PRD
+# Bruno.Ai Hermes Fleet Control Plane PRD
 
 ## Problem Statement
 
@@ -8,7 +8,7 @@ The MVP must validate whether users trust a desktop-first web dashboard, with mo
 
 ## Solution
 
-Build Bruno as a desktop-first web SaaS for managing persistent Hermes agents, with a mobile-responsive control panel for monitoring, approvals, pause/resume, alerts, and quick recovery. The product should feel closer to Vercel, Railway, DigitalOcean, and Datadog for AI agents than to a chat app.
+Build Bruno.Ai as a desktop-first web SaaS for managing persistent Hermes agents, with a mobile-responsive control panel for monitoring, approvals, pause/resume, alerts, and quick recovery. The product should feel closer to Vercel, Railway, DigitalOcean, and Datadog for AI agents than to a chat app.
 
 The first implementation should progress through thin vertical slices: product skeleton, agent records, fake lifecycle controls, event logs, simulated logs, templates, configuration, approval queue, mobile controls, local runner, Docker runner, manual remote runner, secure runner auth, automated DigitalOcean runner provisioning, multiple agents, backups, cost tracking, billing, real Hermes plus Telegram, and private beta.
 
@@ -16,14 +16,14 @@ The core product primitive is a supervised agent operation: a user creates an ag
 
 ## User Stories
 
-1. As a solo founder, I want to create an Bruno account, so that I can manage persistent AI agents from one dashboard.
+1. As a solo founder, I want to create an Bruno.Ai account, so that I can manage persistent AI agents from one dashboard.
 2. As a solo founder, I want to view an empty dashboard after signup, so that I understand where agents will appear.
 3. As a solo founder, I want to create an agent record without real execution, so that I can start configuring my operation before infrastructure exists.
 4. As a solo founder, I want to name an agent, so that I can recognize its job in the dashboard.
 5. As a solo founder, I want to choose an agent template, so that I do not need to design a useful agent from scratch.
 6. As a solo founder, I want to create a Research Agent template, so that I can run recurring research jobs.
 7. As an agency operator, I want to create an Inbox Triage Agent template, so that I can manage client support or sales intake.
-8. As a developer, I want to create a GitHub Issue Agent template, so that repository maintenance can be supervised from Bruno.
+8. As a developer, I want to create a GitHub Issue Agent template, so that repository maintenance can be supervised from Bruno.Ai.
 9. As a content operator, I want to create a Social Content Agent template, so that recurring repurposing work has a clear starting point.
 10. As a user, I want created agents to persist after refresh, so that the dashboard feels reliable.
 11. As a user, I want every agent to have a detail page, so that I can inspect status, config, logs, approvals, and events in one place.
@@ -58,7 +58,7 @@ The core product primitive is a supervised agent operation: a user creates an ag
 40. As an operator, I want logs from multiple agents to stay separated, so that I can debug the right agent.
 41. As an operator, I want the dashboard to control a manually provisioned remote runner, so that the hosting model can be validated before automated cloud APIs are added.
 42. As an operator, I want a runner heartbeat, so that I can tell whether the remote execution environment is online, offline, or degraded.
-43. As a security-conscious user, I want runner API requests to be authenticated, so that only Bruno can control my runner.
+43. As a security-conscious user, I want runner API requests to be authenticated, so that only Bruno.Ai can control my runner.
 44. As a user, I want to create a runner automatically on DigitalOcean, so that I can get to a zero-setup hosted agent without manual server work.
 45. As a user, I want runner provisioning failures to be visible, so that I know whether setup is still pending or needs attention.
 46. As a user, I want to run multiple agents on one runner, so that I can operate a small agent fleet economically.
@@ -70,7 +70,7 @@ The core product primitive is a supervised agent operation: a user creates an ag
 52. As a user, I want to see estimated cost per running agent, so that I can decide whether to consolidate or scale.
 53. As a business owner, I want subscription plans to enforce runner and agent limits, so that pricing maps to usage.
 54. As a business owner, I want Stripe checkout, so that users can pay without manual invoicing.
-55. As a business owner, I want subscription status to sync into Bruno, so that cancelled or unpaid users cannot create new paid resources.
+55. As a business owner, I want subscription status to sync into Bruno.Ai, so that cancelled or unpaid users cannot create new paid resources.
 56. As a user, I want to configure Hermes with Telegram and BYOK model settings, so that I can use a real hosted Hermes agent.
 57. As a user, I want the Hermes agent to reply through Telegram, so that I can validate real end-to-end value.
 58. As a beta user, I want signup, agent creation, runner provisioning, lifecycle controls, logs, Telegram, BYOK, backups, billing, and error reporting to work together, so that I can run an agent without the founder's help.
@@ -80,7 +80,7 @@ The core product primitive is a supervised agent operation: a user creates an ag
 ## Implementation Decisions
 
 - Build a desktop-first web SaaS as the primary surface. The dashboard should be mobile-responsive from day one, but native desktop and native mobile apps are out of scope for the MVP.
-- Treat Bruno as an agent operations control plane, not a commodity Hermes hosting wrapper.
+- Treat Bruno.Ai as an agent operations control plane, not a commodity Hermes hosting wrapper.
 - Start with thin vertical slices that are clickable and testable at every milestone.
 - Defer real cloud provisioning until the dashboard, state model, lifecycle controls, event timeline, templates, config editor, approval queue, and runner abstraction are proven.
 - Model agents as durable records with name, status, template, timestamps, and later configuration.
@@ -100,7 +100,7 @@ The core product primitive is a supervised agent operation: a user creates an ag
 - Validate remote execution with one manually provisioned VPS before building automated Droplet provisioning.
 - The dashboard-to-runner connection should use runner registration, runner identity, authenticated API requests, and heartbeat.
 - The first automated cloud provider should be DigitalOcean because Droplets are simple and predictable.
-- Automated runner provisioning should use cloud-init or an equivalent bootstrapping path to install dependencies, start the runner, and register it with Bruno.
+- Automated runner provisioning should use cloud-init or an equivalent bootstrapping path to install dependencies, start the runner, and register it with Bruno.Ai.
 - Multiple agents should run on one runner before multiple runners become a priority.
 - Until the dedicated multi-agent resource and isolation workstream is complete, hosted placement
   must remain fail-closed at one agent per runner. Cold-deployment performance work must not claim

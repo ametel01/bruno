@@ -188,12 +188,12 @@ const PROGRESS_DESCRIPTIONS: Record<
   Exclude<PublicAgentDeploymentStage, "ready" | "failed">,
   string
 > = {
-  pending: "Bruno is preparing everything this agent needs.",
-  provisioning_runner: "Bruno is preparing everything this agent needs.",
-  configuring_hermes: "Bruno is preparing everything this agent needs.",
-  starting_gateway: "Bruno is preparing everything this agent needs.",
-  verifying_model: "Bruno is preparing everything this agent needs.",
-  connecting_telegram: "Bruno is connecting the dedicated Telegram bot.",
+  pending: "Bruno.Ai is preparing everything this agent needs.",
+  provisioning_runner: "Bruno.Ai is preparing everything this agent needs.",
+  configuring_hermes: "Bruno.Ai is preparing everything this agent needs.",
+  starting_gateway: "Bruno.Ai is preparing everything this agent needs.",
+  verifying_model: "Bruno.Ai is preparing everything this agent needs.",
+  connecting_telegram: "Bruno.Ai is connecting the dedicated Telegram bot.",
 };
 
 export const PUBLIC_AGENT_EXPERIENCE_STAGES = [
@@ -491,7 +491,7 @@ export function buildDeploymentPresentation(input: {
       terminal: false,
       canRetry: false,
       canStopSetup: true,
-      description: "Bruno is preparing replacement capacity automatically.",
+      description: "Bruno.Ai is preparing replacement capacity automatically.",
     };
   }
 

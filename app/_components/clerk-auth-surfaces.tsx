@@ -57,8 +57,8 @@ export function AccountControls() {
 export function SignInSurface() {
   return (
     <AuthSurface
-      description="Use your Bruno account to continue to the operator dashboard."
-      title="Sign in to Bruno"
+      description="Use your Bruno.Ai account to continue to your always-on operator."
+      title="Sign in to Bruno.Ai"
     >
       <SignIn
         fallbackRedirectUrl="/dashboard"
@@ -73,8 +73,8 @@ export function SignInSurface() {
 export function SignUpSurface() {
   return (
     <AuthSurface
-      description="Create a Bruno account to deploy and host an always-on AI personal assistant."
-      title="Create your Bruno account"
+      description="Create a Bruno.Ai account to start an always-on agent that learns how you run your one-person company."
+      title="Create your Bruno.Ai account"
     >
       <SignUp
         fallbackRedirectUrl="/dashboard"
@@ -99,10 +99,10 @@ function AuthSurface({
     <main className="auth-page">
       <section className="auth-card" aria-labelledby="auth-page-title">
         <div className="auth-copy">
-          <Link className="brand-mark" href="/" aria-label="Bruno home">
+          <Link className="brand-mark" href="/" aria-label="Bruno.Ai home">
             B
           </Link>
-          <p className="eyebrow">Bruno account</p>
+          <p className="eyebrow">Bruno.Ai account</p>
           <h1 id="auth-page-title">{title}</h1>
           <p>{description}</p>
         </div>

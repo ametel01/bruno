@@ -1,8 +1,8 @@
 /*
-THESIS: Bruno keeps a one-person company in motion through one calm operating loop, refusing AI glow, chatbot theater, and ledger spectacle.
+THESIS: Bruno.Ai is the always-on AI agent that keeps a one-person company in motion, learns from the founder, and improves through one calm operating loop.
 OWN-WORLD: Ivory and stone fields, deep-charcoal Satoshi, warm espresso rules, mint and lime signals, orbital linework, and softly precise product panels.
-STORY: Understand Bruno’s role, see the Action Inbox and Business Graph at work, then enter the shipped dashboard or create an agent.
-FIRST VIEWPORT: A quiet navigation bar leads into an oversized promise and two clear actions beside a high-fidelity illustrative Action Inbox crossed by Bruno’s circular signal pattern.
+STORY: Understand Bruno.Ai’s 24/7 role and learning loop, see the Action Inbox and Business Graph at work, then enter the shipped dashboard or create an agent.
+FIRST VIEWPORT: A quiet navigation bar leads into an always-on promise and two clear actions beside a high-fidelity illustrative Action Inbox crossed by Bruno.Ai’s circular signal pattern.
 FORM: Calm Operations Brandboard, the user-pinned hard reference; seed b32744ed.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
 */
@@ -160,7 +160,7 @@ export default function Home() {
   return (
     <main className={styles.page} id="top">
       <header className={styles.siteHeader}>
-        <Link className={styles.brandLink} href="#top" aria-label="Bruno home">
+        <Link className={styles.brandLink} href="#top" aria-label="Bruno.Ai home">
           <BrunoLogo className={styles.brandLockup} />
         </Link>
         <nav className={styles.siteNav} aria-label="Landing page navigation">
@@ -190,11 +190,10 @@ export default function Home() {
         </div>
 
         <div className={styles.heroCopyBlock}>
-          <h1 id="landing-title">Bruno runs your one-person business with you.</h1>
+          <h1 id="landing-title">Bruno.Ai runs your business with you. 24/7.</h1>
           <p className={styles.heroCopy}>
-            The operating system for a one-person company. Bruno understands what is happening,
-            finds the work that matters, closes the loops you permit, and brings you the decisions
-            only you can make.
+            Your always-on AI agent for a one-person company. It learns from every interaction,
+            correction, approval, and outcome—then gets better at the work you trust it to handle.
           </p>
           <div className={styles.heroActions}>
             <Link className={styles.primaryAction} href="/dashboard">
@@ -237,12 +236,12 @@ export default function Home() {
               <strong>3 decisions</strong>
             </div>
             <div>
-              <span>Bruno is doing</span>
-              <strong>4 active loops</strong>
+              <span>Always on</span>
+              <strong>24/7 agent</strong>
             </div>
             <div>
-              <span>Authority</span>
-              <strong>Ask first</strong>
+              <span>Learning</span>
+              <strong>Every interaction</strong>
             </div>
           </div>
           <ol className={styles.inboxList}>
@@ -268,50 +267,50 @@ export default function Home() {
         </div>
 
         <p className={styles.truthNote}>
-          Available today: create and operate agents in Bruno’s dashboard. The command center and
-          operating loops shown here are the approved direction—not a claim that they are already
-          shipped.
+          Available today: create and operate persistent agents in Bruno.Ai’s dashboard. The
+          Business Graph and operating loops shown here are the approved direction—not a claim that
+          they are already shipped.
         </p>
       </section>
 
-      <section className={styles.attributes} aria-label="Bruno brand principles">
+      <section className={styles.attributes} aria-label="Bruno.Ai brand principles">
         <div>
           <span className={styles.attributeIcon} data-tone="mint">
             <FeatureIcon name="calm" />
           </span>
           <strong>Calm</strong>
-          <p>Edited attention, not another noisy feed.</p>
+          <p>Watches continuously, surfaces only what matters.</p>
         </div>
         <div>
           <span className={styles.attributeIcon} data-tone="stone">
             <FeatureIcon name="proactive" />
           </span>
           <strong>Proactive</strong>
-          <p>Work arrives prepared, not waiting for a prompt.</p>
+          <p>Runs 24/7, finding work instead of waiting for prompts.</p>
         </div>
         <div>
           <span className={styles.attributeIcon} data-tone="stone">
             <FeatureIcon name="trust" />
           </span>
           <strong>Trustworthy</strong>
-          <p>Every action stays inside an explicit policy.</p>
+          <p>Learns from corrections without expanding its own authority.</p>
         </div>
         <div>
           <span className={styles.attributeIcon} data-tone="lime">
             <FeatureIcon name="operate" />
           </span>
           <strong>Operational</strong>
-          <p>Loops close, results are checked, state moves on.</p>
+          <p>Acts, verifies the result, and improves the next attempt.</p>
         </div>
       </section>
 
       <section className={styles.mechanismSection} id="how-it-works" aria-labelledby="graph-title">
         <div className={styles.mechanismCopy}>
-          <h2 id="graph-title">One company. One working model.</h2>
+          <h2 id="graph-title">One company. One agent that keeps learning.</h2>
           <p>
-            Not chat history. Not a bag of integrations. Bruno’s persistent Business Graph connects
-            customers, conversations, revenue, product, releases, commitments, and open loops—then
-            keeps them current as the business changes.
+            Bruno.Ai’s persistent Business Graph connects customers, conversations, revenue,
+            product, releases, commitments, and open loops. Every interaction, correction, approval,
+            and verified outcome makes that working model more useful.
           </p>
           <Link className={styles.inlineAction} href="/dashboard">
             See the operating surface
@@ -331,19 +330,19 @@ export default function Home() {
             <div className={styles.graphCore}>
               <BrunoLogo className={styles.graphMark} compact />
               <span>Business Graph</span>
-              <strong>What changed—and why it matters</strong>
+              <strong>What changed, what it learned, and why it matters</strong>
             </div>
             <span className={styles.orbitNode} data-position="top">
-              Understand
+              Observe
             </span>
             <span className={styles.orbitNode} data-position="right">
-              Act
+              Learn
             </span>
             <span className={styles.orbitNode} data-position="bottom">
-              Verify
+              Act
             </span>
             <span className={styles.orbitNode} data-position="left">
-              Update
+              Verify
             </span>
             <span className={styles.orbitSignal} aria-hidden="true" />
           </div>
@@ -359,8 +358,8 @@ export default function Home() {
         <div className={styles.loopsHeading}>
           <h2 id="loops-title">The work that keeps a small company alive.</h2>
           <p>
-            Bruno begins with six operating loops a solo SaaS founder already repeats every week,
-            then runs each one with persistent context and a clear finish line.
+            Bruno.Ai runs six essential operating loops continuously, carrying what it learns from
+            one interaction into the next instead of waiting for another prompt.
           </p>
         </div>
         <ol className={styles.loopList}>
@@ -379,8 +378,8 @@ export default function Home() {
         <div className={styles.policyPanel}>
           <h2 id="trust-title">Autonomy you can read.</h2>
           <p>
-            Authority is a business policy: always allow, ask, or never allow. Bruno can earn more
-            autonomy, but it cannot silently take it.
+            Learning improves how Bruno.Ai works, never what it is allowed to do. Authority stays an
+            explicit business policy: always allow, ask, or never allow.
           </p>
           <table className={styles.policyTable}>
             <caption className="visually-hidden">
@@ -409,7 +408,7 @@ export default function Home() {
         <div className={styles.impactPanel}>
           <h2>Measured like an employee.</h2>
           <p>
-            Bruno reports business outcomes instead of making model usage the headline. No figure
+            Bruno.Ai reports business outcomes instead of making model usage the headline. No figure
             appears until the product can support it with evidence.
           </p>
           <ul>
@@ -427,8 +426,8 @@ export default function Home() {
         <div className={styles.closingPattern} aria-hidden="true" />
         <BrunoLogo className={styles.closingMark} compact />
         <div>
-          <h2 id="closing-title">Stop prompting. Start managing.</h2>
-          <p>The founder sets the goals, policies, and judgment. Bruno keeps the company moving.</p>
+          <h2 id="closing-title">Always working. Always learning.</h2>
+          <p>Your goals and policies stay in charge. Bruno.Ai keeps improving within them.</p>
         </div>
         <div className={styles.closingActions}>
           <Link className={styles.darkAction} href="/dashboard">
@@ -441,8 +440,8 @@ export default function Home() {
 
       <footer className={styles.siteFooter}>
         <BrunoLogo className={styles.footerBrand} />
-        <p>The operating system for a one-person company.</p>
-        <span>Built to operate.</span>
+        <p>The always-on AI agent for a one-person company.</p>
+        <span>24/7 · Built to operate.</span>
       </footer>
     </main>
   );

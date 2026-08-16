@@ -1474,7 +1474,7 @@ function ensureDefaultCloudRunnerProvisioning(
 ): Promise<CreateRunnerProvisioningResult> {
   return createDigitalOceanRunnerForUser(userId, {
     provider: "digitalocean",
-    name: "Bruno Cloud Runner",
+    name: "Bruno.Ai Cloud Runner",
   });
 }
 

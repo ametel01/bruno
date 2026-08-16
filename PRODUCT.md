@@ -8,41 +8,47 @@ web
 
 ## Users
 
-Bruno is for solo SaaS founders running a one-person company. They already operate through a
+Bruno.Ai is for solo SaaS founders running a one-person company. They already operate through a
 predictable digital stack—such as Stripe, Gmail, Google Calendar, GitHub, Vercel, analytics,
 project tracking, and customer support—and need help keeping up with customers, revenue, support,
 leads, shipping, marketing, and product signals.
 
 The founder values completed work and operational awareness but should not need to understand or
 administer agent runtimes, models, context windows, skills, cron jobs, containers, or servers. They
-remain the manager: Bruno brings forward decisions, asks for approval according to clear business
+remain the manager: Bruno.Ai brings forward decisions, asks for approval according to clear business
 policies, and handles permitted work.
 
 ## Product Purpose
 
-Bruno is the operating system for a one-person company. It continuously understands the business,
-finds work that matters, prepares or completes the appropriate action, verifies the outcome, and
-keeps the founder informed only when their judgment is needed.
+Bruno.Ai is the 24/7, always-running AI agent for a one-person company. It continuously understands
+the business, finds work that matters, prepares or completes the appropriate action, verifies the
+outcome, and keeps the founder informed only when their judgment is needed.
+
+Bruno.Ai is self-improving in the operational sense: it learns the founder's goals, preferences,
+corrections, approvals, policies, and definitions of a good outcome through interaction. Each
+verified result updates its company context and improves how it recognizes, prepares, and handles
+similar work next time. Learning must never silently expand its authority or be described as
+unbounded model retraining or autonomous code modification without implementation evidence.
 
 Success means the founder spends less time prompting and coordinating software, misses fewer
 important business loops, and can see concrete time, revenue, retention, and customer outcomes
-attributable to Bruno.
+attributable to Bruno.Ai.
 
 ## Positioning
 
-Bruno is not a hosted-agent product or a general chat assistant. Its differentiated mechanism is a
+Bruno.Ai is not a hosted-agent product or a general chat assistant. Its differentiated mechanism is a
 persistent **Business Graph**: structured company state covering goals, customers, prospects,
 conversations, revenue, subscriptions, product, releases, metrics, commitments, experiments, and
 open loops.
 
-Business events update that graph. Bruno interprets their significance, decides whether action is
-needed, prepares or executes the action within policy, verifies the result, and updates company
-state. The founder manages the business through an Action Inbox and outcome reporting rather than
-through a stream of prompts.
+Business events and founder interactions update that graph. Bruno.Ai interprets their significance,
+decides whether action is needed, prepares or executes the action within policy, verifies the
+result, and carries what it learns into the next operating loop. The founder manages the business
+through an Action Inbox and outcome reporting rather than through a stream of prompts.
 
 ## Operating Context
 
-Bruno connects to the systems that already describe and run a solo SaaS company. The initial
+Bruno.Ai connects to the systems that already describe and run a solo SaaS company. The initial
 company picture is expected to combine email, revenue, source control, deployment, analytics,
 planning, and support data while keeping the underlying integrations focused on business-critical
 work.
@@ -63,7 +69,7 @@ The first operating loops are:
   objectives, and concrete next actions.
 
 The primary control surface is a founder command center. Its signature workflow is an Action Inbox
-that separates items needing review or approval from work already completed by Bruno. Core
+that separates items needing review or approval from work already completed by Bruno.Ai. Core
 monitoring and approval actions must remain usable on mobile even though the product is
 desktop-first.
 
@@ -72,17 +78,20 @@ desktop-first.
 - The current repository implements a substantial web control plane for creating, configuring,
   running, observing, approving, backing up, and recovering persistent Hermes agents. This is an
   infrastructure foundation, not the new lead customer promise.
-- The Business Graph, event-driven operating loops, company connectors, Action Inbox, and Bruno
+- The Business Graph, event-driven operating loops, company connectors, Action Inbox, and Bruno.Ai
   Impact reporting are the approved product direction; they must not be presented as already
   shipped without implementation evidence.
 - Autonomy is expressed as understandable business policies per system and action: always allow,
-  ask, or never allow. Bruno may suggest broader permission after repeated approvals but must not
+  ask, or never allow. Bruno.Ai may suggest broader permission after repeated approvals but must not
   silently expand authority.
-- Bruno should report business outcomes—time saved, revenue influenced, churn recovered, leads
+- Self-improvement comes from durable company context and reviewed feedback: interactions,
+  corrections, approvals, policy changes, and verified outcomes should improve subsequent work
+  while keeping authority explicit and auditable.
+- Bruno.Ai should report business outcomes—time saved, revenue influenced, churn recovered, leads
   followed up, support resolved, and insights found—rather than foregrounding tokens or model
   usage.
 - Agent runtimes are interchangeable infrastructure. Hermes is the current runtime foundation;
-  Bruno should own company context, policies, business state, workflows, user experience, and
+  Bruno.Ai should own company context, policies, business state, workflows, user experience, and
   outcomes rather than couple the product identity to Hermes.
 - Infrastructure, runtime selection, multi-agent orchestration, and model selection should remain
   invisible unless an operational exception genuinely requires founder attention.
@@ -93,10 +102,10 @@ desktop-first.
 
 ## Brand Commitments
 
-- Product name: **Bruno**.
+- Product name: **Bruno.Ai**.
 - Product mantra: **The operating system for a one-person company.**
-- Core promise: **Bruno runs your one-person business with you.**
-- Bruno should feel like a capable employee who understands the company and closes loops, not a
+- Core promise: **Bruno.Ai runs your one-person business with you, 24/7.**
+- Bruno.Ai should feel like a capable employee who understands the company and closes loops, not a
   chatbot, infrastructure console, or collection of AI experts.
 - Customer-facing language should describe business work, decisions, policies, and outcomes. Avoid
   making Hermes, OpenClaw, MCP, cron, skills, subagents, context windows, models, or VPS concepts
@@ -111,21 +120,23 @@ desktop-first.
   plane, lifecycle, approvals, events, runners, backups, cost estimates, and authentication modes.
 - `docs/PRD.md` documents the earlier fleet-control-plane thesis. It remains useful implementation
   history but does not override the customer direction in `docs/PIVOT.md`.
-- The repository does not yet contain validated customer testimonials or measured Bruno Impact
+- The repository does not yet contain validated customer testimonials or measured Bruno.Ai Impact
   outcomes. Future product work must not fabricate customers, revenue influence, time savings,
   conversion changes, or other proof.
 
 ## Product Principles
 
-1. **The founder manages; Bruno operates.** Bring decisions and exceptions to the founder instead
+1. **The founder manages; Bruno.Ai operates.** Bring decisions and exceptions to the founder instead
    of requiring them to continually invent prompts and workflows.
 2. **Understand the company before acting.** Ground every recommendation and action in persistent,
    structured business state rather than generic model memory.
-3. **Close loops, then verify outcomes.** Work is not complete when an action is generated; Bruno
+3. **Learn through interaction.** Treat founder corrections, approvals, preferences, and verified
+   outcomes as durable operating context that improves the next attempt.
+4. **Close loops, then verify outcomes.** Work is not complete when an action is generated; Bruno.Ai
    follows through, observes the result, and updates company state.
-4. **Earn autonomy through legible policy and evidence.** Keep authority explicit, approvals
+5. **Earn autonomy through legible policy and evidence.** Keep authority explicit, approvals
    understandable, actions auditable, and recovery available.
-5. **Measure work in business terms.** Optimize for time, revenue, retention, customer outcomes,
+6. **Measure work in business terms.** Optimize for time, revenue, retention, customer outcomes,
    and founder attention—not infrastructure novelty or token throughput.
 
 ## Accessibility & Inclusion

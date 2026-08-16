@@ -128,15 +128,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic Hermes agents now receive a complete managed `config.yaml`, `.env`, `SOUL.md`, workspace, and revision projection from a fresh runner state root without requiring native `hermes setup`.
 - Opt-in `202 Accepted` ready-mode agent creation for ChatGPT or Claude and Telegram inputs.
 - Exact `BRUNO_ALLOW_PUBLIC_DEVELOPMENT=true` opt-in for temporarily exposing a Vercel production-target deployment with the shared development user while keeping hosted development fail-closed by default and preserving runner-machine authentication.
-- Renamed the user-facing application and local package/database defaults to Bruno.
+- Renamed the user-facing application and local package/database defaults to Bruno.Ai.
 - Credential-free local Hermes contract smoke command (`agent:hermes:contract-smoke`) that launches the pinned workload image with a fake OpenAI-compatible provider, private API auth checks, durable log ingestion, restart/state persistence, managed-state backup/restore, and cleanup without claiming external Telegram network behavior.
 - Durable Hermes gateway log ingestion from the runner-managed `/opt/data` log stream, with source classification for gateway output versus container bootstrap diagnostics.
 - Safe Hermes runtime diagnostics for runner log transport, app-side log persistence, and assigned-runner cleanup.
 - Authenticated private Hermes readiness polling for runner-managed gateway launches, including config-revision and Telegram readiness checks before start/restart completion.
 - Versioned Hermes launch specs, server-side launch-spec building with only the generated private API-server key, authenticated runner JSON transport, and managed per-agent Hermes prompt, revision, and workspace projection that preserves Hermes-owned provider state.
-- Native `hermes setup` on the agent detail page through a short-lived interactive terminal, letting users choose a Hermes-supported subscription OAuth path, model, and optional messaging configuration without Bruno collecting provider API keys.
+- Native `hermes setup` on the agent detail page through a short-lived interactive terminal, letting users choose a Hermes-supported subscription OAuth path, model, and optional messaging configuration without Bruno.Ai collecting provider API keys.
 - Encrypted per-agent secret storage, owner-scoped secret status/update/revoke APIs, generated agent API keys, and secret-free backup/restore/delete handling for the Hermes setup path.
-- Pinned Hermes workload image artifact, local smoke verification, and a separate scanned GHCR publication workflow for the first real Bruno-managed Hermes runtime.
+- Pinned Hermes workload image artifact, local smoke verification, and a separate scanned GHCR publication workflow for the first real Bruno.Ai-managed Hermes runtime.
 - Server-only `BRUNO_AUTH_MODE` policy for registration-free loopback development, fail-closed Clerk production/custom-domain access, explicitly protected preview opt-in, and request-scoped shared-user resolution without changing runner-machine authentication.
 - Assigned-runner detail and cloud-runner cards now show labeled raw-infrastructure estimates and active-agent allocation with explicit unavailable and failure states while preserving health and capacity context.
 - Internal user resolution for Clerk sessions and registration-free development, with opaque unique Clerk links, concurrency-safe lazy creation, and an explicit count-only dry-run legacy claim that refuses ambiguous or conflicting ownership.
@@ -147,9 +147,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dedicated runner Docker image artifact that packages the existing runner bootstrap and service runtime without Droplet-side source checkout or GitHub credentials.
 - Server-side `BRUNO_RUNNER_IMAGE` selection for DigitalOcean cloud runner provisioning, including the public GHCR default, trimmed non-empty overrides, blank override validation, and safe runner image metadata in bootstrap/provisioning events.
 - Runner service heartbeat loop that reports cloud runner online status and capacity metrics using the persisted runner credential.
-- Initial Bruno root app page that points users to the dashboard route.
+- Initial Bruno.Ai root app page that points users to the dashboard route.
 - Database-backed `/health` endpoint and local Postgres migration tooling for operator checks.
-- Bruno product shell and initial routes for `/`, `/dashboard`, `/agents`, `/agents/:agentId`, and `/settings`, with empty states and placeholder-only settings surfaces.
+- Bruno.Ai product shell and initial routes for `/`, `/dashboard`, `/agents`, `/agents/:agentId`, and `/settings`, with empty states and placeholder-only settings surfaces.
 - Milestone 1 Postgres schema migration for `users`, `agents`, `agent_events`, and the `agent_status` enum without enabling agent creation or lifecycle behavior.
 - `POST /api/agents` for validated transactional creation of stopped persistent agents and matching `agent.created` events.
 - Database-backed `/agents` create/list workflow for creating stopped persistent agents and showing refreshed active records with stable links.
@@ -215,7 +215,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Completed the Bruno namespace migration across application copy, runtime configuration, generated
+- Completed the Bruno.Ai namespace migration across application copy, runtime configuration, generated
   credentials, database ownership keys, Docker resources, container images, and deployment workflows.
 
 - Runner releases are now SHA-only immutable candidates that must pass digest verification, critical-vulnerability scanning, and one explicitly authorized, serialized disposable release canary against a production-configured staged control plane before that exact deployment can be promoted; test processes cannot construct a live DigitalOcean client, linked-repository production builds cannot bypass the canary, rollout is one runner per reconciliation, and artifact-backed rollback halts further fleet work.
@@ -229,7 +229,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent records now persist explicit stopped/running desired state, and owners can read the latest deployment operation through `GET /api/agents/:agentId/deployment` without exposing leases, idempotency keys, or ownership internals.
 - Split deterministic local verification from provider-backed acceptance: `bun run verify` now ends after the production build, while `bun run verify:e2e` adds the full E2E suite.
 
-- Hermes launch now preserves the wizard-owned `/opt/data/config.yaml`, `.env`, `auth.json`, subscription, provider, model, and messaging state while Bruno merges only private API-server values and its prompt/revision files.
+- Hermes launch now preserves the wizard-owned `/opt/data/config.yaml`, `.env`, `auth.json`, subscription, provider, model, and messaging state while Bruno.Ai merges only private API-server values and its prompt/revision files.
 - DigitalOcean cloud runners now default back to the basic `$4` `s-1vcpu-512mb-10gb` tier for live Hermes validation, relying on the existing low-memory swap bootstrap instead of the previous 2 GB default.
 - Assigned-runner delete cleanup now calls the runner cleanup path before soft-delete, and runner cleanup removes the selected container plus the exact per-agent Hermes state root idempotently.
 - Runner-managed Hermes starts now launch the pinned workload image with `gateway run` on a private Docker network, projected `/opt/data` and `/workspace` mounts, bounded CPU/memory/PID limits, no published gateway port, label ownership, bounded graceful stops, and inspect validation before readiness.
@@ -255,7 +255,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   full-fixture deadline and retain only bounded allowlisted per-attempt outcomes. Successful evidence
   must end in `passed`; missing, hostile, oversized, and non-passing diagnostics fail closed without
   retaining provider responses, credentials, or exception text.
-- Protected snapshot builders now treat an empty Bruno Docker-network set as successful cleanup and
+- Protected snapshot builders now treat an empty Bruno.Ai Docker-network set as successful cleanup and
   retrieve authoritative completion evidence through a controller-owned pinned-SSH session that
   waits for cloud-init, runs sanitation, and reads the result before closing. The protected job no
   longer grants issue-write permission or places a GitHub callback token in builder user-data.
@@ -338,4 +338,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Telegram bot validation is bounded to one redacted `getMe` preflight with fixed origin, timeout, response-size, and safe failure mapping.
 - Active Telegram bot credentials now use stable server-only uniqueness metadata and database-enforced active-bot indexes while preserving the existing public secret fingerprint.
 - Hermes setup terminals use owner-scoped runner placement, stopped-workload and single-session gating, a 15-minute one-time WebSocket-subprotocol token stored only as a digest, bounded PTY messages, private no-port/no-Docker-socket containers, and no terminal-output logging or persistence.
-- Runner and app log ingestion now apply a shared defense-in-depth redaction corpus for OpenRouter keys, Telegram tokens, Bruno bearer/API tokens, secret-bearing environment assignments, sensitive URL query values, and fixed test canaries.
+- Runner and app log ingestion now apply a shared defense-in-depth redaction corpus for OpenRouter keys, Telegram tokens, Bruno.Ai bearer/API tokens, secret-bearing environment assignments, sensitive URL query values, and fixed test canaries.

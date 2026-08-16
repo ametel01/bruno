@@ -331,7 +331,7 @@ test("automatic replacement stays Preparing across refresh and list surfaces wit
       const progress = page.locator(".agent-deployment-progress-card");
       await expectCurrentStage(page, "Preparing your agent");
       await expect(progress).toContainText(
-        "Bruno is preparing replacement capacity automatically.",
+        "Bruno.Ai is preparing replacement capacity automatically.",
       );
       await expect(progress.locator(".deployment-stage-list li")).toHaveCount(3);
       await expect(progress.locator("[aria-live='polite']")).toHaveCount(1);

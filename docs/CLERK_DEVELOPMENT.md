@@ -1,16 +1,16 @@
 # Clerk development instance and production provider prerequisites
 
-This runbook is the operator contract for issue #232. It separates the approved Bruno
+This runbook is the operator contract for issue #232. It separates the approved Bruno.Ai
 development-instance work from the later production cutover in issue #240.
 
 ## Current status and authority
 
-Approval `de322ae8-c258-440e-a679-b74bafb61048` authorizes one dedicated **Bruno development**
+Approval `de322ae8-c258-440e-a679-b74bafb61048` authorizes one dedicated **Bruno.Ai development**
 Clerk application, verified email-code sign-in, development Google and Apple connections, an
 explicit CLI link, and development test keys written only to this repository's ignored local
 `.env.local` file.
 
-The approved issue #232 development setup is complete: the dedicated Bruno development
+The approved issue #232 development setup is complete: the dedicated Bruno.Ai development
 application is explicitly linked, verified email-code sign-in and development Google/Apple provider
 configuration are enabled, required local `.env.local` variable names are present, and a sanitized
 `clerk doctor --json` gate passed for that linked development app. This is setup, link, provider
@@ -24,15 +24,15 @@ before any of those operations.
 
 ## Safe development setup
 
-Run these steps from the Bruno repository on the approved host. Do not use verbose shell
+Run these steps from the Bruno.Ai repository on the approved host. Do not use verbose shell
 tracing, record the terminal, or redirect raw CLI output into a tracked file.
 
 1. Reauthenticate with `clerk auth login`. Confirm authentication locally, but do not publish the
    identity returned by `clerk whoami`.
 2. Inventory accessible applications with `clerk apps list`. Reuse an application only when its
-   name and environment unambiguously identify it as the dedicated Bruno development app.
+   name and environment unambiguously identify it as the dedicated Bruno.Ai development app.
    Never select Ask Siargao or a production instance. If no such app exists, create exactly one
-   with `clerk apps create "Bruno Development"`.
+   with `clerk apps create "Bruno.Ai Development"`.
 3. Capture the selected opaque application ID privately and run `clerk link --app <app-id>`.
    Confirm the linked-project check locally with `clerk doctor --json`; the doctor command may
    still report the expected missing-environment failure at this point. `clerk whoami` shows the
@@ -103,7 +103,7 @@ not a production credential set. Before the separately approved production cutov
    connection into the Google client. Treat the Clerk Dashboard value as authoritative; do not
    construct or reuse a development callback URL. Add authorized JavaScript origins only when the
    Clerk/Google configuration calls for them, using the final HTTPS production origins.
-4. After production approval, enter the client ID and secret into only the Bruno production
+4. After production approval, enter the client ID and secret into only the Bruno.Ai production
    Clerk connection. A matching redirect URI is exact, including scheme, host, path, and trailing
    slash behavior; a mismatch must block cutover.
 
@@ -129,7 +129,7 @@ custom credentials. Prepare these items without adding them to the development i
    Clerk-displayed HTTPS callback verbatim; do not substitute the application landing page, a
    development `accounts.dev` URL, localhost, or an inferred path.
 5. Support Apple's Hide My Email flow. Register every domain or individual source address that can
-   send Bruno mail to Apple relay addresses, publish the SPF DNS record Apple requires for each
+   send Bruno.Ai mail to Apple relay addresses, publish the SPF DNS record Apple requires for each
    outbound domain, and wait for Apple to verify it. The user-facing application/return domains and
    the outbound relay domains are separate allowlists; both must be ready before production smoke.
 

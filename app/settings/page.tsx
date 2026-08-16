@@ -79,7 +79,7 @@ export default async function SettingsPage() {
       active="settings"
       eyebrow=""
       title="Workspace settings"
-      description="Review the capacity behind Bruno, manage secure runner access, and keep planned company controls clearly separated from what is available today."
+      description="Review the capacity behind Bruno.Ai, manage secure runner access, and keep planned company controls clearly separated from what is available today."
       showHealthLink={false}
     >
       <div className="settings-page dashboard-page">

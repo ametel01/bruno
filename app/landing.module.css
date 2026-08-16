@@ -825,7 +825,7 @@
 
 .orbitNode {
   position: absolute;
-  z-index: 3;
+  z-index: 5;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--white);

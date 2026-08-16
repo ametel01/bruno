@@ -19,6 +19,7 @@ export function BrunoLogo({ className, compact = false }: BrunoLogoProps) {
           <span aria-hidden="true" style={{ color: "var(--bruno-logo-dot, currentColor)" }}>
             .
           </span>
+          Ai
         </span>
       )}
     </span>

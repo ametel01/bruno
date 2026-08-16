@@ -14,7 +14,7 @@ related_targets: ["app/agents/_components/create-agent-form.tsx","app/_component
 
 ## Visitor and job
 
-- A solo SaaS founder building and directing the operating team behind Bruno while retaining access to the shipped control-plane capabilities.
+- A solo SaaS founder building and directing the operating team behind Bruno.Ai while retaining access to the shipped control-plane capabilities.
 - Let the founder scan persisted roster state and capacity, operate existing agents, add an agent through guided setup, and reach technical provisioning only when an exception or audit requires it.
 - Keep the founder-facing reading order fixed: Agent Roster title and promise, Roster Pulse, Operating Roster, Add an Agent, then the bounded System Appendix.
 
@@ -24,12 +24,12 @@ related_targets: ["app/agents/_components/create-agent-form.tsx","app/_component
 - Preserve the complete existing workflow: authentication gating, roster load failures, desktop table and mobile agent records, lifecycle controls, deployment status, configuration and identity links, empty-state creation route, assistant selection, one-time model credential connection, Telegram bot token and user allowlist, safe retry/start-over behavior, cloud provisioning detail, and the System health route.
 - Keep technical provisioning subordinate to the founder's roster and setup outcomes. The primary topbar intentionally omits System health on `/agents`; the route appears only as the operator link that closes the System Appendix.
 - Every unavailable creation state must name the observed cause and recovery: invalid or disabled ready-creation configuration, failed assistant-connection loading, or no connected assistant. The notice must also warn against entering secrets and disclose that draft values are not saved.
-- Do not imply that the future Business Graph, business operating loops, Action Inbox, or Bruno Impact outcomes are already present on this surface. This redesign changes visual and information hierarchy, not workflow availability.
+- Do not imply that the future Business Graph, business operating loops, Action Inbox, or Bruno.Ai Impact outcomes are already present on this surface. This redesign changes visual and information hierarchy, not workflow availability.
 
 ## Direction and memorable moment
 
 - Chosen direction: Agent Roster within Founder Dispatch.
-- Extend the Company Daybook with warm grid paper, ledger ink, electric Bruno blue, citron emphasis, red-pencil exception states, League Gothic display type, square geometry, hard rules, and flat structural borders.
+- Extend the Company Daybook with warm grid paper, ledger ink, electric Bruno.Ai blue, citron emphasis, red-pencil exception states, League Gothic display type, square geometry, hard rules, and flat structural borders.
 - The saturated-blue Roster Pulse is the first operational block. Its four ruled measures turn infrastructure-backed data into a concise founder read without hiding what the values actually represent.
 - Operating Roster is a finite ruled enclosure, followed by a citron-headed Add an Agent section. The contrast makes guided creation the main action while keeping form labels, credentials, recovery states, and disabled controls plain and auditable.
 - A dark System Appendix closes the page. Cloud provisioning expands in place, and the single System health operator route sits in the closing ruled row rather than competing in the topbar.

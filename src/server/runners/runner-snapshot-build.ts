@@ -1147,7 +1147,7 @@ export function buildSnapshotBuilderBootstrap(input: {
     chmod 0600 /run/bruno-snapshot-builder/evidence.env
     cat > /etc/systemd/system/bruno-snapshot-finalize.service <<'BRUNO_SNAPSHOT_FINALIZE_UNIT'
     [Unit]
-    Description=Finalize sanitized Bruno runner snapshot evidence
+    Description=Finalize sanitized Bruno.Ai runner snapshot evidence
     After=cloud-final.service network-online.target
     Wants=network-online.target
 

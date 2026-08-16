@@ -47,7 +47,7 @@ describe("Hermes home projection", () => {
     expect(env).not.toContain(provider === "anthropic" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY");
   });
 
-  it("preserves Hermes-owned setup and merges only Bruno API settings", async () => {
+  it("preserves Hermes-owned setup and merges only Bruno.Ai API settings", async () => {
     tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const spec = sampleLaunchSpec();
     const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });

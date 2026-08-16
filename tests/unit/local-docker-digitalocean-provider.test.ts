@@ -24,11 +24,11 @@ describe("local Docker DigitalOcean provider", () => {
       commandBearerToken: "runner-command-token",
       endpointDiscovery: { type: "digitalocean_metadata" },
       runnerImage: "bruno-runner:local",
-      runnerName: "Bruno Cloud Runner",
+      runnerName: "Bruno.Ai Cloud Runner",
     });
 
     const created = await provider.createRunner({
-      name: "Bruno Cloud Runner",
+      name: "Bruno.Ai Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
@@ -167,11 +167,11 @@ describe("local Docker DigitalOcean provider", () => {
       endpointDiscovery: { type: "digitalocean_metadata" },
       enableSwap: true,
       runnerImage: "bruno-runner:local",
-      runnerName: "Bruno Cloud Runner",
+      runnerName: "Bruno.Ai Cloud Runner",
     });
 
     await provider.createRunner({
-      name: "Bruno Cloud Runner",
+      name: "Bruno.Ai Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
@@ -241,7 +241,7 @@ describe("local Docker DigitalOcean provider", () => {
     });
 
     await provider.createRunner({
-      name: "Bruno Cloud Runner",
+      name: "Bruno.Ai Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
@@ -265,7 +265,7 @@ describe("local Docker DigitalOcean provider", () => {
         docker: async () => ({ stdout: "ok\n", stderr: "" }),
       });
       await provider.createRunner({
-        name: "Bruno Cloud Runner",
+        name: "Bruno.Ai Cloud Runner",
         region: "sfo3",
         sizeSlug: "s-1vcpu-512mb-10gb",
         image: "ubuntu-24-04-x64",

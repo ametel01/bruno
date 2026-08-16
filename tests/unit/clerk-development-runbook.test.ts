@@ -11,12 +11,12 @@ describe("Clerk development runbook", () => {
 
     for (const requiredText of [
       "de322ae8-c258-440e-a679-b74bafb61048",
-      "Bruno development",
+      "Bruno.Ai development",
       "development setup is complete",
       "does not claim hosted browser",
       "clerk auth login",
       "clerk apps list",
-      'clerk apps create "Bruno Development"',
+      'clerk apps create "Bruno.Ai Development"',
       "clerk link --app <app-id>",
       "git check-ignore -q .env.local",
       "touch .env.local",

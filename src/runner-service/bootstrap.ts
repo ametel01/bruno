@@ -81,7 +81,7 @@ export async function bootstrapRegisteredRunner(
   const writeEnvFile = input.writeEnvFile ?? defaultWriteEnvFile;
   const appBaseUrl = normalizeBaseUrl(env.BRUNO_APP_URL);
   const endpointUrl = env.BRUNO_RUNNER_ENDPOINT_URL?.trim();
-  const runnerName = env.BRUNO_RUNNER_NAME?.trim() || "Bruno Cloud Runner";
+  const runnerName = env.BRUNO_RUNNER_NAME?.trim() || "Bruno.Ai Cloud Runner";
   const envFilePath = env.BRUNO_RUNNER_ENV_FILE?.trim();
   let runnerId = env.BRUNO_RUNNER_ID?.trim() ?? "";
   let credential = env.BRUNO_RUNNER_CREDENTIAL?.trim() ?? "";
