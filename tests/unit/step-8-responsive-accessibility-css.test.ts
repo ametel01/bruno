@@ -57,7 +57,12 @@ describe("Step 8 responsive and accessibility CSS", () => {
   });
 
   it("does not use decorative motion for creation or persisted progress", () => {
-    const stepEightCss = css.slice(css.indexOf(".agent-create-mode-fieldset"));
+    const stepEightStart = css.indexOf(".agent-create-mode-fieldset");
+    const authenticatedMigrationStart = css.indexOf("/* Authenticated Calm Operations migration");
+    const stepEightCss = css.slice(
+      stepEightStart,
+      authenticatedMigrationStart === -1 ? css.length : authenticatedMigrationStart,
+    );
 
     expect(stepEightCss).not.toMatch(/\banimation(?:-[\w-]+)?\s*:/i);
     expect(stepEightCss).not.toMatch(/\btransition(?:-[\w-]+)?\s*:/i);

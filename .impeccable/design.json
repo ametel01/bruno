@@ -289,11 +289,6 @@
         "name": "business-orbit",
         "value": "11s linear infinite",
         "purpose": "Moves one mint signal around the Business Graph; disabled for reduced motion."
-      },
-      {
-        "name": "workspace-presence",
-        "value": "3.8s cubic-bezier(0.16, 1, 0.3, 1) infinite",
-        "purpose": "Breathes the written authenticated presence signal; disabled for reduced motion."
       }
     ],
     "breakpoints": [

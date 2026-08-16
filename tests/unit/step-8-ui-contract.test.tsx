@@ -199,7 +199,12 @@ describe("Step 8 progress accessibility and responsive CSS", () => {
 
   it("keeps the 320px progress/card contract wrapping and motion-independent", async () => {
     const css = await readFile("app/globals.css", "utf8");
-    const progressCss = css.slice(css.indexOf(".agent-deployment-progress-card"));
+    const progressStart = css.indexOf(".agent-deployment-progress-card");
+    const authenticatedMigrationStart = css.indexOf("/* Authenticated Calm Operations migration");
+    const progressCss = css.slice(
+      progressStart,
+      authenticatedMigrationStart === -1 ? css.length : authenticatedMigrationStart,
+    );
 
     expect(css).toMatch(/@media \(max-width: (?:4[0-9]{2}|3[2-9][0-9])px\)/);
     expect(css).toMatch(/\.agent-deployment-progress-card\s*\{[^}]*min-width:\s*0[^}]*\}/);

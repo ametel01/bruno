@@ -6889,18 +6889,6 @@ h2 {
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 5px rgb(89 214 197 / 16%);
-  animation: bruno-presence 3.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
-}
-
-@keyframes bruno-presence {
-  0%,
-  70%,
-  100% {
-    box-shadow: 0 0 0 5px rgb(89 214 197 / 16%);
-  }
-  82% {
-    box-shadow: 0 0 0 9px rgb(89 214 197 / 4%);
-  }
 }
 
 :is(
@@ -8582,12 +8570,6 @@ h2 {
     )
     :where(.dashboard-system-notes, .settings-configuration-notes, .agents-cloud-status) {
     margin: 12px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-state-orbit > span {
-    animation: none;
   }
 }
 
