@@ -16,6 +16,7 @@ type CreateAgentFormProps = {
   maxNameLength: number;
   readyModeEnabled: boolean;
   modelConnections: ModelConnectionOption[];
+  unavailableMessage: string | null;
 };
 
 type SubmitState =
@@ -33,6 +34,7 @@ export function CreateAgentForm({
   maxNameLength,
   readyModeEnabled,
   modelConnections,
+  unavailableMessage,
 }: CreateAgentFormProps) {
   const router = useRouter();
   const nameRef = useRef<HTMLInputElement | null>(null);
@@ -193,8 +195,15 @@ export function CreateAgentForm({
       onSubmit={handleSubmit}
       aria-busy={submitting}
     >
-      {!readyModeEnabled ? (
-        <div className="safe-notice">Agent setup is temporarily unavailable.</div>
+      {unavailableMessage ? (
+        <div className="safe-notice" role="status">
+          <strong>Agent setup unavailable</strong>
+          <span>{unavailableMessage}</span>
+          <small>
+            Review the required fields below, but do not enter secrets yet. Draft values are not
+            saved.
+          </small>
+        </div>
       ) : null}
 
       <div className="field-group">

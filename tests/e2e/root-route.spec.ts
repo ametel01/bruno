@@ -36,7 +36,7 @@ test.afterEach(async ({ request }) => {
 
 const shellRoutes = [
   { path: "/dashboard", heading: "Founder dispatch" },
-  { path: "/agents", heading: "Your AI agents" },
+  { path: "/agents", heading: "Agent roster" },
   { path: "/settings", heading: "Workspace settings" },
 ] as const;
 

@@ -4142,9 +4142,9 @@ h2 {
   }
 }
 
-/* Founder Dispatch: the dashboard inherits the Company Daybook world without
-   changing the visual contract of the agent and settings routes. */
-.app-shell[data-active="dashboard"] {
+/* Founder Dispatch and Agent Roster share the Company Daybook world. Settings
+   remains an intentionally separate operational surface. */
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) {
   --background: #f2f0e8;
   --foreground: #172018;
   --muted: #4b544c;
@@ -4166,17 +4166,18 @@ h2 {
   color: var(--foreground);
 }
 
-.app-shell[data-active="dashboard"] ::selection {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) ::selection {
   background: var(--accent-soft);
   color: var(--foreground);
 }
 
-.app-shell[data-active="dashboard"] :where(a, button, summary):focus-visible {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :where(a, button, summary):focus-visible {
   outline-color: var(--accent);
   outline-offset: 4px;
 }
 
-.app-shell[data-active="dashboard"] .app-sidebar {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .app-sidebar {
   position: sticky;
   top: 0;
   min-height: 100svh;
@@ -4186,12 +4187,12 @@ h2 {
   padding: 28px 20px 22px;
 }
 
-.app-shell[data-active="dashboard"] .brand-block {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .brand-block {
   align-items: flex-start;
   gap: 11px;
 }
 
-.app-shell[data-active="dashboard"] .brand-mark {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .brand-mark {
   width: 46px;
   height: 54px;
   border: 0;
@@ -4204,13 +4205,13 @@ h2 {
   line-height: 1;
 }
 
-.app-shell[data-active="dashboard"] .brand-name {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .brand-name {
   font-size: 1.08rem;
   font-weight: 900;
   letter-spacing: 0.01em;
 }
 
-.app-shell[data-active="dashboard"] .brand-subtitle {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .brand-subtitle {
   max-width: 116px;
   margin-top: 5px;
   color: var(--muted);
@@ -4221,14 +4222,14 @@ h2 {
   text-transform: uppercase;
 }
 
-.app-shell[data-active="dashboard"] .nav-list {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .nav-list {
   gap: 0;
   margin-top: 44px;
   border-top: 1px solid var(--line-strong);
   counter-reset: dashboard-navigation;
 }
 
-.app-shell[data-active="dashboard"] .nav-link {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .nav-link {
   position: relative;
   min-height: 48px;
   justify-content: space-between;
@@ -4243,25 +4244,26 @@ h2 {
   counter-increment: dashboard-navigation;
 }
 
-.app-shell[data-active="dashboard"] .nav-link::before {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .nav-link::before {
   color: var(--muted);
   content: "0" counter(dashboard-navigation);
   font-size: 0.62rem;
   font-variant-numeric: tabular-nums;
 }
 
-.app-shell[data-active="dashboard"] .nav-link:hover {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .nav-link:hover {
   background: rgb(223 255 63 / 46%);
   color: var(--accent-strong);
 }
 
-.app-shell[data-active="dashboard"] .nav-link[aria-current="page"] {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .nav-link[aria-current="page"] {
   background: var(--accent-soft);
   box-shadow: inset 0 -2px 0 var(--warning);
   color: var(--foreground);
 }
 
-.app-shell[data-active="dashboard"] .sidebar-note {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .sidebar-note {
   border-color: var(--line-strong);
   color: var(--muted);
   font-size: 0.7rem;
@@ -4270,7 +4272,7 @@ h2 {
   text-transform: uppercase;
 }
 
-.app-shell[data-active="dashboard"] .status-dot {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .status-dot {
   width: 12px;
   height: 9px;
   border-radius: 0;
@@ -4278,18 +4280,18 @@ h2 {
   box-shadow: inset -3px 0 0 var(--accent-soft);
 }
 
-.app-shell[data-active="dashboard"] .shell-main {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .shell-main {
   width: min(100%, 1500px);
   padding: 34px clamp(22px, 3.8vw, 64px) 72px;
 }
 
-.app-shell[data-active="dashboard"] .topbar {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .topbar {
   align-items: flex-end;
   border-bottom: 2px solid var(--foreground);
   padding-bottom: 18px;
 }
 
-.app-shell[data-active="dashboard"] .eyebrow {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .eyebrow {
   width: fit-content;
   margin-bottom: 9px;
   background: var(--accent-soft);
@@ -4301,7 +4303,7 @@ h2 {
   padding: 6px 9px 5px;
 }
 
-.app-shell[data-active="dashboard"] h1 {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) h1 {
   max-width: 760px;
   font-family: var(--font-bruno-display), sans-serif;
   font-size: clamp(3.8rem, 7vw, 6rem);
@@ -4312,7 +4314,7 @@ h2 {
   text-transform: uppercase;
 }
 
-.app-shell[data-active="dashboard"] .page-description {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .page-description {
   max-width: 66ch;
   margin: 18px 0 32px;
   color: var(--muted);
@@ -4320,7 +4322,7 @@ h2 {
   line-height: 1.6;
 }
 
-.app-shell[data-active="dashboard"] .health-link {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .health-link {
   min-height: 46px;
   border-color: var(--foreground);
   border-radius: 0;
@@ -4332,19 +4334,20 @@ h2 {
   text-transform: uppercase;
 }
 
-.app-shell[data-active="dashboard"] .health-link:hover {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .health-link:hover {
   background: var(--accent);
   color: #ffffff;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-page {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-page {
   gap: 28px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse,
-.app-shell[data-active="dashboard"] .dashboard-infrastructure,
-.app-shell[data-active="dashboard"] .dashboard-system-notes,
-.app-shell[data-active="dashboard"]
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-fleet-pulse,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-infrastructure,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-system-notes,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
   .dashboard-page
   :where(
     .agent-list-panel,
@@ -4358,21 +4361,24 @@ h2 {
   box-shadow: none;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-fleet-pulse {
   overflow: hidden;
   border: 2px solid var(--foreground);
   background: var(--panel);
   box-shadow: 0 22px 44px rgb(21 94 239 / 16%);
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse-heading {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-fleet-pulse-heading {
   align-items: center;
   background: var(--accent);
   color: #ffffff;
   padding: 18px 22px 16px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse-heading p {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-fleet-pulse-heading
+  p {
   color: rgb(255 255 255 / 76%);
   font-family: inherit;
   font-size: 0.68rem;
@@ -4380,7 +4386,9 @@ h2 {
   letter-spacing: 0.07em;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse-heading h2 {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-fleet-pulse-heading
+  h2 {
   font-family: var(--font-bruno-display), sans-serif;
   font-size: clamp(2.35rem, 4vw, 3.7rem);
   font-weight: 400;
@@ -4389,7 +4397,9 @@ h2 {
   text-transform: uppercase;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse-heading > span {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-fleet-pulse-heading
+  > span {
   border: 1px solid rgb(255 255 255 / 56%);
   color: #ffffff;
   font-size: 0.66rem;
@@ -4398,18 +4408,26 @@ h2 {
   text-transform: uppercase;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-fleet-pulse
+  dl {
   border-top: 2px solid var(--foreground);
   background: var(--panel);
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-fleet-pulse
+  dl
+  > div {
   gap: 8px;
   border-color: var(--line-strong);
   padding: 18px 18px 17px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div::before {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-fleet-pulse
+  dl
+  > div::before {
   top: 0;
   left: 0;
   width: 100%;
@@ -4418,13 +4436,19 @@ h2 {
   background: var(--line);
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div[data-state="active"]::before,
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div[data-state="clear"]::before {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-fleet-pulse
+  dl
+  > div[data-state="active"]::before,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-fleet-pulse
+  dl
+  > div[data-state="clear"]::before {
   background: var(--accent);
   box-shadow: none;
 }
 
-.app-shell[data-active="dashboard"]
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
   .dashboard-fleet-pulse
   dl
   > div[data-state="attention"]::before {
@@ -4432,7 +4456,9 @@ h2 {
   box-shadow: none;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dt {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-fleet-pulse
+  dt {
   color: var(--muted);
   font-family: inherit;
   font-size: 0.68rem;
@@ -4440,30 +4466,42 @@ h2 {
   letter-spacing: 0.06em;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dd {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-fleet-pulse
+  dd {
   display: grid;
   gap: 3px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dd strong {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-fleet-pulse
+  dd
+  strong {
   font-family: var(--font-bruno-display), sans-serif;
   font-size: 2.45rem;
   font-weight: 400;
   letter-spacing: -0.02em;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dd span {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-fleet-pulse
+  dd
+  span {
   min-height: 2.5em;
   color: var(--muted);
   font-size: 0.74rem;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-work-queue > section {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-work-queue
+  > section {
   max-height: 520px;
   overflow: auto;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-work-queue .approval-panel {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-work-queue
+  .approval-panel {
   border: 2px solid var(--foreground);
   background-color: var(--panel);
   background-image: linear-gradient(to bottom, transparent 27px, rgb(23 32 24 / 7%) 28px);
@@ -4471,7 +4509,9 @@ h2 {
   padding: 0;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-work-queue .section-heading {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-work-queue
+  .section-heading {
   position: sticky;
   z-index: 3;
   top: 0;
@@ -4482,9 +4522,17 @@ h2 {
   padding: 18px 22px 16px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-work-queue .section-heading h2,
-.app-shell[data-active="dashboard"] .dashboard-workbench .section-heading h2,
-.app-shell[data-active="dashboard"] .dashboard-section-heading h2 {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-work-queue
+  .section-heading
+  h2,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-workbench
+  .section-heading
+  h2,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-section-heading
+  h2 {
   font-family: var(--font-bruno-display), sans-serif;
   font-size: clamp(2.25rem, 4vw, 3.45rem);
   font-weight: 400;
@@ -4493,8 +4541,14 @@ h2 {
   text-transform: uppercase;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-work-queue .section-heading span,
-.app-shell[data-active="dashboard"] .dashboard-workbench .section-heading span {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-work-queue
+  .section-heading
+  span,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-workbench
+  .section-heading
+  span {
   color: var(--foreground);
   font-size: 0.66rem;
   font-weight: 900;
@@ -4502,18 +4556,18 @@ h2 {
   text-transform: uppercase;
 }
 
-.app-shell[data-active="dashboard"]
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
   .dashboard-work-queue
   :where(.approval-list, .activity-empty-state, .safe-error) {
   margin: 0 22px 22px;
 }
 
-.app-shell[data-active="dashboard"] .approval-list {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .approval-list {
   gap: 0;
   counter-reset: dashboard-decisions;
 }
 
-.app-shell[data-active="dashboard"] .approval-item {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .approval-item {
   position: relative;
   min-height: 120px;
   gap: 11px;
@@ -4522,7 +4576,7 @@ h2 {
   counter-increment: dashboard-decisions;
 }
 
-.app-shell[data-active="dashboard"] .approval-item::before {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .approval-item::before {
   position: absolute;
   top: 20px;
   left: 0;
@@ -4538,31 +4592,34 @@ h2 {
   font-weight: 900;
 }
 
-.app-shell[data-active="dashboard"] .approval-item-header a,
-.app-shell[data-active="dashboard"] .agent-table a,
-.app-shell[data-active="dashboard"] .activity-agent-context a {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .approval-item-header a,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .agent-table a,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .activity-agent-context
+  a {
   color: var(--accent-strong);
   text-decoration-color: var(--accent-soft);
   text-decoration-thickness: 3px;
   text-underline-offset: 3px;
 }
 
-.app-shell[data-active="dashboard"] .approval-item h3 {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .approval-item h3 {
   font-size: 1.02rem;
   font-weight: 900;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-workbench {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-workbench {
   grid-template-columns: minmax(0, 1.4fr) minmax(330px, 0.8fr);
   gap: 28px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-agent-column,
-.app-shell[data-active="dashboard"] .dashboard-activity-column {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-agent-column,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-activity-column {
   min-width: 0;
 }
 
-.app-shell[data-active="dashboard"]
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
   .dashboard-workbench
   :where(.agent-list-panel, .activity-feed-panel) {
   border: 1px solid var(--foreground);
@@ -4570,7 +4627,9 @@ h2 {
   padding: 0 20px 20px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-agent-column .empty-state {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-agent-column
+  .empty-state {
   min-height: 0;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -4578,12 +4637,16 @@ h2 {
   padding: 20px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-activity-column .activity-empty-state {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-activity-column
+  .activity-empty-state {
   min-height: 0;
   padding-block: 18px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-workbench .section-heading {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-workbench
+  .section-heading {
   position: sticky;
   z-index: 2;
   top: 0;
@@ -4594,28 +4657,30 @@ h2 {
   padding: 18px 20px 15px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-activity-column > section {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-activity-column
+  > section {
   max-height: 720px;
 }
 
-.app-shell[data-active="dashboard"] .agent-table th,
-.app-shell[data-active="dashboard"] .agent-table td {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .agent-table th,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .agent-table td {
   border-color: var(--line-strong);
 }
 
-.app-shell[data-active="dashboard"] .agent-table th {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .agent-table th {
   color: var(--muted);
   font-size: 0.68rem;
   font-weight: 900;
   letter-spacing: 0.05em;
 }
 
-.app-shell[data-active="dashboard"]
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
   :where(.status-pill, .deployment-status-label, .deleted-agent-pill) {
   border-radius: 0;
 }
 
-.app-shell[data-active="dashboard"] .status-pill {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .status-pill {
   min-height: 26px;
   border-color: var(--foreground);
   background: var(--panel-subtle);
@@ -4625,25 +4690,27 @@ h2 {
   text-transform: uppercase;
 }
 
-.app-shell[data-active="dashboard"] .activity-feed,
-.app-shell[data-active="dashboard"] .runtime-log-list,
-.app-shell[data-active="dashboard"] .manual-runner-list {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .activity-feed,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .runtime-log-list,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .manual-runner-list {
   gap: 0;
 }
 
-.app-shell[data-active="dashboard"]
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
   :where(.activity-feed-item, .runtime-log-item, .manual-runner-item) {
   border-color: var(--line-strong);
   padding-block: 16px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-infrastructure {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-infrastructure {
   border: 1px solid var(--foreground);
   background: var(--panel-subtle);
   padding: 0;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-section-heading {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-section-heading {
   align-items: flex-end;
   margin: 0;
   border-bottom: 2px solid var(--foreground);
@@ -4652,54 +4719,68 @@ h2 {
   padding: 20px 22px 18px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-section-heading p {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-section-heading
+  p {
   color: rgb(255 255 255 / 70%);
   font-family: inherit;
   font-size: 0.66rem;
   letter-spacing: 0.06em;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-section-heading > span {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-section-heading
+  > span {
   color: var(--accent-soft);
   font-size: 0.68rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-infrastructure-grid {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-infrastructure-grid {
   gap: 0;
   padding: 0;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-cost-ledger {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-cost-ledger {
   border-top: 1px solid var(--foreground);
   background: var(--panel);
 }
 
-.app-shell[data-active="dashboard"] .dashboard-infrastructure-grid > section,
-.app-shell[data-active="dashboard"] .dashboard-log-strip {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-infrastructure-grid
+  > section,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-log-strip {
   max-height: 650px;
   border: 0;
   background: var(--panel);
 }
 
-.app-shell[data-active="dashboard"] .dashboard-infrastructure-grid > section + section {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-infrastructure-grid
+  > section
+  + section {
   border-left: 1px solid var(--foreground);
 }
 
-.app-shell[data-active="dashboard"] .dashboard-log-strip {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-log-strip {
   grid-column: 1 / -1;
   border-bottom: 1px solid var(--foreground);
 }
 
-.app-shell[data-active="dashboard"] .dashboard-log-strip > section {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-log-strip
+  > section {
   max-height: 420px;
   overflow: auto;
   border: 0;
   background: transparent;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-infrastructure-grid .section-heading {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-infrastructure-grid
+  .section-heading {
   position: sticky;
   z-index: 2;
   top: 0;
@@ -4709,33 +4790,43 @@ h2 {
   padding: 16px 18px 13px;
 }
 
-.app-shell[data-active="dashboard"]
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
   .dashboard-infrastructure-grid
   > section
   > :where(.manual-runner-list, .cloud-runner-list, .activity-empty-state, .safe-error) {
   margin: 0 18px 18px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-system-notes {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-system-notes {
   border: 0;
   border-top: 1px solid var(--foreground);
   background: var(--panel);
   padding: 18px 20px;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-system-notes summary strong {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-system-notes
+  summary
+  strong {
   font-size: 0.86rem;
   font-weight: 900;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
-.app-shell[data-active="dashboard"] .dashboard-system-notes summary small,
-.app-shell[data-active="dashboard"] .dashboard-system-notes summary > span:last-child {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-system-notes
+  summary
+  small,
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  .dashboard-system-notes
+  summary
+  > span:last-child {
   color: var(--muted);
 }
 
-.app-shell[data-active="dashboard"] :where(.primary-button, .secondary-button, .disabled-button) {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :where(.primary-button, .secondary-button, .disabled-button) {
   min-height: 46px;
   border-radius: 0;
   font-size: 0.7rem;
@@ -4744,191 +4835,693 @@ h2 {
   text-transform: uppercase;
 }
 
-.app-shell[data-active="dashboard"] .primary-button {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .primary-button {
   border-color: var(--accent);
   background: var(--accent);
   color: #ffffff;
 }
 
-.app-shell[data-active="dashboard"] .primary-button:hover {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .primary-button:hover {
   border-color: var(--accent-strong);
   background: var(--accent-strong);
   box-shadow: 0 12px 28px rgb(21 94 239 / 24%);
   transform: translateY(-2px);
 }
 
-.app-shell[data-active="dashboard"] .secondary-button {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .secondary-button {
   border-color: var(--foreground);
   background: transparent;
 }
 
-.app-shell[data-active="dashboard"] .secondary-button:hover {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .secondary-button:hover {
   background: var(--accent-soft);
   color: var(--foreground);
 }
 
-.app-shell[data-active="dashboard"] :where(.safe-error, .approval-action-error) {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :where(.safe-error, .approval-action-error) {
   border: 1px solid var(--warning);
   border-radius: 0;
   background: #f8e9e5;
   color: #6e1c1c;
 }
 
-.app-shell[data-active="dashboard"] * {
+:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) * {
   scrollbar-color: var(--accent) var(--panel-subtle);
   scrollbar-width: thin;
 }
 
 @media (max-width: 1120px) {
-  .app-shell[data-active="dashboard"] .dashboard-workbench {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-workbench {
     grid-template-columns: 1fr;
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-work-queue {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-work-queue {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 860px) {
-  .app-shell[data-active="dashboard"] {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .app-shell[data-active="dashboard"] .app-sidebar {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .app-sidebar {
     position: static;
     height: auto;
     min-height: auto;
     padding: 16px;
   }
 
-  .app-shell[data-active="dashboard"] .brand-block {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .brand-block {
     align-items: center;
   }
 
-  .app-shell[data-active="dashboard"] .brand-subtitle {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .brand-subtitle {
     max-width: none;
   }
 
-  .app-shell[data-active="dashboard"] .nav-list {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .nav-list {
     grid-auto-flow: column;
     grid-auto-columns: minmax(110px, 1fr);
     margin-top: 16px;
     border-left: 1px solid var(--line-strong);
   }
 
-  .app-shell[data-active="dashboard"] .nav-link {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .nav-link {
     border-right: 1px solid var(--line-strong);
   }
 
-  .app-shell[data-active="dashboard"] .sidebar-note {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .sidebar-note {
     display: none;
   }
 
-  .app-shell[data-active="dashboard"] .shell-main {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .shell-main {
     padding: 28px 16px 48px;
   }
 
-  .app-shell[data-active="dashboard"] .topbar {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .topbar {
     align-items: stretch;
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-page {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-page {
     gap: 18px;
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-agent-column .empty-state {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-agent-column
+    .empty-state {
     grid-template-columns: 1fr;
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-fleet-pulse
+    dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div,
-  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div:first-child {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-fleet-pulse
+    dl
+    > div,
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-fleet-pulse
+    dl
+    > div:first-child {
     border-top: 1px solid var(--line-strong);
     border-left: 1px solid var(--line-strong);
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div:nth-child(odd) {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-fleet-pulse
+    dl
+    > div:nth-child(odd) {
     border-left: 0;
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-work-queue > section,
-  .app-shell[data-active="dashboard"] .dashboard-activity-column > section,
-  .app-shell[data-active="dashboard"] .dashboard-infrastructure-grid > section,
-  .app-shell[data-active="dashboard"] .dashboard-log-strip > section {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-work-queue
+    > section,
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-activity-column
+    > section,
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-infrastructure-grid
+    > section,
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-log-strip
+    > section {
     max-height: none;
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-infrastructure-grid {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-infrastructure-grid {
     grid-template-columns: 1fr;
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-infrastructure-grid > section + section {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-infrastructure-grid
+    > section
+    + section {
     border-top: 1px solid var(--foreground);
     border-left: 0;
   }
 
-  .app-shell[data-active="dashboard"] .approval-item {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .approval-item {
     padding-left: 0;
     padding-top: 68px;
   }
 
-  .app-shell[data-active="dashboard"] .approval-item::before {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .approval-item::before {
     top: 16px;
   }
 
-  .app-shell[data-active="dashboard"] .agent-table-wrap {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .agent-table-wrap {
     display: none;
   }
 
-  .app-shell[data-active="dashboard"] .mobile-agent-list {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .mobile-agent-list {
     display: grid;
   }
 }
 
 @media (max-width: 460px) {
-  .app-shell[data-active="dashboard"] h1 {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) h1 {
     font-size: 3.35rem;
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse-heading,
-  .app-shell[data-active="dashboard"] .dashboard-work-queue .section-heading,
-  .app-shell[data-active="dashboard"] .dashboard-workbench .section-heading,
-  .app-shell[data-active="dashboard"] .dashboard-infrastructure-grid .section-heading,
-  .app-shell[data-active="dashboard"] .dashboard-section-heading {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-fleet-pulse-heading,
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-work-queue
+    .section-heading,
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-workbench
+    .section-heading,
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-infrastructure-grid
+    .section-heading,
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-section-heading {
     display: grid;
     gap: 10px;
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-system-notes summary > span:last-child {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-system-notes
+    summary
+    > span:last-child {
     font-size: 0;
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-system-notes summary > span:last-child::after {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-system-notes
+    summary
+    > span:last-child::after {
     content: "+";
     font-size: 1rem;
   }
 
-  .app-shell[data-active="dashboard"]
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
     .dashboard-system-notes[open]
     summary
     > span:last-child::after {
     content: "−";
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-fleet-pulse
+    dl
+    > div {
     padding: 16px 14px 14px;
   }
 
-  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse dd strong {
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+    .dashboard-fleet-pulse
+    dd
+    strong {
     font-size: 2.1rem;
   }
 
-  .app-shell[data-active="dashboard"]
+  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
     .dashboard-work-queue
     :where(.approval-list, .activity-empty-state, .safe-error) {
     margin-inline: 16px;
+  }
+}
+
+/* Agent Roster: a ruled operating ledger that extends Founder Dispatch while
+   preserving the complete agent lifecycle and creation controls. */
+.app-shell[data-active="agents"] .agents-page {
+  gap: 28px;
+}
+
+.app-shell[data-active="agents"]
+  :where(
+    .agents-workspace-overview,
+    .agent-list-panel,
+    .agent-creation-panel,
+    .agents-system-appendix,
+    .agents-cloud-status
+  ) {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.app-shell[data-active="agents"] .agents-workspace-overview {
+  border: 2px solid var(--foreground);
+}
+
+.app-shell[data-active="agents"] .agent-list-panel {
+  overflow: hidden;
+  border: 1px solid var(--foreground);
+  background: var(--panel);
+  padding: 0 20px 20px;
+}
+
+.app-shell[data-active="agents"] .agent-list-panel .section-heading {
+  align-items: flex-end;
+  margin: 0 -20px 18px;
+  border-bottom: 2px solid var(--foreground);
+  background: var(--panel);
+  padding: 18px 20px 15px;
+}
+
+.app-shell[data-active="agents"] .agent-list-panel .empty-state {
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  padding: 26px 28px;
+}
+
+.app-shell[data-active="agents"]
+  :where(.agent-list-panel .section-heading h2, .agent-creation-heading h2) {
+  font-family: var(--font-bruno-display), sans-serif;
+  font-size: clamp(2.25rem, 4vw, 3.45rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 0.92;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="agents"]
+  :where(.agent-list-panel .section-heading span, .agent-creation-heading > span) {
+  color: var(--foreground);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="agents"] .agent-table th,
+.app-shell[data-active="agents"] .agent-table td {
+  border-color: var(--line-strong);
+}
+
+.app-shell[data-active="agents"] .agent-table th {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.app-shell[data-active="agents"] .agent-table td {
+  padding-block: 16px;
+}
+
+.app-shell[data-active="agents"] .agent-table a,
+.app-shell[data-active="agents"] .mobile-agent-title-group a,
+.app-shell[data-active="agents"] .form-helper a {
+  color: var(--accent-strong);
+  text-decoration-color: var(--accent-soft);
+  text-decoration-thickness: 3px;
+  text-underline-offset: 3px;
+}
+
+.app-shell[data-active="agents"]
+  :where(.status-pill, .deployment-status-label, .connection-status, .provisioning-phase-list li) {
+  border-radius: 0;
+}
+
+.app-shell[data-active="agents"] .status-pill {
+  min-height: 26px;
+  border-color: var(--foreground);
+  background: var(--panel-subtle);
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  padding-inline: 8px;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="agents"] .agent-creation-panel {
+  overflow: hidden;
+  border: 2px solid var(--foreground);
+  background-color: var(--panel);
+  background-image: linear-gradient(to bottom, transparent 27px, rgb(23 32 24 / 7%) 28px);
+  background-size: 100% 28px;
+}
+
+.app-shell[data-active="agents"] .agent-creation-heading {
+  align-items: flex-end;
+  border-bottom: 2px solid var(--foreground);
+  background: var(--accent-soft);
+  padding: 18px 22px 16px;
+}
+
+.app-shell[data-active="agents"] .agent-creation-body {
+  background: rgb(248 247 241 / 94%);
+  padding: clamp(22px, 4vw, 42px);
+}
+
+.app-shell[data-active="agents"] .one-click-agent-form {
+  max-width: 880px;
+  gap: 24px;
+}
+
+.app-shell[data-active="agents"] .field-group {
+  gap: 8px;
+}
+
+.app-shell[data-active="agents"]
+  :where(.field-group label, .assistant-choice-fieldset legend, .ready-credential-fieldset legend) {
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+}
+
+.app-shell[data-active="agents"]
+  :where(.field-group input, .field-group select, .field-group textarea) {
+  border-radius: 0;
+  border-color: var(--foreground);
+  background: #ffffff;
+}
+
+.app-shell[data-active="agents"]
+  :where(.field-group input, .field-group select, .field-group textarea):focus {
+  border-color: var(--accent);
+  outline: 3px solid var(--accent-soft);
+  outline-offset: 2px;
+}
+
+.app-shell[data-active="agents"] .assistant-choice-list {
+  gap: 0;
+  border-top: 1px solid var(--foreground);
+  border-left: 1px solid var(--foreground);
+}
+
+.app-shell[data-active="agents"] .assistant-choice-card {
+  min-height: 78px;
+  border-width: 0 1px 1px 0;
+  border-color: var(--foreground);
+  border-radius: 0;
+  background: var(--panel);
+  padding: 15px;
+}
+
+.app-shell[data-active="agents"] .assistant-choice-card[data-selected="true"] {
+  background: rgb(223 255 63 / 46%);
+  box-shadow: inset 0 -3px 0 var(--accent);
+}
+
+.app-shell[data-active="agents"] .connection-key-field {
+  border-color: var(--line-strong);
+  border-radius: 0;
+  background: var(--panel-subtle);
+}
+
+.app-shell[data-active="agents"] .one-click-summary {
+  border: 1px solid var(--foreground);
+  border-left-width: 1px;
+  background: var(--panel-subtle);
+  padding: 14px 16px;
+}
+
+.app-shell[data-active="agents"] .agent-creation-actions {
+  border-color: var(--foreground);
+  padding-top: 20px;
+}
+
+.app-shell[data-active="agents"] :where(.form-message, .safe-notice) {
+  border-radius: 0;
+}
+
+.app-shell[data-active="agents"] .safe-notice {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--warning);
+  background: #f8e9e5;
+  color: #6e1c1c;
+  line-height: 1.45;
+  padding: 14px 16px;
+}
+
+.app-shell[data-active="agents"] .safe-notice strong {
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="agents"] .safe-notice small {
+  color: #6e1c1c;
+  font-size: 0.76rem;
+}
+
+.app-shell[data-active="agents"] .primary-button:disabled {
+  border-color: #747b75;
+  background: #d9d8d0;
+  box-shadow: none;
+  color: #303831;
+  opacity: 1;
+  transform: none;
+}
+
+.app-shell[data-active="agents"] .mobile-agent-list {
+  gap: 0;
+}
+
+.app-shell[data-active="agents"] .mobile-agent-card {
+  border-color: var(--line-strong);
+  padding-block: 18px;
+}
+
+.app-shell[data-active="agents"] .mobile-agent-card:first-child {
+  padding-top: 2px;
+}
+
+.app-shell[data-active="agents"] .mobile-agent-metadata {
+  grid-template-columns: minmax(0, 0.6fr) minmax(0, 1.4fr);
+  gap: 12px;
+  border-block: 1px solid var(--line);
+  padding-block: 12px;
+}
+
+.app-shell[data-active="agents"] .agents-system-appendix {
+  overflow: hidden;
+  border: 1px solid var(--foreground);
+  background: var(--panel-subtle);
+}
+
+.app-shell[data-active="agents"] .agents-cloud-status {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.app-shell[data-active="agents"] .agents-cloud-status summary {
+  min-height: 82px;
+  border-bottom: 0;
+  background: var(--foreground);
+  color: #ffffff;
+  margin: 0;
+  padding: 18px 22px;
+}
+
+.app-shell[data-active="agents"] .agents-cloud-status summary strong {
+  font-family: var(--font-bruno-display), sans-serif;
+  font-size: clamp(2.1rem, 4vw, 3.15rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 0.92;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="agents"] .agents-cloud-status summary small,
+.app-shell[data-active="agents"] .agents-cloud-status summary > span:last-child {
+  color: var(--accent-soft);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="agents"] .agents-cloud-status[open] summary {
+  border-bottom: 2px solid var(--foreground);
+  margin: 0;
+  padding: 18px 22px;
+}
+
+.app-shell[data-active="agents"] .agents-cloud-status > .cloud-runner-panel {
+  background: var(--panel);
+  padding: 0 20px 20px;
+}
+
+.app-shell[data-active="agents"] .agents-cloud-status .section-heading {
+  align-items: flex-end;
+  margin: 0 -20px 18px;
+  border-bottom: 1px solid var(--foreground);
+  padding: 18px 20px 14px;
+}
+
+.app-shell[data-active="agents"] .agents-cloud-status .section-heading h2 {
+  font-family: var(--font-bruno-display), sans-serif;
+  font-size: 2.35rem;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 0.92;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="agents"] .agents-cloud-status .manual-runner-list {
+  gap: 0;
+}
+
+.app-shell[data-active="agents"] .agents-cloud-status .manual-runner-item {
+  border-color: var(--line-strong);
+  padding-block: 18px;
+}
+
+.app-shell[data-active="agents"] .agents-cloud-status .provisioning-phase-list li {
+  border-color: var(--line-strong);
+  background: var(--panel-subtle);
+}
+
+.app-shell[data-active="agents"] .agents-system-route {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid var(--foreground);
+  background: var(--panel);
+  padding: 10px 18px;
+}
+
+.app-shell[data-active="agents"] .agents-system-route span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="agents"] .agents-system-route a {
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-decoration-color: var(--accent-soft);
+  text-decoration-thickness: 3px;
+  text-underline-offset: 4px;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="agents"] * {
+  scrollbar-color: var(--accent) var(--panel-subtle);
+  scrollbar-width: thin;
+}
+
+@media (max-width: 860px) {
+  .app-shell[data-active="agents"] .agents-workspace-overview dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-shell[data-active="agents"] .agents-workspace-overview dl > div,
+  .app-shell[data-active="agents"] .agents-workspace-overview dl > div:first-child {
+    border-top: 1px solid var(--line-strong);
+    border-left: 1px solid var(--line-strong);
+  }
+
+  .app-shell[data-active="agents"] .agents-workspace-overview dl > div:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .app-shell[data-active="agents"] .agent-table-wrap {
+    display: none;
+  }
+
+  .app-shell[data-active="agents"] .mobile-agent-list {
+    display: grid;
+  }
+}
+
+@media (max-width: 460px) {
+  .app-shell[data-active="agents"] h1 {
+    font-size: 3.35rem;
+  }
+
+  .app-shell[data-active="agents"]
+    :where(
+      .agents-workspace-heading,
+      .agent-list-panel .section-heading,
+      .agent-creation-heading,
+      .agents-cloud-status summary,
+      .agents-cloud-status .section-heading
+    ) {
+    display: grid;
+    gap: 10px;
+  }
+
+  .app-shell[data-active="agents"] .agents-workspace-overview dl {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell[data-active="agents"] .agents-workspace-overview dl > div,
+  .app-shell[data-active="agents"] .agents-workspace-overview dl > div:first-child,
+  .app-shell[data-active="agents"] .agents-workspace-overview dl > div:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .app-shell[data-active="agents"] .agents-workspace-overview dd strong {
+    font-size: 2.1rem;
+  }
+
+  .app-shell[data-active="agents"] .agent-list-panel,
+  .app-shell[data-active="agents"] .agents-cloud-status > .cloud-runner-panel {
+    padding-inline: 16px;
+  }
+
+  .app-shell[data-active="agents"] .agent-list-panel .section-heading,
+  .app-shell[data-active="agents"] .agents-cloud-status .section-heading {
+    margin-inline: -16px;
+    padding-inline: 16px;
+  }
+
+  .app-shell[data-active="agents"] .agent-creation-body {
+    padding: 20px 16px;
+  }
+
+  .app-shell[data-active="agents"] .mobile-agent-metadata {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell[data-active="agents"] .agent-list-panel .empty-state {
+    grid-template-columns: 1fr;
+    padding: 22px 0;
+  }
+
+  .app-shell[data-active="agents"] .agent-list-panel .empty-state-action {
+    width: 100%;
+  }
+
+  .app-shell[data-active="agents"] .agents-cloud-status summary,
+  .app-shell[data-active="agents"] .agents-cloud-status[open] summary {
+    padding-inline: 16px;
+  }
+
+  .app-shell[data-active="agents"] .agents-system-route {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

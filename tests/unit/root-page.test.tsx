@@ -1135,9 +1135,9 @@ describe("product shell routes", () => {
     const html = renderToStaticMarkup(element);
 
     expect(html).toContain("No agents yet");
-    expect(html).toContain('class="agents-page"');
-    expect(html).toContain('class="agents-workspace-overview"');
-    expect(html).toContain("Agent workspace");
+    expect(html).toContain('class="agents-page dashboard-page"');
+    expect(html).toContain('class="agents-workspace-overview dashboard-fleet-pulse"');
+    expect(html).toContain("Roster pulse");
     expect(html).toContain('class="agent-creation-panel"');
     expect(html).toContain('class="assistant-choice-list"');
     expect(html).toContain('class="agent-creation-actions"');
@@ -1147,7 +1147,8 @@ describe("product shell routes", () => {
     expect(html.indexOf("create-agent-title")).toBeLessThan(
       html.indexOf("agents-cloud-runner-title"),
     );
-    expect(html).toContain("Create a new agent");
+    expect(html).toContain("Add an agent");
+    expect(html).toContain("System appendix");
     expect(html).toContain("ChatGPT");
     expect(html).toContain("Claude");
     expect(html).toContain("OpenAI API key");

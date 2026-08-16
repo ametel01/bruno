@@ -66,33 +66,43 @@ export default async function AgentsPage() {
     : 0;
   const readyFlag = readReadyAgentCreationFlag();
   const readyModeEnabled = readyFlag.ok && readyFlag.enabled;
+  const creationUnavailableMessage = !readyFlag.ok
+    ? "Workspace setup is misconfigured. Check the ready agent creation setting, then refresh this page."
+    : !readyFlag.enabled
+      ? "Agent creation is not enabled for this workspace. Enable ready agent creation, then refresh this page."
+      : !modelConnectionResult.ok
+        ? "Assistant connections could not be loaded. Refresh this page; if the problem continues, open System health below."
+        : modelConnectionResult.connections.length === 0
+          ? "Connect ChatGPT or Claude in Settings, then return here to create an agent."
+          : null;
 
   return (
     <ProductShell
       active="agents"
-      eyebrow="Agents"
-      title="Your AI agents"
-      description="Choose ChatGPT or Claude. We securely configure, launch, and monitor the agent for you."
+      eyebrow=""
+      title="Agent roster"
+      description="Build your operating team, direct its live work, and keep the technical setup in one bounded place."
+      showHealthLink={false}
     >
-      <div className="agents-page">
-        <section className="agents-workspace-overview" aria-labelledby="agents-workspace-title">
-          <div className="agents-workspace-heading">
-            <div>
-              <p>Creation readiness</p>
-              <h2 id="agents-workspace-title">Agent workspace</h2>
-            </div>
-            <span>Persisted state</span>
+      <div className="agents-page dashboard-page">
+        <section
+          className="agents-workspace-overview dashboard-fleet-pulse"
+          aria-labelledby="agents-workspace-title"
+        >
+          <div className="agents-workspace-heading dashboard-fleet-pulse-heading">
+            <h2 id="agents-workspace-title">Roster pulse</h2>
+            <span>Live persisted state</span>
           </div>
           <dl>
             <div data-state={agentCount !== null && agentCount > 0 ? "active" : "neutral"}>
-              <dt>Agents</dt>
+              <dt>In roster</dt>
               <dd>
                 <strong>{agentCount ?? "—"}</strong>
-                <span>persisted records</span>
+                <span>{agentCount === 1 ? "agent on record" : "agents on record"}</span>
               </dd>
             </div>
             <div data-state="active">
-              <dt>Templates</dt>
+              <dt>Roles</dt>
               <dd>
                 <strong>{AGENT_TEMPLATE_OPTIONS.length}</strong>
                 <span>available profiles</span>
@@ -103,10 +113,10 @@ export default async function AgentsPage() {
                 assignableRunnerCount !== null && assignableRunnerCount > 0 ? "clear" : "neutral"
               }
             >
-              <dt>Assignable runners</dt>
+              <dt>Capacity</dt>
               <dd>
                 <strong>{assignableRunnerCount ?? "—"}</strong>
-                <span>online now</span>
+                <span>ready to take work</span>
               </dd>
             </div>
             <div
@@ -118,7 +128,7 @@ export default async function AgentsPage() {
                     : "clear"
               }
             >
-              <dt>{automaticRecoveryCount > 0 ? "Recovery" : "Cloud ready"}</dt>
+              <dt>{automaticRecoveryCount > 0 ? "Recovery" : "Cloud capacity"}</dt>
               {automaticRecoveryCount > 0 ? (
                 <dd>
                   <strong>{automaticRecoveryCount}</strong>
@@ -129,7 +139,7 @@ export default async function AgentsPage() {
                   <strong>
                     {readyCloudRunnerCount ?? "—"}/{cloudRunnerCount ?? "—"}
                   </strong>
-                  <span>online and tracked</span>
+                  <span>ready and tracked</span>
                 </dd>
               )}
             </div>
@@ -138,8 +148,10 @@ export default async function AgentsPage() {
 
         <section className="agent-list-panel" aria-labelledby="agent-list-title">
           <div className="section-heading">
-            <h2 id="agent-list-title">Existing agents</h2>
-            {listResult.ok ? <span>{listResult.agents.length} persisted</span> : null}
+            <h2 id="agent-list-title">Operating roster</h2>
+            {listResult.ok ? (
+              <span>Persisted agents · {listResult.agents.length} active</span>
+            ) : null}
           </div>
           {listResult.ok ? (
             listResult.agents.length > 0 ? (
@@ -220,14 +232,12 @@ export default async function AgentsPage() {
 
         <section className="agent-creation-panel" aria-labelledby="create-agent-title">
           <div className="agent-creation-heading">
-            <div>
-              <p>Guided setup</p>
-              <h2 id="create-agent-title">Create a new agent</h2>
-            </div>
-            <span>We handle the technical setup</span>
+            <h2 id="create-agent-title">Add an agent</h2>
+            <span>Guided setup · we handle the infrastructure</span>
           </div>
           <div className="agent-creation-body">
             <CreateAgentForm
+              unavailableMessage={creationUnavailableMessage}
               maxNameLength={AGENT_NAME_MAX_LENGTH}
               modelConnections={modelConnectionResult.ok ? modelConnectionResult.connections : []}
               readyModeEnabled={readyModeEnabled && modelConnectionResult.ok}
@@ -235,22 +245,28 @@ export default async function AgentsPage() {
           </div>
         </section>
 
-        <details className="agents-cloud-status">
-          <summary>
-            <span>
-              <strong>Cloud setup status</strong>
-              <small>Provisioning and runner readiness details</small>
-            </span>
-            <span>
-              {cloudRunnerCount ?? "—"} tracked / {readyCloudRunnerCount ?? "—"} ready
-            </span>
-          </summary>
-          <CloudRunnerProvisioningPanel
-            result={cloudRunnersResult}
-            title="Cloud setup status"
-            titleId="agents-cloud-runner-title"
-          />
-        </details>
+        <section className="agents-system-appendix" aria-label="System appendix">
+          <details className="agents-cloud-status">
+            <summary>
+              <span>
+                <strong>System appendix</strong>
+                <small>Cloud provisioning and capacity details</small>
+              </span>
+              <span>
+                {cloudRunnerCount ?? "—"} tracked / {readyCloudRunnerCount ?? "—"} ready
+              </span>
+            </summary>
+            <CloudRunnerProvisioningPanel
+              result={cloudRunnersResult}
+              title="Cloud capacity"
+              titleId="agents-cloud-runner-title"
+            />
+          </details>
+          <div className="agents-system-route">
+            <span>Operator route</span>
+            <Link href="/health">System health</Link>
+          </div>
+        </section>
       </div>
     </ProductShell>
   );

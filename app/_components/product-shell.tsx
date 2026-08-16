@@ -8,6 +8,7 @@ type ProductShellProps = {
   title: string;
   description: string;
   children: React.ReactNode;
+  showHealthLink?: boolean;
 };
 
 const navigationItems = [
@@ -16,7 +17,14 @@ const navigationItems = [
   { href: "/settings", label: "Settings", key: "settings" },
 ] as const;
 
-export function ProductShell({ active, eyebrow, title, description, children }: ProductShellProps) {
+export function ProductShell({
+  active,
+  eyebrow,
+  title,
+  description,
+  children,
+  showHealthLink = true,
+}: ProductShellProps) {
   const clerkEnabled = resolveAuthMode(process.env).mode === "clerk";
 
   return (
@@ -60,9 +68,11 @@ export function ProductShell({ active, eyebrow, title, description, children }: 
           </div>
           <div className="topbar-actions">
             {clerkEnabled ? <AccountControls /> : null}
-            <Link className="health-link" href="/health">
-              System health
-            </Link>
+            {showHealthLink ? (
+              <Link className="health-link" href="/health">
+                System health
+              </Link>
+            ) : null}
           </div>
         </header>
         <p className="page-description">{description}</p>
