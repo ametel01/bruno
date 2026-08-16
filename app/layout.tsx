@@ -53,13 +53,6 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://api.fontshare.com" />
-        <link
-          href="https://api.fontshare.com/v2/css?f[]=satoshi@500,600,700&display=swap"
-          rel="stylesheet"
-        />
-      </head>
       <body className={bodyFont.variable} data-impeccable-seed="b32744ed">
         <Script id="direction-contract" strategy="afterInteractive">
           {directionContractBootstrap}
