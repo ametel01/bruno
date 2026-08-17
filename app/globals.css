@@ -10,6 +10,8 @@
   --accent: #1f6f68;
   --accent-strong: #164f4a;
   --accent-soft: #dcebe7;
+  --brand-mint: #59d6c5;
+  --brand-lime: #b8f34b;
   --warning: #8a5a18;
   --shadow: 0 18px 48px rgb(23 26 31 / 8%);
 }
@@ -297,7 +299,42 @@ h2 {
 }
 
 .auth-copy .brand-mark {
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  align-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--foreground);
   margin-bottom: 28px;
+}
+
+.auth-bruno-logo {
+  display: inline-flex;
+}
+
+.auth-bruno-logo svg {
+  width: 40px;
+  height: 48px;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 4.4;
+}
+
+.auth-bruno-logo .bruno-logo__mint {
+  fill: var(--brand-mint);
+  stroke: currentColor;
+  stroke-width: 2.8;
+}
+
+.auth-bruno-logo .bruno-logo__lime {
+  fill: var(--brand-lime);
+  stroke: currentColor;
+  stroke-width: 2.8;
 }
 
 .auth-copy h1 {
@@ -6725,24 +6762,24 @@ h2 {
 
 .product-bruno-logo svg {
   width: 31px;
-  height: 33px;
+  height: 37px;
   overflow: visible;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 3.1;
+  stroke-width: 4.4;
 }
 
 .product-bruno-logo .bruno-logo__mint {
-  fill: var(--accent);
-  stroke: var(--white);
+  fill: var(--brand-mint);
+  stroke: currentColor;
   stroke-width: 2.8;
 }
 
 .product-bruno-logo .bruno-logo__lime {
-  fill: var(--lime);
-  stroke: var(--white);
+  fill: var(--brand-lime);
+  stroke: currentColor;
   stroke-width: 2.8;
 }
 

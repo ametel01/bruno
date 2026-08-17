@@ -107,7 +107,7 @@
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 3.1;
+  stroke-width: 4.4;
 }
 
 .brandLockup :global(.bruno-logo__mint),
@@ -116,7 +116,7 @@
 .graphMark :global(.bruno-logo__mint),
 .closingMark :global(.bruno-logo__mint) {
   fill: var(--mint);
-  stroke: var(--ivory);
+  stroke: currentColor;
   stroke-width: 2.8;
 }
 
@@ -126,7 +126,7 @@
 .graphMark :global(.bruno-logo__lime),
 .closingMark :global(.bruno-logo__lime) {
   fill: var(--lime);
-  stroke: var(--ivory);
+  stroke: currentColor;
   stroke-width: 2.8;
 }
 
@@ -1105,16 +1105,6 @@
 .closingMark svg {
   width: 64px;
   height: 70px;
-}
-
-.closingMark :global(.bruno-logo__mint) {
-  fill: var(--mint);
-  stroke: var(--lime);
-}
-
-.closingMark :global(.bruno-logo__lime) {
-  fill: var(--white);
-  stroke: var(--lime);
 }
 
 .closingSection > div:not(.closingPattern),

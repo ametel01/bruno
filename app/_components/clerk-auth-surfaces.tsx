@@ -12,6 +12,7 @@ import {
   UserButton,
 } from "@clerk/nextjs";
 import Link from "next/link";
+import { BrunoLogo } from "@/app/_components/bruno-logo";
 
 export function AccountControls() {
   return (
@@ -100,7 +101,7 @@ function AuthSurface({
       <section className="auth-card" aria-labelledby="auth-page-title">
         <div className="auth-copy">
           <Link className="brand-mark" href="/" aria-label="Bruno.Ai home">
-            B
+            <BrunoLogo className="auth-bruno-logo" compact />
           </Link>
           <p className="eyebrow">Bruno.Ai account</p>
           <h1 id="auth-page-title">{title}</h1>

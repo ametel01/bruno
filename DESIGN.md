@@ -288,6 +288,8 @@ The product shell states “Bruno.Ai is on” and “Working 24/7” as orientat
 
 The mark is a rounded monoline `B` with an internal chevron and lower loop, punctuated by mint and lime circular signals. Render it in deep charcoal on light fields or warm white in the graph core; preserve round stroke caps and the two signal colors. It may appear as a lockup or as the compact icon, but its geometry should not be redrawn as a generic sparkle or bot face.
 
+`app/_components/bruno-logo.tsx` is the canonical in-product mark and `app/icon.svg` is its favicon rendering. Use the shared component for every visible Bruno.Ai brand mark, including landing, authenticated, authentication, loading, empty, and failure surfaces; do not substitute a letter tile or redraw the paths locally.
+
 ### Action Inbox
 
 The Action Inbox is the canonical proof panel: a rounded warm-white shell, quiet top bar, explicit “Illustrative data” label, three status summaries, and compact decision rows. Each row combines a circular signal icon, clear title and evidence, a written tag, and a written timing or authority state. Illustrative product direction must remain visibly labeled and must not be presented as shipped functionality.
