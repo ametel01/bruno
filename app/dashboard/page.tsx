@@ -12,6 +12,7 @@ import {
   type DashboardCostResult,
   DashboardCostSummary,
 } from "@/app/dashboard/_components/cost-summary";
+import { FounderOperatorPrototype } from "@/app/dashboard/_prototype/founder-operator-prototype";
 import {
   AgentListPersistenceError,
   listActiveAgentsForUser,
@@ -56,7 +57,26 @@ type DashboardCloudRunnersResult = Awaited<ReturnType<typeof loadDashboardCloudR
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+type DashboardPageProps = {
+  searchParams?: Promise<{
+    variant?: string | string[] | undefined;
+  }>;
+};
+
+export default async function DashboardPage({ searchParams }: DashboardPageProps = {}) {
+  const resolvedSearchParams = await searchParams;
+  const requestedVariant = Array.isArray(resolvedSearchParams?.variant)
+    ? resolvedSearchParams.variant[0]
+    : resolvedSearchParams?.variant;
+  const prototypeVariant = requestedVariant?.toUpperCase();
+
+  if (
+    process.env.NODE_ENV !== "production" &&
+    (prototypeVariant === "A" || prototypeVariant === "B" || prototypeVariant === "C")
+  ) {
+    return <FounderOperatorPrototype initialVariant={prototypeVariant} />;
+  }
+
   const applicationUser = await requireConfiguredApplicationUser();
 
   if (!applicationUser.ok) {
