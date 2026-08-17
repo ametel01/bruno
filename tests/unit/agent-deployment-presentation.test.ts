@@ -186,6 +186,30 @@ describe("agent deployment presentation", () => {
     );
   });
 
+  it("accepts the persisted acceptance timestamp returned by ready creation", () => {
+    const createBody = {
+      agent: { id: AGENT_ID, name: "Agent" },
+      deployment: {
+        ...deploymentDto(),
+        acceptedAt: "2026-08-03T05:00:00.000Z",
+      },
+    };
+
+    expect(parseSafeCreate202Body(createBody)).toMatchObject({
+      ok: true,
+      agentId: AGENT_ID,
+      deployment: {
+        acceptedAt: "2026-08-03T05:00:00.000Z",
+      },
+    });
+    expect(
+      parseSafeCreate202Body({
+        ...createBody,
+        deployment: { ...createBody.deployment, acceptedAt: "not-a-timestamp" },
+      }).ok,
+    ).toBe(false);
+  });
+
   it("does not let desired status mask missing or malformed deployment state", () => {
     expect(
       buildDeploymentPresentation({

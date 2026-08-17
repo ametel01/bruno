@@ -36,6 +36,7 @@ export type PublicAgentDeployment = {
   startedAt: string | null;
   completedAt: string | null;
   failedAt: string | null;
+  acceptedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -239,6 +240,7 @@ export function parseSafePublicDeployment(value: unknown): SafeDeploymentParseRe
       "startedAt",
       "completedAt",
       "failedAt",
+      ...(Object.hasOwn(value, "acceptedAt") ? ["acceptedAt"] : []),
       "createdAt",
       "updatedAt",
     ])
@@ -257,6 +259,7 @@ export function parseSafePublicDeployment(value: unknown): SafeDeploymentParseRe
     !isNullableIso(value.startedAt) ||
     !isNullableIso(value.completedAt) ||
     !isNullableIso(value.failedAt) ||
+    (Object.hasOwn(value, "acceptedAt") && !isNullableIso(value.acceptedAt)) ||
     !isIsoTimestamp(value.createdAt) ||
     !isIsoTimestamp(value.updatedAt)
   ) {
@@ -306,6 +309,9 @@ export function parseSafePublicDeployment(value: unknown): SafeDeploymentParseRe
       startedAt: value.startedAt,
       completedAt: value.completedAt,
       failedAt: value.failedAt,
+      ...(Object.hasOwn(value, "acceptedAt")
+        ? { acceptedAt: value.acceptedAt as string | null }
+        : {}),
       createdAt: value.createdAt,
       updatedAt: value.updatedAt,
     },
