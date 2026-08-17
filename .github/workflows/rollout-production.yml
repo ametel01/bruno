@@ -86,7 +86,11 @@ jobs:
           test -n "${QSTASH_CURRENT_SIGNING_KEY}"
           test -n "${QSTASH_NEXT_SIGNING_KEY}"
           test "${QSTASH_CURRENT_SIGNING_KEY}" != "${QSTASH_NEXT_SIGNING_KEY}"
-          test "${NEXT_PUBLIC_APP_URL}" = "https://bruno-ametel01s-projects.vercel.app"
+          test "${NEXT_PUBLIC_APP_URL}" = "https://getbruno.xyz"
+          CALLBACK_STATUS="$(curl --silent --show-error --max-time 15 \
+            --output /dev/null --write-out '%{http_code}' \
+            "${NEXT_PUBLIC_APP_URL}/runner/v1/bootstrap-events")"
+          test "${CALLBACK_STATUS}" = "405"
 
       - name: Download exact Verified Release evidence
         uses: actions/download-artifact@v4

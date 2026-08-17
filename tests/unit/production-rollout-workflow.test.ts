@@ -11,9 +11,9 @@ describe("protected production rollout workflow", () => {
     expect(workflow).toContain('default: "0"');
     expect(workflow).toContain("QSTASH_TOKEN: $" + "{{ secrets.QSTASH_TOKEN }}");
     expect(workflow).toContain("NEXT_PUBLIC_APP_URL: $" + "{{ vars.NEXT_PUBLIC_APP_URL }}");
-    expect(workflow).toContain(
-      'test "$' + '{NEXT_PUBLIC_APP_URL}" = "https://bruno-ametel01s-projects.vercel.app"',
-    );
+    expect(workflow).toContain('test "$' + '{NEXT_PUBLIC_APP_URL}" = "https://getbruno.xyz"');
+    expect(workflow).toContain('"$' + '{NEXT_PUBLIC_APP_URL}/runner/v1/bootstrap-events"');
+    expect(workflow).toContain('test "$' + '{CALLBACK_STATUS}" = "405"');
     expect(workflow).toContain(
       "BRUNO_DIGITALOCEAN_TOKEN: $" + "{{ secrets.BRUNO_DIGITALOCEAN_TOKEN }}",
     );
