@@ -1,0 +1,2 @@
+CREATE TYPE "public"."operator_mail_offer_disposition" AS ENUM('enabled', 'dismissed');--> statement-breakpoint
+ALTER TABLE "operators" ADD COLUMN "mail_offer_disposition" "operator_mail_offer_disposition";

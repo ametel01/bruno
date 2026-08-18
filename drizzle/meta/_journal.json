@@ -365,6 +365,27 @@
       "when": 1787075151115,
       "tag": "0051_odd_the_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1787079364898,
+      "tag": "0052_thin_jack_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1787079381296,
+      "tag": "0053_spooky_tomas",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1787080018055,
+      "tag": "0054_redundant_risque",
+      "breakpoints": true
     }
   ]
 }

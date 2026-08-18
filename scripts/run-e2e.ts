@@ -103,6 +103,7 @@ function buildE2ECommandEnvironment(
   commandEnv.BRUNO_PROVIDER_TRIAL_MODEL_API_KEY = "";
   commandEnv.BRUNO_PROVIDER_TRIAL_TELEGRAM_BOT_TOKEN = "";
   commandEnv.BRUNO_AUTH_MODE = "development";
+  commandEnv.BRUNO_GOOGLE_MAIL_READING_RELEASE = "qualified";
   commandEnv.PORT = "3100";
   commandEnv.NEXT_PUBLIC_APP_URL = "http://localhost:3100";
   commandEnv.PLAYWRIGHT_BASE_URL = "http://localhost:3100";

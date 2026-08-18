@@ -1,0 +1,127 @@
+.card {
+  display: grid;
+  gap: 1rem;
+  padding: 1.35rem;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: 1.35rem;
+  background: color-mix(in srgb, var(--surface) 92%, var(--accent) 8%);
+  box-shadow: 0 1.5rem 3rem rgb(31 40 34 / 5%);
+}
+.heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.kicker {
+  margin: 0 0 0.35rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+.heading h3 {
+  margin: 0;
+  font-size: clamp(1.2rem, 2vw, 1.55rem);
+  letter-spacing: -0.03em;
+}
+.badge {
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  color: #1c5c3b;
+  background: #dff2e5;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+.copy,
+.notice,
+.disclosure,
+.hint {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.account {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 700;
+}
+.resources {
+  display: grid;
+  gap: 0.65rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+.resources legend {
+  padding: 0 0.35rem;
+  color: var(--ink);
+  font-weight: 750;
+}
+.resource {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--surface) 72%, var(--line) 28%);
+}
+.resource input {
+  inline-size: 1.1rem;
+  block-size: 1.1rem;
+  accent-color: var(--accent);
+}
+.resource span {
+  display: grid;
+  gap: 0.15rem;
+}
+.resource small {
+  color: var(--muted);
+}
+.receipt {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  font-size: 0.88rem;
+}
+.receipt strong {
+  color: var(--ink);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+.button,
+.secondary {
+  min-height: 2.7rem;
+  padding: 0.7rem 1rem;
+  border-radius: 0.75rem;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+.button {
+  border: 1px solid var(--ink);
+  color: var(--surface);
+  background: var(--ink);
+}
+.secondary {
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: transparent;
+}
+.button:disabled,
+.secondary:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+.error {
+  margin: 0;
+  color: #a33c34;
+  font-weight: 650;
+}

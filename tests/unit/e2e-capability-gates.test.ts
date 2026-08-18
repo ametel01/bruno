@@ -159,6 +159,7 @@ describe("E2E capability gates", () => {
     expect(childEnv).toEqual({
       PATH: "/test-bin",
       BRUNO_AUTH_MODE: "development",
+      BRUNO_GOOGLE_MAIL_READING_RELEASE: "qualified",
       BRUNO_DIGITALOCEAN_TOKEN: "",
       BRUNO_PROVIDER_TRIAL_MODEL_API_KEY: "",
       BRUNO_PROVIDER_TRIAL_TELEGRAM_BOT_TOKEN: "",

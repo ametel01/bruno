@@ -1,5 +1,10 @@
 import { FounderOperatorPreparation } from "@/app/operator/_components/founder-operator-preparation";
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
+import {
+  FOUNDER_GOOGLE_MAIL_RELEASE_CONTROLS,
+  isFounderGoogleMailReadingReleased,
+  REQUIRED_MAIL_SCOPE,
+} from "@/src/server/operators/founder-mail-connection";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
@@ -20,10 +25,23 @@ export default async function FounderOperatorPage() {
   }
 
   const operator = await ensureFounderOperatorForUser(applicationUser.userId);
+  const mailReadingReleased = isFounderGoogleMailReadingReleased();
 
   return (
     <FounderOperatorShell>
-      <FounderOperatorPreparation initialOperator={operator} />
+      <FounderOperatorPreparation
+        initialOperator={operator}
+        mailReadingReleased={mailReadingReleased}
+        mailReleaseControls={
+          mailReadingReleased
+            ? {
+                qualified: true,
+                requiredScope: REQUIRED_MAIL_SCOPE,
+                ...FOUNDER_GOOGLE_MAIL_RELEASE_CONTROLS,
+              }
+            : undefined
+        }
+      />
     </FounderOperatorShell>
   );
 }

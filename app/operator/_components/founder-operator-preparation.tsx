@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { FounderMailConnectionDto } from "@/src/server/operators/founder-mail-connection";
 import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
 import { FounderAiConnection } from "./founder-ai-connection";
 import { FounderCalendarConnection } from "./founder-calendar-connection";
-import { FounderLimitedOperation } from "./founder-limited-operation";
 import { FounderConversation } from "./founder-conversation";
+import { FounderLimitedOperation } from "./founder-limited-operation";
+import { FounderMailConnection } from "./founder-mail-connection";
 import styles from "./founder-operator-preparation.module.css";
 
 const TIMEZONE_OPTIONS = buildTimezoneOptions();
@@ -14,8 +16,12 @@ const TIMEZONE_VALUES: ReadonlySet<string> = new Set(TIMEZONE_OPTIONS.map(([valu
 
 export function FounderOperatorPreparation({
   initialOperator,
+  mailReadingReleased = false,
+  mailReleaseControls,
 }: {
   initialOperator: FounderOperatorDto;
+  mailReadingReleased?: boolean;
+  mailReleaseControls?: FounderMailConnectionDto["release"] | undefined;
 }) {
   const [operator, setOperator] = useState(initialOperator);
   const [timezone, setTimezone] = useState(initialOperator.preparation.timezone ?? "");
@@ -214,6 +220,10 @@ export function FounderOperatorPreparation({
       {runtimeReady ? <FounderAiConnection /> : null}
 
       {runtimeReady ? <FounderCalendarConnection /> : null}
+
+      {runtimeReady && mailReadingReleased && mailReleaseControls ? (
+        <FounderMailConnection releaseControls={mailReleaseControls} />
+      ) : null}
 
       {runtimeReady ? <FounderLimitedOperation /> : null}
 

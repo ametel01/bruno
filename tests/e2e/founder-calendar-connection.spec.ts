@@ -27,10 +27,27 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
         limited: false,
         activated: false,
       };
+      const mailState: { status: "offer" | "selecting" | "ready"; selected: boolean } = {
+        status: "offer",
+        selected: false,
+      };
       await installCalendarRoutes(context, state);
+      await installMailRoutes(context, mailState);
       await page.goto("/operator");
 
       await expect(page.getByText("Your Calendar Connection", { exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Bring Mail evidence into your workspace?" }),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Review Gmail reading" }).click();
+      await page.getByRole("button", { name: "Connect Gmail reading" }).click();
+      await expect(
+        page.getByText("Choose exactly which Gmail labels Bruno may read."),
+      ).toBeVisible();
+      await page.getByLabel("Inbox").check();
+      await page.getByRole("button", { name: "Save and verify labels" }).click();
+      await expect(page.getByRole("heading", { name: "Gmail reading is ready" })).toBeVisible();
+      await expect(page.getByText("Bruno is using 1 selected Gmail label.")).toBeVisible();
       await expect(page.getByText("Choose exactly which calendars Bruno may read.")).toBeVisible();
       await expect(page.getByLabel("Primary")).not.toBeChecked();
       await expect(
@@ -148,6 +165,125 @@ async function installCalendarRoutes(
       }),
     });
   });
+}
+
+async function installMailRoutes(
+  context: import("@playwright/test").BrowserContext,
+  state: { status: "offer" | "selecting" | "ready"; selected: boolean },
+): Promise<void> {
+  await context.route("**/api/operator/mail", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          connection: state.status === "offer" ? null : mailDto(state),
+          offerDisposition: state.status === "offer" ? null : "enabled",
+        }),
+      });
+      return;
+    }
+    const body = route.request().postDataJSON() as { action?: string; resourceIds?: string[] };
+    if (body.action === "offer") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ connection: null, offerDisposition: "enabled" }),
+      });
+      return;
+    }
+    if (body.action === "start") {
+      state.status = "selecting";
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ connection: mailDto(state), authorization: null }),
+      });
+      return;
+    }
+    if (body.action === "select") {
+      expect(body.resourceIds).toEqual(["INBOX"]);
+      state.selected = true;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ connection: mailDto(state) }),
+      });
+      return;
+    }
+    if (body.action === "verify") {
+      expect(state.selected).toBe(true);
+      state.status = "ready";
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ connection: mailDto(state) }),
+      });
+      return;
+    }
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ connection: mailDto(state) }),
+    });
+  });
+}
+
+function mailDto(state: { status: "offer" | "selecting" | "ready"; selected: boolean }) {
+  const ready = state.status === "ready";
+  return {
+    provider: "google_gmail",
+    status: state.status === "offer" ? "selecting" : state.status,
+    accountLabel: "founder@example.com",
+    connectedAt: "2026-08-19T01:00:00.000Z",
+    lastVerifiedAt: ready ? "2026-08-19T01:02:00.000Z" : null,
+    evidenceState: ready ? "current" : "unknown",
+    workState: ready ? "available" : "paused",
+    recoveryMessage: null,
+    suite: { status: "matched", grouped: ready, name: "Primary Communications Suite" },
+    release: {
+      qualified: true,
+      requiredScope: "https://www.googleapis.com/auth/gmail.readonly",
+      disclosure:
+        "Bruno reads only the selected Gmail labels, keeps bounded evidence, and may send nothing through this connection.",
+      retentionDays: 90,
+      deletion:
+        "Disconnect stops access; retained Bruno data follows the staged deletion controls.",
+      aiLimitedUse:
+        "Selected mail evidence may be processed only to prepare the Founder workspace and its bounded briefs.",
+    },
+    resources: [
+      {
+        providerResourceId: "INBOX",
+        name: "Inbox",
+        labelType: "system",
+        messageListVisibility: "show",
+        labelListVisibility: "labelShow",
+        selected: state.selected,
+        status: "available",
+      },
+      {
+        providerResourceId: "PROJECTS",
+        name: "Projects",
+        labelType: "user",
+        messageListVisibility: "show",
+        labelListVisibility: "labelShow",
+        selected: false,
+        status: "available",
+      },
+    ],
+    receipt: ready
+      ? {
+          provider: "google_gmail",
+          accountLabel: "founder@example.com",
+          outcome: "verified",
+          grantedScopes: [
+            "openid",
+            "email",
+            "profile",
+            "https://www.googleapis.com/auth/gmail.readonly",
+          ],
+          selectedResourceCount: 1,
+          evidenceState: "current",
+          suiteStatus: "matched",
+          issuedAt: "2026-08-19T01:02:00.000Z",
+        }
+      : null,
+  };
 }
 
 function dto(state: { selected: boolean; status: "selecting" | "verifying" | "ready" }) {
