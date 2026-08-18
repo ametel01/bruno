@@ -12,6 +12,7 @@ import {
   operators,
 } from "@/src/server/db/schema";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import { reconcileFounderLimitedOperationForUser } from "@/src/server/operators/founder-limited-operation";
 import {
   decryptOperatorSecret,
   digestOperatorSecret,
@@ -104,6 +105,7 @@ export type FounderGoogleCalendarAdapter = {
     providerSubjectId: string;
     accountLabel: string | null;
     evidenceState: "current" | "unavailable";
+    attentionCount?: number;
     accessToken?: string;
     refreshToken?: string;
     tokenExpiresAt?: Date;
@@ -653,6 +655,7 @@ export async function verifyFounderGoogleCalendarForUser(
           lastVerifiedAt:
             verification.evidenceState === "current" ? at : current.connection.lastVerifiedAt,
           lastEvidenceAt: at,
+          lastEvidenceCount: verification.attentionCount ?? current.connection.lastEvidenceCount,
           tokenExpiresAt: verification.tokenExpiresAt ?? current.connection.tokenExpiresAt,
           ...(tokenUpdate
             ? {
@@ -699,6 +702,10 @@ export async function verifyFounderGoogleCalendarForUser(
           503,
         );
       return toDto(bundle);
+    });
+    await reconcileFounderLimitedOperationForUser(userId, {
+      createConnection: () => connection,
+      now,
     });
     return updated;
   } catch (error) {
@@ -924,6 +931,7 @@ export function createGoogleCalendarAdapter(
       let currentRefreshToken = refreshToken;
       let tokenExpiresAt: Date | undefined;
       let refreshed = false;
+      let attentionCount = 0;
       for (const resource of resources) {
         const url = new URL(
           `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(resource.providerResourceId)}/events`,
@@ -946,12 +954,13 @@ export function createGoogleCalendarAdapter(
             headers: { Authorization: `Bearer ${currentAccessToken}` },
           });
         }
-        await readJson(response);
+        const body = await readJson(response);
         if (!response.ok) {
           const identity = await this.getIdentity({ accessToken: currentAccessToken });
           return {
             ...identity,
             evidenceState: "unavailable" as const,
+            attentionCount,
             ...(refreshed && tokenExpiresAt
               ? {
                   accessToken: currentAccessToken,
@@ -961,11 +970,13 @@ export function createGoogleCalendarAdapter(
               : {}),
           };
         }
+        if (isRecord(body) && Array.isArray(body.items)) attentionCount += body.items.length;
       }
       const identity = await this.getIdentity({ accessToken: currentAccessToken });
       return {
         ...identity,
         evidenceState: "current" as const,
+        attentionCount,
         ...(refreshed && tokenExpiresAt
           ? { accessToken: currentAccessToken, refreshToken: currentRefreshToken, tokenExpiresAt }
           : {}),

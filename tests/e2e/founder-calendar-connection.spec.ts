@@ -16,9 +16,16 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
 
   try {
     await withPinnedDevelopmentUser(fixture.userId, async () => {
-      const state: { selected: boolean; status: "selecting" | "verifying" | "ready" } = {
+      const state: {
+        selected: boolean;
+        status: "selecting" | "verifying" | "ready";
+        limited: boolean;
+        activated: boolean;
+      } = {
         selected: false,
         status: "selecting",
+        limited: false,
+        activated: false,
       };
       await installCalendarRoutes(context, state);
       await page.goto("/operator");
@@ -35,6 +42,15 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
       await expect(page.getByRole("heading", { name: "Google Calendar is ready" })).toBeVisible();
       await expect(page.getByText("Google granted read-only Calendar access.")).toBeVisible();
       await expect(page.getByText("Bruno is using 1 selected calendar.")).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Calendar-only Limited Operation" }),
+      ).toBeVisible();
+      await page.getByRole("checkbox", { name: /I confirm that my Ready AI Connection/ }).check();
+      await page.getByRole("button", { name: "Confirm Processing Consent" }).click();
+      await expect(page.getByText("Safe Authority Policy · v1")).toBeVisible();
+      await expect(page.getByText("verified quiet brief")).toBeVisible();
+      await page.getByRole("button", { name: "Open Founder Morning Brief" }).click();
+      await expect(page.getByText("Founder Activation recorded.")).toBeVisible();
 
       const secondContext = await browser.newContext();
       try {
@@ -45,6 +61,7 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
           secondPage.getByRole("heading", { name: "Google Calendar is ready" }),
         ).toBeVisible();
         await expect(secondPage.getByText("Bruno is using 1 selected calendar.")).toBeVisible();
+        await expect(secondPage.getByText("Founder Activation recorded.")).toBeVisible();
       } finally {
         await secondContext.close();
       }
@@ -56,7 +73,12 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
 
 async function installCalendarRoutes(
   context: import("@playwright/test").BrowserContext,
-  state: { selected: boolean; status: "selecting" | "verifying" | "ready" },
+  state: {
+    selected: boolean;
+    status: "selecting" | "verifying" | "ready";
+    limited: boolean;
+    activated: boolean;
+  },
 ): Promise<void> {
   await context.route("**/api/operator/calendar", async (route) => {
     if (route.request().method() === "GET") {
@@ -89,6 +111,23 @@ async function installCalendarRoutes(
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({ connection: dto(state) }),
+    });
+  });
+
+  await context.route("**/api/operator/limited-operation", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ operation: limitedOperation(state) }),
+      });
+      return;
+    }
+    const body = route.request().postDataJSON() as { action?: string };
+    if (body.action === "confirm_consent") state.limited = true;
+    if (body.action === "open_brief") state.activated = true;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ operation: limitedOperation(state) }),
     });
   });
 
@@ -154,6 +193,43 @@ function dto(state: { selected: boolean; status: "selecting" | "verifying" | "re
           issuedAt: "2026-08-19T01:02:00.000Z",
         }
       : null,
+  };
+}
+
+function limitedOperation(state: { limited?: boolean; activated?: boolean }) {
+  return {
+    name: "Calendar-only Limited Operation",
+    status: state.limited ? "limited" : "awaiting_consent",
+    mailIncluded: false,
+    access: { ai: "ready", calendar: "ready", evidence: "current" },
+    consent: {
+      status: state.limited ? "active" : "missing",
+      purpose: "calendar_morning_brief",
+      confirmedAt: state.limited ? "2026-08-19T01:02:00.000Z" : null,
+    },
+    authorityPolicy: state.limited
+      ? {
+          version: 1,
+          observation: "always",
+          preparation: "always",
+          externalEffects: "approval_required",
+          mailIncluded: false,
+        }
+      : null,
+    brief: state.limited
+      ? {
+          id: "brief-1",
+          generation: 1,
+          status: state.activated ? "opened" : "prepared",
+          evidenceState: "current",
+          quiet: true,
+          content:
+            "Nothing needs attention in your selected Calendar right now. This is a verified quiet brief.",
+          generatedAt: "2026-08-19T01:02:00.000Z",
+          openedAt: state.activated ? "2026-08-19T01:03:00.000Z" : null,
+        }
+      : null,
+    activatedAt: state.activated ? "2026-08-19T01:03:00.000Z" : null,
   };
 }
 

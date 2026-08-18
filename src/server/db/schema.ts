@@ -132,6 +132,33 @@ export const operatorCalendarEvidenceStateEnum = pgEnum("operator_calendar_evide
   "unavailable",
 ]);
 
+export const operatorLimitedOperationStatusEnum = pgEnum("operator_limited_operation_status", [
+  "awaiting_consent",
+  "limited",
+  "needs_attention",
+]);
+
+export const operatorProcessingConsentStatusEnum = pgEnum("operator_processing_consent_status", [
+  "active",
+  "revoked",
+]);
+
+export const operatorAuthorityModeEnum = pgEnum("operator_authority_mode", [
+  "always",
+  "approval_required",
+  "never",
+]);
+
+export const operatorGovernanceReceiptKindEnum = pgEnum("operator_governance_receipt_kind", [
+  "processing_consent",
+  "authority_policy",
+]);
+
+export const operatorMorningBriefStatusEnum = pgEnum("operator_morning_brief_status", [
+  "prepared",
+  "opened",
+]);
+
 export const operatorConversationStatusEnum = pgEnum("operator_conversation_status", [
   "active",
   "paused",
@@ -743,6 +770,7 @@ export const operatorCalendarConnections = pgTable(
     authorizedAt: timestamp("authorized_at", { withTimezone: true }),
     lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
     lastEvidenceAt: timestamp("last_evidence_at", { withTimezone: true }),
+    lastEvidenceCount: integer("last_evidence_count").notNull().default(0),
     evidenceState: operatorCalendarEvidenceStateEnum("evidence_state").notNull().default("unknown"),
     failureCode: text("failure_code"),
     recoveryMessage: text("recovery_message"),
@@ -893,6 +921,224 @@ export const operatorCalendarConnectionReceipts = pgTable(
       table.connectionId,
       table.createdAt,
     ),
+  ],
+);
+
+export const operatorProcessingConsents = pgTable(
+  "operator_processing_consents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    aiConnectionId: uuid("ai_connection_id")
+      .notNull()
+      .references(() => operatorAiConnections.id),
+    calendarConnectionId: uuid("calendar_connection_id")
+      .notNull()
+      .references(() => operatorCalendarConnections.id),
+    status: operatorProcessingConsentStatusEnum("status").notNull().default("active"),
+    purpose: text("purpose").notNull().default("calendar_morning_brief"),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_processing_consents_purpose_check",
+      sql`${table.purpose} = 'calendar_morning_brief'`,
+    ),
+    check(
+      "operator_processing_consents_revocation_check",
+      sql`(${table.status} = 'active' AND ${table.revokedAt} IS NULL) OR (${table.status} = 'revoked' AND ${table.revokedAt} IS NOT NULL)`,
+    ),
+    uniqueIndex("operator_processing_consents_connection_pair_idx").on(
+      table.operatorId,
+      table.aiConnectionId,
+      table.calendarConnectionId,
+    ),
+    index("operator_processing_consents_status_idx").on(table.operatorId, table.status),
+  ],
+);
+
+export const operatorAuthorityPolicies = pgTable(
+  "operator_authority_policies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    version: integer("version").notNull(),
+    observation: operatorAuthorityModeEnum("observation").notNull().default("always"),
+    preparation: operatorAuthorityModeEnum("preparation").notNull().default("always"),
+    externalEffects: operatorAuthorityModeEnum("external_effects")
+      .notNull()
+      .default("approval_required"),
+    mailIncluded: boolean("mail_included").notNull().default(false),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("operator_authority_policies_version_check", sql`${table.version} >= 1`),
+    check(
+      "operator_authority_policies_safe_default_check",
+      sql`${table.observation} = 'always' AND ${table.preparation} = 'always' AND ${table.externalEffects} = 'approval_required' AND ${table.mailIncluded} = false`,
+    ),
+    uniqueIndex("operator_authority_policies_operator_version_idx").on(
+      table.operatorId,
+      table.version,
+    ),
+    index("operator_authority_policies_operator_idx").on(table.operatorId, table.createdAt),
+  ],
+);
+
+export const operatorGovernanceReceipts = pgTable(
+  "operator_governance_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    kind: operatorGovernanceReceiptKindEnum("kind").notNull(),
+    processingConsentId: uuid("processing_consent_id").references(
+      () => operatorProcessingConsents.id,
+    ),
+    authorityPolicyId: uuid("authority_policy_id").references(() => operatorAuthorityPolicies.id),
+    evidenceDigest: text("evidence_digest").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_governance_receipts_source_check",
+      sql`(${table.kind} = 'processing_consent' AND ${table.processingConsentId} IS NOT NULL AND ${table.authorityPolicyId} IS NULL) OR (${table.kind} = 'authority_policy' AND ${table.processingConsentId} IS NULL AND ${table.authorityPolicyId} IS NOT NULL)`,
+    ),
+    check(
+      "operator_governance_receipts_digest_check",
+      sql`${table.evidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    uniqueIndex("operator_governance_receipts_consent_idx").on(
+      table.processingConsentId,
+      table.kind,
+    ),
+    uniqueIndex("operator_governance_receipts_policy_idx").on(table.authorityPolicyId, table.kind),
+    index("operator_governance_receipts_operator_created_idx").on(
+      table.operatorId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const operatorLimitedOperations = pgTable(
+  "operator_limited_operations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    aiConnectionId: uuid("ai_connection_id")
+      .notNull()
+      .references(() => operatorAiConnections.id),
+    calendarConnectionId: uuid("calendar_connection_id")
+      .notNull()
+      .references(() => operatorCalendarConnections.id),
+    processingConsentId: uuid("processing_consent_id").references(
+      () => operatorProcessingConsents.id,
+    ),
+    authorityPolicyId: uuid("authority_policy_id").references(() => operatorAuthorityPolicies.id),
+    status: operatorLimitedOperationStatusEnum("status").notNull().default("awaiting_consent"),
+    firstBriefId: uuid("first_brief_id"),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_limited_operations_consent_shape_check",
+      sql`${table.status} = 'awaiting_consent' OR (${table.processingConsentId} IS NOT NULL AND ${table.authorityPolicyId} IS NOT NULL)`,
+    ),
+    check(
+      "operator_limited_operations_activation_shape_check",
+      sql`${table.activatedAt} IS NULL OR ${table.firstBriefId} IS NOT NULL`,
+    ),
+    uniqueIndex("operator_limited_operations_operator_idx").on(table.operatorId),
+    index("operator_limited_operations_status_idx").on(table.status),
+  ],
+);
+
+export const operatorMorningBriefs = pgTable(
+  "operator_morning_briefs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    operationId: uuid("operation_id")
+      .notNull()
+      .references(() => operatorLimitedOperations.id),
+    generation: integer("generation").notNull(),
+    status: operatorMorningBriefStatusEnum("status").notNull().default("prepared"),
+    evidenceState: operatorCalendarEvidenceStateEnum("evidence_state").notNull(),
+    quiet: boolean("quiet").notNull(),
+    attentionCount: integer("attention_count").notNull().default(0),
+    content: text("content").notNull(),
+    evidenceDigest: text("evidence_digest").notNull(),
+    windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull(),
+    windowEndedAt: timestamp("window_ended_at", { withTimezone: true }).notNull(),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull(),
+    openedAt: timestamp("opened_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("operator_morning_briefs_generation_check", sql`${table.generation} >= 1`),
+    check("operator_morning_briefs_attention_count_check", sql`${table.attentionCount} >= 0`),
+    check(
+      "operator_morning_briefs_quiet_truth_check",
+      sql`${table.quiet} = false OR (${table.evidenceState} = 'current' AND ${table.attentionCount} = 0)`,
+    ),
+    check(
+      "operator_morning_briefs_content_check",
+      sql`length(trim(${table.content})) BETWEEN 1 AND 12000`,
+    ),
+    check(
+      "operator_morning_briefs_window_check",
+      sql`${table.windowEndedAt} > ${table.windowStartedAt}`,
+    ),
+    check(
+      "operator_morning_briefs_opened_status_check",
+      sql`(${table.status} = 'prepared' AND ${table.openedAt} IS NULL) OR (${table.status} = 'opened' AND ${table.openedAt} IS NOT NULL)`,
+    ),
+    check(
+      "operator_morning_briefs_digest_check",
+      sql`${table.evidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    uniqueIndex("operator_morning_briefs_operation_generation_idx").on(
+      table.operationId,
+      table.generation,
+    ),
+    index("operator_morning_briefs_operator_status_idx").on(table.operatorId, table.status),
+  ],
+);
+
+export const operatorFounderActivations = pgTable(
+  "operator_founder_activations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    firstBriefId: uuid("first_brief_id")
+      .notNull()
+      .references(() => operatorMorningBriefs.id),
+    activatedAt: timestamp("activated_at", { withTimezone: true }).notNull().defaultNow(),
+    evidenceDigest: text("evidence_digest").notNull(),
+  },
+  (table) => [
+    check(
+      "operator_founder_activations_digest_check",
+      sql`${table.evidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    uniqueIndex("operator_founder_activations_operator_idx").on(table.operatorId),
+    uniqueIndex("operator_founder_activations_brief_idx").on(table.firstBriefId),
   ],
 );
 

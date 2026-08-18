@@ -1,0 +1,1 @@
+ALTER TABLE "operator_calendar_connections" ADD COLUMN "last_evidence_count" integer DEFAULT 0 NOT NULL;
