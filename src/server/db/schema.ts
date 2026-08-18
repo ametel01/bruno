@@ -184,6 +184,7 @@ export const operatorPrimaryCommunicationsSuiteStatusEnum = pgEnum(
 export const operatorLimitedOperationStatusEnum = pgEnum("operator_limited_operation_status", [
   "awaiting_consent",
   "limited",
+  "core",
   "needs_attention",
 ]);
 
@@ -1197,6 +1198,7 @@ export const operatorProcessingConsents = pgTable(
     calendarConnectionId: uuid("calendar_connection_id")
       .notNull()
       .references(() => operatorCalendarConnections.id),
+    mailConnectionId: uuid("mail_connection_id").references(() => operatorMailConnections.id),
     status: operatorProcessingConsentStatusEnum("status").notNull().default("active"),
     purpose: text("purpose").notNull().default("calendar_morning_brief"),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1206,7 +1208,7 @@ export const operatorProcessingConsents = pgTable(
   (table) => [
     check(
       "operator_processing_consents_purpose_check",
-      sql`${table.purpose} = 'calendar_morning_brief'`,
+      sql`${table.purpose} IN ('calendar_morning_brief', 'core_operation')`,
     ),
     check(
       "operator_processing_consents_revocation_check",
@@ -1216,6 +1218,7 @@ export const operatorProcessingConsents = pgTable(
       table.operatorId,
       table.aiConnectionId,
       table.calendarConnectionId,
+      table.mailConnectionId,
     ),
     index("operator_processing_consents_status_idx").on(table.operatorId, table.status),
   ],
@@ -1301,6 +1304,7 @@ export const operatorLimitedOperations = pgTable(
     calendarConnectionId: uuid("calendar_connection_id")
       .notNull()
       .references(() => operatorCalendarConnections.id),
+    mailConnectionId: uuid("mail_connection_id").references(() => operatorMailConnections.id),
     processingConsentId: uuid("processing_consent_id").references(
       () => operatorProcessingConsents.id,
     ),

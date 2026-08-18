@@ -1,0 +1,8 @@
+ALTER TABLE "operator_processing_consents" DROP CONSTRAINT "operator_processing_consents_purpose_check";--> statement-breakpoint
+DROP INDEX "operator_processing_consents_connection_pair_idx";--> statement-breakpoint
+ALTER TABLE "operator_limited_operations" ADD COLUMN "mail_connection_id" uuid;--> statement-breakpoint
+ALTER TABLE "operator_processing_consents" ADD COLUMN "mail_connection_id" uuid;--> statement-breakpoint
+ALTER TABLE "operator_limited_operations" ADD CONSTRAINT "operator_limited_operations_mail_connection_id_operator_mail_connections_id_fk" FOREIGN KEY ("mail_connection_id") REFERENCES "public"."operator_mail_connections"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "operator_processing_consents" ADD CONSTRAINT "operator_processing_consents_mail_connection_id_operator_mail_connections_id_fk" FOREIGN KEY ("mail_connection_id") REFERENCES "public"."operator_mail_connections"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "operator_processing_consents_connection_pair_idx" ON "operator_processing_consents" USING btree ("operator_id","ai_connection_id","calendar_connection_id","mail_connection_id");--> statement-breakpoint
+ALTER TABLE "operator_processing_consents" ADD CONSTRAINT "operator_processing_consents_purpose_check" CHECK ("operator_processing_consents"."purpose" IN ('calendar_morning_brief', 'core_operation'));

@@ -1,0 +1,1 @@
+ALTER TYPE "public"."operator_limited_operation_status" ADD VALUE 'core' BEFORE 'needs_attention';

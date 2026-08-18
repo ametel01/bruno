@@ -12,31 +12,39 @@ import {
   operatorFounderActivations,
   operatorGovernanceReceipts,
   operatorLimitedOperations,
+  operatorMailConnections,
   operatorMorningBriefs,
+  operatorPrimaryCommunicationsSuites,
   operatorProcessingConsents,
 } from "@/src/server/db/schema";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 
-type LimitedOperationTransaction = Parameters<
+type CoreTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
 >[0];
 
-const CALENDAR_PURPOSE = "calendar_morning_brief" as const;
+const CORE_PURPOSE = "core_operation" as const;
 
-export type FounderLimitedOperationStatus = "awaiting_consent" | "limited" | "needs_attention";
+export type FounderCoreOperationStatus = "awaiting_consent" | "core" | "needs_attention";
 
-export type FounderLimitedOperationDto = {
-  name: "Calendar-only Limited Operation";
-  status: FounderLimitedOperationStatus;
-  mailIncluded: false;
+export type FounderCoreOperationDto = {
+  name: "Core Operation";
+  status: FounderCoreOperationStatus;
+  mailIncluded: true;
+  mailSendingRequired: false;
+  suite: {
+    status: "active" | "unavailable" | "mismatch";
+    providerSubjectId: string | null;
+  };
   access: {
     ai: "ready" | "unavailable";
     calendar: "ready" | "unavailable";
+    mail: "ready" | "unavailable";
     evidence: "current" | "unavailable";
   };
   consent: {
     status: "active" | "missing";
-    purpose: typeof CALENDAR_PURPOSE;
+    purpose: typeof CORE_PURPOSE;
     confirmedAt: string | null;
   };
   authorityPolicy: {
@@ -60,76 +68,77 @@ export type FounderLimitedOperationDto = {
   activatedAt: string | null;
 };
 
-export type FounderLimitedOperationDependencies = {
+export type FounderCoreOperationDependencies = {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
 };
 
-export class FounderLimitedOperationError extends Error {
+export class FounderCoreOperationError extends Error {
   readonly code: string;
   readonly status: 400 | 409 | 503;
 
   constructor(code: string, message: string, status: 400 | 409 | 503 = 409) {
     super(message);
-    this.name = "FounderLimitedOperationError";
+    this.name = "FounderCoreOperationError";
     this.code = code;
     this.status = status;
   }
 }
 
-export async function getFounderLimitedOperationForUser(
+export async function getFounderCoreOperationForUser(
   userId: string,
-  dependencies: FounderLimitedOperationDependencies = {},
-): Promise<FounderLimitedOperationDto | null> {
+  dependencies: FounderCoreOperationDependencies = {},
+): Promise<FounderCoreOperationDto | null> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
-  return withConnection(dependencies, async (connection) => {
-    const now = dependencies.now ?? (() => new Date());
-    return connection.db.transaction(async (tx) => {
-      const operation = await ensureOperation(tx, operator.id, now());
-      return operation && !operation.mailConnectionId
-        ? projectOperation(tx, operation, operator.id)
-        : null;
-    });
-  });
+  return withConnection(dependencies, async (connection) =>
+    connection.db.transaction(async (tx) => {
+      const operation = await ensureCoreOperation(
+        tx,
+        operator.id,
+        dependencies.now?.() ?? new Date(),
+      );
+      return operation ? projectCoreOperation(tx, operation, operator.id) : null;
+    }),
+  );
 }
 
-export async function confirmFounderProcessingConsentForUser(
+export async function confirmFounderCoreProcessingConsentForUser(
   userId: string,
-  dependencies: FounderLimitedOperationDependencies = {},
-): Promise<FounderLimitedOperationDto> {
+  dependencies: FounderCoreOperationDependencies = {},
+): Promise<FounderCoreOperationDto> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   return withConnection(dependencies, async (connection) => {
-    const now = dependencies.now ?? (() => new Date());
-    const at = now();
+    const at = dependencies.now?.() ?? new Date();
     return connection.db.transaction(async (tx) => {
       await lockOperator(tx, operator.id);
-      const pair = await readyConnectionPair(tx, operator.id);
+      const pair = await readyCoreConnectionSet(tx, operator.id);
       if (!pair) {
-        throw new FounderLimitedOperationError(
-          "connections_not_ready",
-          "Bruno needs a Ready AI Connection and a Current Calendar Connection before you confirm Processing Consent.",
+        throw new FounderCoreOperationError(
+          "core_connections_not_ready",
+          "Bruno needs Ready AI, Current Calendar, and Current Mail from the same Primary Communications Suite before you confirm Core Operation consent.",
         );
       }
-      const operation = await ensureOperation(tx, operator.id, at, pair);
+      const operation = await ensureCoreOperation(tx, operator.id, at, pair);
       if (!operation) {
-        throw new FounderLimitedOperationError(
-          "limited_operation_unavailable",
-          "Calendar-only Limited Operation could not be established.",
+        throw new FounderCoreOperationError(
+          "core_operation_unavailable",
+          "Core Operation could not be established.",
           503,
         );
       }
       if (
         operation.status === "needs_attention" &&
         (operation.aiConnectionId !== pair.ai.id ||
-          operation.calendarConnectionId !== pair.calendar.id)
+          operation.calendarConnectionId !== pair.calendar.id ||
+          operation.mailConnectionId !== pair.mail.id)
       ) {
-        throw new FounderLimitedOperationError(
+        throw new FounderCoreOperationError(
           "connection_replacement_requires_migration",
-          "A different connected account cannot inherit this Limited Operation. Review the connection replacement before starting a new one.",
+          "A replaced provider identity cannot inherit Core Operation. Review the connection replacement before confirming again.",
         );
       }
 
-      const consent = await upsertConsent(tx, operator.id, pair.ai.id, pair.calendar.id, at);
+      const consent = await upsertCoreConsent(tx, operator.id, pair, at);
       const policy = await upsertSafePolicy(tx, operator.id, at);
       await tx
         .insert(operatorGovernanceReceipts)
@@ -142,7 +151,8 @@ export async function confirmFounderProcessingConsentForUser(
             consentId: consent.id,
             aiConnectionId: pair.ai.id,
             calendarConnectionId: pair.calendar.id,
-            purpose: CALENDAR_PURPOSE,
+            mailConnectionId: pair.mail.id,
+            purpose: CORE_PURPOSE,
           }),
           createdAt: at,
         })
@@ -160,7 +170,7 @@ export async function confirmFounderProcessingConsentForUser(
             observation: policy.observation,
             preparation: policy.preparation,
             externalEffects: policy.externalEffects,
-            mailIncluded: policy.mailIncluded,
+            mailIncluded: false,
           }),
           createdAt: at,
         })
@@ -171,77 +181,92 @@ export async function confirmFounderProcessingConsentForUser(
         .set({
           aiConnectionId: pair.ai.id,
           calendarConnectionId: pair.calendar.id,
+          mailConnectionId: pair.mail.id,
           processingConsentId: consent.id,
           authorityPolicyId: policy.id,
-          status: "limited",
+          status: "core",
           updatedAt: at,
         })
         .where(eq(operatorLimitedOperations.id, operation.id))
         .returning();
       if (!saved) {
-        throw new FounderLimitedOperationError(
-          "limited_operation_unavailable",
-          "Limited Operation could not be saved.",
+        throw new FounderCoreOperationError(
+          "core_operation_unavailable",
+          "Core Operation could not be saved.",
           503,
         );
       }
-      await ensureFirstBrief(tx, saved, pair.calendar.lastEvidenceCount, at);
-      return projectOperation(tx, saved, operator.id);
+      await ensureCoreBrief(
+        tx,
+        saved,
+        pair.calendar.lastEvidenceCount + pair.mail.lastEvidenceCount,
+        at,
+      );
+      return projectCoreOperation(tx, saved, operator.id);
     });
   });
 }
 
-/**
- * Reconcile the first brief after a live Calendar check. It is deliberately
- * idempotent: consent and operation state are never recreated by a retry.
- */
-export async function reconcileFounderLimitedOperationForUser(
+export async function reconcileFounderCoreOperationForUser(
   userId: string,
-  dependencies: FounderLimitedOperationDependencies = {},
-): Promise<FounderLimitedOperationDto | null> {
+  dependencies: FounderCoreOperationDependencies = {},
+): Promise<FounderCoreOperationDto | null> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
-  return withConnection(dependencies, async (connection) => {
-    const now = dependencies.now ?? (() => new Date());
-    return connection.db.transaction(async (tx) => {
+  return withConnection(dependencies, async (connection) =>
+    connection.db.transaction(async (tx) => {
       await lockOperator(tx, operator.id);
-      const operation = await ensureOperation(tx, operator.id, now());
-      if (operation?.mailConnectionId) return null;
-      if (operation?.status !== "limited" || !operation.processingConsentId) {
-        return operation ? projectOperation(tx, operation, operator.id) : null;
+      const operation = await ensureCoreOperation(
+        tx,
+        operator.id,
+        dependencies.now?.() ?? new Date(),
+      );
+      if (operation?.status !== "core" || !operation.processingConsentId) {
+        return operation ? projectCoreOperation(tx, operation, operator.id) : null;
       }
       const [calendar] = await tx
         .select()
         .from(operatorCalendarConnections)
         .where(eq(operatorCalendarConnections.id, operation.calendarConnectionId))
         .limit(1);
-      if (calendar?.status === "ready" && calendar.evidenceState === "current") {
-        await ensureFirstBrief(tx, operation, calendar.lastEvidenceCount, now());
+      const [mail] = operation.mailConnectionId
+        ? await tx
+            .select()
+            .from(operatorMailConnections)
+            .where(eq(operatorMailConnections.id, operation.mailConnectionId))
+            .limit(1)
+        : [];
+      if (calendar?.evidenceState === "current" && mail?.evidenceState === "current") {
+        await ensureCoreBrief(
+          tx,
+          operation,
+          calendar.lastEvidenceCount + (mail.lastEvidenceCount ?? 0),
+          dependencies.now?.() ?? new Date(),
+        );
       }
       const [fresh] = await tx
         .select()
         .from(operatorLimitedOperations)
         .where(eq(operatorLimitedOperations.id, operation.id))
         .limit(1);
-      return fresh ? projectOperation(tx, fresh, operator.id) : null;
-    });
-  });
+      return fresh ? projectCoreOperation(tx, fresh, operator.id) : null;
+    }),
+  );
 }
 
-export async function openFounderMorningBriefForUser(
+export async function openFounderCoreBriefForUser(
   userId: string,
-  dependencies: FounderLimitedOperationDependencies = {},
-): Promise<FounderLimitedOperationDto> {
+  dependencies: FounderCoreOperationDependencies = {},
+): Promise<FounderCoreOperationDto> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   return withConnection(dependencies, async (connection) => {
-    const now = dependencies.now ?? (() => new Date());
-    const at = now();
+    const at = dependencies.now?.() ?? new Date();
     return connection.db.transaction(async (tx) => {
       await lockOperator(tx, operator.id);
-      const operation = await ensureOperation(tx, operator.id, at);
-      if (operation?.status !== "limited") {
-        throw new FounderLimitedOperationError(
-          "limited_operation_not_ready",
-          "Confirm Processing Consent before opening the Founder Morning Brief.",
+      const operation = await ensureCoreOperation(tx, operator.id, at);
+      if (operation?.status !== "core") {
+        throw new FounderCoreOperationError(
+          "core_operation_not_ready",
+          "Confirm Core Operation Processing Consent before opening the current brief.",
         );
       }
       const [brief] = await tx
@@ -255,9 +280,9 @@ export async function openFounderMorningBriefForUser(
         )
         .limit(1);
       if (!brief) {
-        throw new FounderLimitedOperationError(
+        throw new FounderCoreOperationError(
           "first_brief_not_ready",
-          "Bruno is waiting for a Current check of your selected Calendar.",
+          "Bruno is waiting for Current Calendar and Mail evidence.",
         );
       }
       const openedAt = brief.openedAt ?? at;
@@ -276,8 +301,7 @@ export async function openFounderMorningBriefForUser(
           evidenceDigest: digest({
             operatorId: operator.id,
             firstBriefId: brief.id,
-            evidenceState: brief.evidenceState,
-            generation: brief.generation,
+            purpose: CORE_PURPOSE,
           }),
         })
         .onConflictDoNothing();
@@ -295,30 +319,30 @@ export async function openFounderMorningBriefForUser(
         .where(eq(operatorLimitedOperations.id, operation.id))
         .limit(1);
       if (!fresh)
-        throw new FounderLimitedOperationError(
-          "limited_operation_unavailable",
-          "Limited Operation could not be reloaded.",
+        throw new FounderCoreOperationError(
+          "core_operation_unavailable",
+          "Core Operation could not be reloaded.",
           503,
         );
-      return projectOperation(tx, fresh, operator.id);
+      return projectCoreOperation(tx, fresh, operator.id);
     });
   });
 }
 
-async function ensureOperation(
-  tx: LimitedOperationTransaction,
+async function ensureCoreOperation(
+  tx: CoreTransaction,
   operatorId: string,
   at: Date,
-  pair?: Awaited<ReturnType<typeof readyConnectionPair>>,
+  pair?: Awaited<ReturnType<typeof readyCoreConnectionSet>>,
 ) {
-  const currentPair = pair ?? (await readyConnectionPair(tx, operatorId));
+  const currentPair = pair ?? (await readyCoreConnectionSet(tx, operatorId));
   const [existing] = await tx
     .select()
     .from(operatorLimitedOperations)
     .where(eq(operatorLimitedOperations.operatorId, operatorId))
     .limit(1);
   if (!currentPair) {
-    if (existing && existing.status === "limited") {
+    if (existing?.mailConnectionId && existing.status === "core") {
       const [updated] = await tx
         .update(operatorLimitedOperations)
         .set({ status: "needs_attention", updatedAt: at })
@@ -326,31 +350,30 @@ async function ensureOperation(
         .returning();
       return updated ?? existing;
     }
-    return existing;
+    return existing?.mailConnectionId ? existing : null;
   }
   if (existing) {
     if (
-      existing.status === "limited" &&
+      existing.mailConnectionId &&
+      existing.status === "core" &&
       (existing.aiConnectionId !== currentPair.ai.id ||
-        existing.calendarConnectionId !== currentPair.calendar.id)
+        existing.calendarConnectionId !== currentPair.calendar.id ||
+        existing.mailConnectionId !== currentPair.mail.id)
     ) {
-      const [needsAttention] = await tx
+      const [updated] = await tx
         .update(operatorLimitedOperations)
         .set({ status: "needs_attention", updatedAt: at })
         .where(eq(operatorLimitedOperations.id, existing.id))
         .returning();
-      return needsAttention ?? existing;
+      return updated ?? existing;
     }
-    if (
-      existing.status === "awaiting_consent" &&
-      (existing.aiConnectionId !== currentPair.ai.id ||
-        existing.calendarConnectionId !== currentPair.calendar.id)
-    ) {
+    if (!existing.mailConnectionId && existing.status !== "core") {
       const [updated] = await tx
         .update(operatorLimitedOperations)
         .set({
           aiConnectionId: currentPair.ai.id,
           calendarConnectionId: currentPair.calendar.id,
+          mailConnectionId: currentPair.mail.id,
           updatedAt: at,
         })
         .where(eq(operatorLimitedOperations.id, existing.id))
@@ -365,6 +388,7 @@ async function ensureOperation(
       operatorId,
       aiConnectionId: currentPair.ai.id,
       calendarConnectionId: currentPair.calendar.id,
+      mailConnectionId: currentPair.mail.id,
       status: "awaiting_consent",
       createdAt: at,
       updatedAt: at,
@@ -383,7 +407,7 @@ async function ensureOperation(
   );
 }
 
-async function readyConnectionPair(tx: LimitedOperationTransaction, operatorId: string) {
+async function readyCoreConnectionSet(tx: CoreTransaction, operatorId: string) {
   const [ai] = await tx
     .select()
     .from(operatorAiConnections)
@@ -407,14 +431,46 @@ async function readyConnectionPair(tx: LimitedOperationTransaction, operatorId: 
     )
     .orderBy(desc(operatorCalendarConnections.updatedAt))
     .limit(1);
-  return ai && calendar ? { ai, calendar } : null;
+  const [mail] = await tx
+    .select()
+    .from(operatorMailConnections)
+    .where(
+      and(
+        eq(operatorMailConnections.operatorId, operatorId),
+        eq(operatorMailConnections.status, "ready"),
+        eq(operatorMailConnections.evidenceState, "current"),
+        eq(operatorMailConnections.suiteStatus, "matched"),
+      ),
+    )
+    .orderBy(desc(operatorMailConnections.updatedAt))
+    .limit(1);
+  if (
+    !ai ||
+    !calendar ||
+    !mail ||
+    !calendar.providerSubjectId ||
+    calendar.providerSubjectId !== mail.providerSubjectId
+  )
+    return null;
+  const [suite] = await tx
+    .select()
+    .from(operatorPrimaryCommunicationsSuites)
+    .where(
+      and(
+        eq(operatorPrimaryCommunicationsSuites.operatorId, operatorId),
+        eq(operatorPrimaryCommunicationsSuites.calendarConnectionId, calendar.id),
+        eq(operatorPrimaryCommunicationsSuites.mailConnectionId, mail.id),
+        eq(operatorPrimaryCommunicationsSuites.status, "active"),
+      ),
+    )
+    .limit(1);
+  return suite ? { ai, calendar, mail, suite } : null;
 }
 
-async function upsertConsent(
-  tx: LimitedOperationTransaction,
+async function upsertCoreConsent(
+  tx: CoreTransaction,
   operatorId: string,
-  aiConnectionId: string,
-  calendarConnectionId: string,
+  pair: NonNullable<Awaited<ReturnType<typeof readyCoreConnectionSet>>>,
   at: Date,
 ) {
   const [existing] = await tx
@@ -423,8 +479,10 @@ async function upsertConsent(
     .where(
       and(
         eq(operatorProcessingConsents.operatorId, operatorId),
-        eq(operatorProcessingConsents.aiConnectionId, aiConnectionId),
-        eq(operatorProcessingConsents.calendarConnectionId, calendarConnectionId),
+        eq(operatorProcessingConsents.aiConnectionId, pair.ai.id),
+        eq(operatorProcessingConsents.calendarConnectionId, pair.calendar.id),
+        eq(operatorProcessingConsents.mailConnectionId, pair.mail.id),
+        eq(operatorProcessingConsents.purpose, CORE_PURPOSE),
       ),
     )
     .limit(1);
@@ -441,24 +499,25 @@ async function upsertConsent(
     .insert(operatorProcessingConsents)
     .values({
       operatorId,
-      aiConnectionId,
-      calendarConnectionId,
+      aiConnectionId: pair.ai.id,
+      calendarConnectionId: pair.calendar.id,
+      mailConnectionId: pair.mail.id,
       status: "active",
-      purpose: CALENDAR_PURPOSE,
+      purpose: CORE_PURPOSE,
       confirmedAt: at,
       createdAt: at,
     })
     .returning();
   if (!created)
-    throw new FounderLimitedOperationError(
+    throw new FounderCoreOperationError(
       "consent_unavailable",
-      "Processing Consent could not be saved.",
+      "Core Processing Consent could not be saved.",
       503,
     );
   return created;
 }
 
-async function upsertSafePolicy(tx: LimitedOperationTransaction, operatorId: string, at: Date) {
+async function upsertSafePolicy(tx: CoreTransaction, operatorId: string, at: Date) {
   const [existing] = await tx
     .select()
     .from(operatorAuthorityPolicies)
@@ -488,7 +547,7 @@ async function upsertSafePolicy(tx: LimitedOperationTransaction, operatorId: str
     .orderBy(desc(operatorAuthorityPolicies.version))
     .limit(1);
   if (!afterConflict)
-    throw new FounderLimitedOperationError(
+    throw new FounderCoreOperationError(
       "policy_unavailable",
       "Safe Authority Policy could not be saved.",
       503,
@@ -496,13 +555,13 @@ async function upsertSafePolicy(tx: LimitedOperationTransaction, operatorId: str
   return afterConflict;
 }
 
-async function ensureFirstBrief(
-  tx: LimitedOperationTransaction,
+async function ensureCoreBrief(
+  tx: CoreTransaction,
   operation: typeof operatorLimitedOperations.$inferSelect,
   evidenceCount: number,
   at: Date,
-): Promise<void> {
-  if (operation.status !== "limited") return;
+) {
+  if (operation.status !== "core") return;
   const [existing] = await tx
     .select()
     .from(operatorMorningBriefs)
@@ -518,8 +577,8 @@ async function ensureFirstBrief(
   const windowStartedAt = new Date(at.getTime() - 24 * 60 * 60 * 1000);
   const windowEndedAt = new Date(at.getTime() + 7 * 24 * 60 * 60 * 1000);
   const content = quiet
-    ? "Nothing needs attention in your selected Calendar right now. This is a verified quiet brief."
-    : "Your selected Calendar is Current. Bruno found calendar evidence in the brief window and is ready to help you prepare for it.";
+    ? "Nothing needs attention across your Calendar and selected Mail right now. This is a verified quiet brief."
+    : "Your Primary Communications Suite is Current. Bruno found Calendar and Mail evidence and is ready to help prepare your day.";
   await tx
     .insert(operatorMorningBriefs)
     .values({
@@ -536,6 +595,7 @@ async function ensureFirstBrief(
         generation: 1,
         evidenceCount,
         at: at.toISOString(),
+        purpose: CORE_PURPOSE,
       }),
       windowStartedAt,
       windowEndedAt,
@@ -545,11 +605,11 @@ async function ensureFirstBrief(
     .onConflictDoNothing();
 }
 
-async function projectOperation(
-  tx: LimitedOperationTransaction,
+async function projectCoreOperation(
+  tx: CoreTransaction,
   operation: typeof operatorLimitedOperations.$inferSelect,
   operatorId: string,
-): Promise<FounderLimitedOperationDto> {
+): Promise<FounderCoreOperationDto> {
   const [consent] = operation.processingConsentId
     ? await tx
         .select()
@@ -574,6 +634,28 @@ async function projectOperation(
     .from(operatorCalendarConnections)
     .where(eq(operatorCalendarConnections.id, operation.calendarConnectionId))
     .limit(1);
+  const [mail] = operation.mailConnectionId
+    ? await tx
+        .select()
+        .from(operatorMailConnections)
+        .where(eq(operatorMailConnections.id, operation.mailConnectionId))
+        .limit(1)
+    : [];
+  const [suite] = operation.mailConnectionId
+    ? await tx
+        .select()
+        .from(operatorPrimaryCommunicationsSuites)
+        .where(
+          and(
+            eq(
+              operatorPrimaryCommunicationsSuites.calendarConnectionId,
+              operation.calendarConnectionId,
+            ),
+            eq(operatorPrimaryCommunicationsSuites.mailConnectionId, operation.mailConnectionId),
+          ),
+        )
+        .limit(1)
+    : [];
   const [brief] = await tx
     .select()
     .from(operatorMorningBriefs)
@@ -589,25 +671,54 @@ async function projectOperation(
     .from(operatorFounderActivations)
     .where(eq(operatorFounderActivations.operatorId, operatorId))
     .limit(1);
-  const limited = operation.status === "limited";
-  const projectedStatus: FounderLimitedOperationStatus =
-    operation.status === "core" ? "needs_attention" : operation.status;
   return {
-    name: "Calendar-only Limited Operation",
-    status: projectedStatus,
-    mailIncluded: false,
+    name: "Core Operation",
+    status:
+      operation.status === "core"
+        ? "core"
+        : operation.status === "needs_attention"
+          ? "needs_attention"
+          : "awaiting_consent",
+    mailIncluded: true,
+    mailSendingRequired: false,
+    suite: {
+      status:
+        suite?.status === "active" &&
+        mail?.suiteStatus === "matched" &&
+        mail.providerSubjectId === calendar?.providerSubjectId
+          ? "active"
+          : mail &&
+              calendar &&
+              (mail.suiteStatus === "mismatch" ||
+                mail.providerSubjectId !== calendar.providerSubjectId)
+            ? "mismatch"
+            : "unavailable",
+      providerSubjectId: suite?.providerSubjectId ?? calendar?.providerSubjectId ?? null,
+    },
     access: {
       ai: ai?.status === "ready" ? "ready" : "unavailable",
       calendar: calendar?.status === "ready" ? "ready" : "unavailable",
-      evidence: calendar?.evidenceState === "current" ? "current" : "unavailable",
+      mail: mail?.status === "ready" ? "ready" : "unavailable",
+      evidence:
+        calendar?.evidenceState === "current" && mail?.evidenceState === "current"
+          ? "current"
+          : "unavailable",
     },
     consent: {
-      status: limited && consent?.status === "active" ? "active" : "missing",
-      purpose: CALENDAR_PURPOSE,
-      confirmedAt: limited ? (consent?.confirmedAt.toISOString() ?? null) : null,
+      status:
+        operation.status === "core" &&
+        consent?.status === "active" &&
+        consent.purpose === CORE_PURPOSE
+          ? "active"
+          : "missing",
+      purpose: CORE_PURPOSE,
+      confirmedAt:
+        operation.status === "core" && consent?.purpose === CORE_PURPOSE
+          ? consent.confirmedAt.toISOString()
+          : null,
     },
     authorityPolicy:
-      limited &&
+      operation.status === "core" &&
       policy &&
       policy.observation === "always" &&
       policy.preparation === "always" &&
@@ -621,7 +732,7 @@ async function projectOperation(
           }
         : null,
     brief:
-      limited && brief
+      operation.status === "core" && brief
         ? {
             id: brief.id,
             generation: brief.generation,
@@ -634,13 +745,14 @@ async function projectOperation(
             openedAt: brief.openedAt?.toISOString() ?? null,
           }
         : null,
-    activatedAt: limited
-      ? (activation?.activatedAt.toISOString() ?? operation.activatedAt?.toISOString() ?? null)
-      : null,
+    activatedAt:
+      operation.status === "core"
+        ? (activation?.activatedAt.toISOString() ?? operation.activatedAt?.toISOString() ?? null)
+        : null,
   };
 }
 
-async function lockOperator(tx: LimitedOperationTransaction, operatorId: string): Promise<void> {
+async function lockOperator(tx: CoreTransaction, operatorId: string) {
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-operator:${operatorId}`}, 0))`,
   );
@@ -651,7 +763,7 @@ function digest(value: unknown): string {
 }
 
 async function withConnection<T>(
-  dependencies: FounderLimitedOperationDependencies,
+  dependencies: FounderCoreOperationDependencies,
   callback: (connection: DatabaseConnection) => Promise<T>,
 ): Promise<T> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();

@@ -6,6 +6,7 @@ import {
   REQUIRED_MAIL_SCOPE,
 } from "@/src/server/operators/founder-mail-connection";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import { getFounderOnboardingForUser } from "@/src/server/operators/founder-onboarding";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 export const dynamic = "force-dynamic";
@@ -25,12 +26,14 @@ export default async function FounderOperatorPage() {
   }
 
   const operator = await ensureFounderOperatorForUser(applicationUser.userId);
+  const onboarding = await getFounderOnboardingForUser(applicationUser.userId);
   const mailReadingReleased = isFounderGoogleMailReadingReleased();
 
   return (
     <FounderOperatorShell>
       <FounderOperatorPreparation
         initialOperator={operator}
+        initialOnboarding={onboarding}
         mailReadingReleased={mailReadingReleased}
         mailReleaseControls={
           mailReadingReleased

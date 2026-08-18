@@ -119,6 +119,216 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
   }
 });
 
+test("founder resumes a persisted Core Operation on desktop and mobile", async ({ browser }) => {
+  test.setTimeout(45_000);
+  const fixture = await createFixture();
+  try {
+    await withPinnedDevelopmentUser(fixture.userId, async () => {
+      for (const viewport of [
+        { width: 1280, height: 900 },
+        { width: 390, height: 844 },
+      ]) {
+        const context = await browser.newContext({ viewport });
+        try {
+          const page = await context.newPage();
+          const state = { confirmed: false, activated: false, mode: "ready" as const };
+          await installCoreRoutes(context, state);
+          await page.goto("/operator");
+          await expect(page.getByRole("heading", { name: "Core Operation" })).toBeVisible();
+          await expect(page.getByText("Mail Sending is never required here.")).toBeVisible();
+          await page.getByRole("checkbox", { name: /matched Calendar and selected Mail/ }).check();
+          await page.getByRole("button", { name: "Confirm Core Operation" }).click();
+          await expect(page.getByText("Mail Sending: not required")).toBeVisible();
+          await page.getByRole("button", { name: "Open Founder Morning Brief" }).click();
+          await expect(
+            page.getByText("Founder Activation recorded. Conversation is your current workspace."),
+          ).toBeVisible();
+          await page.reload();
+          await expect(
+            page.getByText("Founder Activation recorded. Conversation is your current workspace."),
+          ).toBeVisible();
+        } finally {
+          await context.close();
+        }
+      }
+    });
+  } finally {
+    await deleteFixture(fixture);
+  }
+});
+
+test("founder sees denied, partial, and stale onboarding facts on desktop and mobile", async ({
+  browser,
+}) => {
+  test.setTimeout(45_000);
+  const fixture = await createFixture();
+  try {
+    await withPinnedDevelopmentUser(fixture.userId, async () => {
+      for (const mode of ["denied", "partial", "stale"] as const) {
+        for (const viewport of [
+          { width: 1280, height: 900 },
+          { width: 390, height: 844 },
+        ]) {
+          const context = await browser.newContext({ viewport });
+          try {
+            const page = await context.newPage();
+            await installCoreRoutes(context, { confirmed: false, activated: false, mode });
+            await page.goto("/operator");
+            const step = mode === "denied" ? "ai" : mode === "partial" ? "calendar" : "mail";
+            await expect(page.locator(`[data-next-step="${step}"]`)).toBeVisible();
+            await expect(
+              page.getByText(new RegExp(`AI: ${mode === "denied" ? "Not connected" : "Ready"}`)),
+            ).toBeVisible();
+            if (mode === "stale")
+              await expect(page.getByText(/Mail: Needs a fresh check/)).toBeVisible();
+          } finally {
+            await context.close();
+          }
+        }
+      }
+    });
+  } finally {
+    await deleteFixture(fixture);
+  }
+});
+
+async function installCoreRoutes(
+  context: import("@playwright/test").BrowserContext,
+  state: {
+    confirmed: boolean;
+    activated: boolean;
+    mode?: "ready" | "denied" | "partial" | "stale";
+  },
+): Promise<void> {
+  await context.route("**/api/operator/onboarding", async (route) => {
+    const mode = state.mode ?? "ready";
+    const nextStep =
+      mode === "denied"
+        ? "ai"
+        : mode === "partial"
+          ? "calendar"
+          : mode === "stale"
+            ? "mail"
+            : state.activated
+              ? "conversation"
+              : state.confirmed
+                ? "brief"
+                : "consent";
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        onboarding: {
+          nextStep,
+          defaultRoute: `/operator#onboarding-${nextStep}`,
+          activated: state.activated,
+          operation: "core",
+          capabilities: {
+            ai: mode === "denied" ? "missing" : "ready",
+            calendar: mode === "partial" ? "missing" : "ready",
+            mail: mode === "stale" ? "stale" : "ready",
+            core: mode === "ready" ? "ready" : "missing",
+          },
+          facts: {
+            timezoneConfirmed: true,
+            runtimeReady: true,
+            processingConsent: state.confirmed,
+            firstBriefReady: state.confirmed,
+            primarySuiteIdentity: "google-founder",
+          },
+        },
+      }),
+    });
+  });
+  await context.route("**/api/operator/connections", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        connection: {
+          provider: "openai",
+          status: "ready",
+          accountLabel: "Founder OpenAI",
+          connectedAt: "2026-08-19T01:00:00.000Z",
+          lastVerifiedAt: "2026-08-19T01:00:00.000Z",
+          workState: "available",
+          recoveryMessage: null,
+          receipt: null,
+        },
+      }),
+    });
+  });
+  await context.route("**/api/operator/calendar", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ connection: dto({ selected: true, status: "ready" }) }),
+    });
+  });
+  await context.route("**/api/operator/mail", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        connection: mailDto({ status: "ready", selected: true }),
+        offerDisposition: "enabled",
+      }),
+    });
+  });
+  await context.route("**/api/operator/limited-operation", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ operation: null }),
+    });
+  });
+  await context.route("**/api/operator/core-operation", async (route) => {
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as { action?: string };
+      if (body.action === "confirm_consent") state.confirmed = true;
+      if (body.action === "open_brief") state.activated = true;
+    }
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ operation: coreOperation(state) }),
+    });
+  });
+}
+
+function coreOperation(state: { confirmed: boolean; activated: boolean }) {
+  return {
+    name: "Core Operation",
+    status: state.confirmed ? "core" : "awaiting_consent",
+    mailIncluded: true,
+    mailSendingRequired: false,
+    suite: { status: "active", providerSubjectId: "google-founder" },
+    access: { ai: "ready", calendar: "ready", mail: "ready", evidence: "current" },
+    consent: {
+      status: state.confirmed ? "active" : "missing",
+      purpose: "core_operation",
+      confirmedAt: state.confirmed ? "2026-08-19T01:02:00.000Z" : null,
+    },
+    authorityPolicy: state.confirmed
+      ? {
+          version: 1,
+          observation: "always",
+          preparation: "always",
+          externalEffects: "approval_required",
+          mailIncluded: false,
+        }
+      : null,
+    brief: state.confirmed
+      ? {
+          id: "core-brief-1",
+          generation: 1,
+          status: state.activated ? "opened" : "prepared",
+          evidenceState: "current",
+          quiet: false,
+          attentionCount: 1,
+          content: "Your Primary Communications Suite is Current.",
+          generatedAt: "2026-08-19T01:02:00.000Z",
+          openedAt: state.activated ? "2026-08-19T01:03:00.000Z" : null,
+        }
+      : null,
+    activatedAt: state.activated ? "2026-08-19T01:03:00.000Z" : null,
+  };
+}
+
 async function installCalendarRoutes(
   context: import("@playwright/test").BrowserContext,
   state: {
@@ -431,6 +641,17 @@ async function deleteFixture(fixture: { userId: string; operatorId: string }): P
     await sql`delete from operator_conversation_messages where conversation_id in (select id from operator_conversations where operator_id = ${fixture.operatorId})`;
     await sql`delete from operator_conversation_works where conversation_id in (select id from operator_conversations where operator_id = ${fixture.operatorId})`;
     await sql`delete from operator_conversations where operator_id = ${fixture.operatorId}`;
+    await sql`delete from operator_founder_activations where operator_id = ${fixture.operatorId}`;
+    await sql`delete from operator_governance_receipts where operator_id = ${fixture.operatorId}`;
+    await sql`update operator_limited_operations set first_brief_id = null where operator_id = ${fixture.operatorId}`;
+    await sql`delete from operator_morning_briefs where operator_id = ${fixture.operatorId}`;
+    await sql`delete from operator_limited_operations where operator_id = ${fixture.operatorId}`;
+    await sql`delete from operator_processing_consents where operator_id = ${fixture.operatorId}`;
+    await sql`delete from operator_authority_policies where operator_id = ${fixture.operatorId}`;
+    await sql`delete from operator_primary_communications_suites where operator_id = ${fixture.operatorId}`;
+    await sql`delete from operator_mail_connection_receipts where connection_id in (select id from operator_mail_connections where operator_id = ${fixture.operatorId})`;
+    await sql`delete from operator_mail_resources where connection_id in (select id from operator_mail_connections where operator_id = ${fixture.operatorId})`;
+    await sql`delete from operator_mail_connections where operator_id = ${fixture.operatorId}`;
     await sql`delete from operator_calendar_connection_receipts where connection_id in (select id from operator_calendar_connections where operator_id = ${fixture.operatorId})`;
     await sql`delete from operator_calendar_resources where connection_id in (select id from operator_calendar_connections where operator_id = ${fixture.operatorId})`;
     await sql`delete from operator_calendar_connections where operator_id = ${fixture.operatorId}`;

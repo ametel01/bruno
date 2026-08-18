@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FounderMailConnectionDto } from "@/src/server/operators/founder-mail-connection";
 import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
+import type { FounderOnboardingDto } from "@/src/server/operators/founder-onboarding";
 import { FounderAiConnection } from "./founder-ai-connection";
 import { FounderCalendarConnection } from "./founder-calendar-connection";
 import { FounderConversation } from "./founder-conversation";
 import { FounderLimitedOperation } from "./founder-limited-operation";
+import { FounderCoreOperation } from "./founder-core-operation";
 import { FounderMailConnection } from "./founder-mail-connection";
 import styles from "./founder-operator-preparation.module.css";
 
@@ -16,10 +18,12 @@ const TIMEZONE_VALUES: ReadonlySet<string> = new Set(TIMEZONE_OPTIONS.map(([valu
 
 export function FounderOperatorPreparation({
   initialOperator,
+  initialOnboarding,
   mailReadingReleased = false,
   mailReleaseControls,
 }: {
   initialOperator: FounderOperatorDto;
+  initialOnboarding?: FounderOnboardingDto;
   mailReadingReleased?: boolean;
   mailReleaseControls?: FounderMailConnectionDto["release"] | undefined;
 }) {
@@ -28,6 +32,45 @@ export function FounderOperatorPreparation({
   const [detectedTimezone, setDetectedTimezone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [onboarding, setOnboarding] = useState(initialOnboarding);
+  const lastOpenedStep = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void fetch("/api/operator/onboarding", { credentials: "same-origin" })
+        .then(async (response) => {
+          if (!response.ok) return null;
+          return (await response.json()) as { onboarding?: FounderOnboardingDto };
+        })
+        .then((body) => {
+          if (!cancelled && body?.onboarding) setOnboarding(body.onboarding);
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      !onboarding ||
+      lastOpenedStep.current === `${onboarding.nextStep}:${onboarding.activated}`
+    ) {
+      return;
+    }
+    lastOpenedStep.current = `${onboarding.nextStep}:${onboarding.activated}`;
+    const targetId = onboarding.activated
+      ? "conversation"
+      : onboarding.nextStep === "ai"
+        ? "connections"
+        : onboarding.nextStep;
+    document.getElementById(targetId)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [onboarding]);
 
   useEffect(() => {
     const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -154,6 +197,40 @@ export function FounderOperatorPreparation({
         </p>
       </section>
 
+      {onboarding ? (
+        <section
+          className={styles.card}
+          id={`onboarding-${onboarding.nextStep}`}
+          data-next-step={onboarding.nextStep}
+          aria-labelledby="onboarding-next-step-title"
+        >
+          <div className={styles.cardHeading}>
+            <div>
+              <p className={styles.kicker}>{onboarding.activated ? "Now" : "Needs you"}</p>
+              <h3 id="onboarding-next-step-title">
+                {onboarding.activated
+                  ? "Your current brief and Conversation are ready."
+                  : `Next step: ${onboardingStepLabel(onboarding.nextStep)}`}
+              </h3>
+            </div>
+            <span className={styles.confirmed}>
+              {onboarding.operation === "core" ? "Core Operation" : "Saved"}
+            </span>
+          </div>
+          <p className={styles.hint}>
+            {onboarding.activated
+              ? "Bruno opens the active workspace here after every refresh."
+              : "This step is derived from the latest saved connection, consent, and evidence state."}
+          </p>
+          <p className={styles.hint}>
+            Capabilities — AI: {capabilityLabel(onboarding.capabilities.ai)}; Calendar:{" "}
+            {capabilityLabel(onboarding.capabilities.calendar)}; Mail:{" "}
+            {capabilityLabel(onboarding.capabilities.mail)}; Core:{" "}
+            {capabilityLabel(onboarding.capabilities.core)}.
+          </p>
+        </section>
+      ) : null}
+
       {!awaitingTimezone && runtimeNeedsAttention ? (
         <section className={styles.card} aria-labelledby="recovery-title">
           <div className={styles.cardHeading}>
@@ -225,7 +302,9 @@ export function FounderOperatorPreparation({
         <FounderMailConnection releaseControls={mailReleaseControls} />
       ) : null}
 
-      {runtimeReady ? <FounderLimitedOperation /> : null}
+      {runtimeReady && onboarding?.operation === "core" ? <FounderCoreOperation /> : null}
+
+      {runtimeReady && onboarding?.operation !== "core" ? <FounderLimitedOperation /> : null}
 
       <section className={styles.resume} aria-labelledby="resume-title">
         <p className={styles.kicker}>Safe to resume</p>
@@ -241,6 +320,32 @@ export function FounderOperatorPreparation({
 
 function timezoneLabel(value: string): string {
   return TIMEZONE_OPTIONS.find(([option]) => option === value)?.[1] ?? "your local time";
+}
+
+function onboardingStepLabel(step: FounderOnboardingDto["nextStep"]): string {
+  return {
+    timezone: "Confirm your local time",
+    runtime: "Prepare your private workspace",
+    ai: "Connect your Ready AI Connection",
+    calendar: "Connect your Ready Calendar Connection",
+    mail: "Review Mail evidence access",
+    consent: "Confirm Processing Consent",
+    brief: "Open your Founder Morning Brief",
+    activation: "Activate your Founder workspace",
+    conversation: "Open Conversation",
+  }[step];
+}
+
+function capabilityLabel(state: FounderOnboardingDto["capabilities"]["ai"]): string {
+  return {
+    ready: "Ready",
+    missing: "Not connected",
+    authorizing: "In progress",
+    stale: "Needs a fresh check",
+    mismatch: "Accounts do not match",
+    deferred: "Deferred",
+    not_offered: "Not offered",
+  }[state];
 }
 
 function buildTimezoneOptions(): ReadonlyArray<readonly [string, string]> {
