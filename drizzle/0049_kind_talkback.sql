@@ -1,0 +1,2 @@
+DROP INDEX "operator_calendar_connection_receipts_generation_idx";--> statement-breakpoint
+CREATE INDEX "operator_calendar_connection_receipts_generation_idx" ON "operator_calendar_connection_receipts" USING btree ("connection_id","generation","kind");

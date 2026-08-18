@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
 import { FounderAiConnection } from "./founder-ai-connection";
+import { FounderCalendarConnection } from "./founder-calendar-connection";
 import { FounderConversation } from "./founder-conversation";
 import styles from "./founder-operator-preparation.module.css";
 
@@ -210,6 +211,8 @@ export function FounderOperatorPreparation({
       {runtimeReady ? <FounderConversation /> : null}
 
       {runtimeReady ? <FounderAiConnection /> : null}
+
+      {runtimeReady ? <FounderCalendarConnection /> : null}
 
       <section className={styles.resume} aria-labelledby="resume-title">
         <p className={styles.kicker}>Safe to resume</p>

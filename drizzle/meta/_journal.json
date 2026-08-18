@@ -330,6 +330,27 @@
       "when": 1787048258497,
       "tag": "0046_broad_bucky",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1787071507856,
+      "tag": "0047_minor_gambit",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1787071583890,
+      "tag": "0048_yellow_mercury",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1787072266388,
+      "tag": "0049_kind_talkback",
+      "breakpoints": true
     }
   ]
 }

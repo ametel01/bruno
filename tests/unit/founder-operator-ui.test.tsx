@@ -97,4 +97,29 @@ describe("Founder Operator preparation shell", () => {
     expect(html).not.toContain("Telegram");
     expect(html).not.toContain("WhatsApp");
   });
+
+  it("presents Calendar access as a reviewed, founder-selected connection", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: {
+          ...OPERATOR,
+          preparation: {
+            ...OPERATOR.preparation,
+            status: "ready",
+            timezone: "Asia/Manila",
+            timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+            startedAt: "2026-08-18T01:00:00.000Z",
+            completedAt: "2026-08-18T01:00:01.000Z",
+          },
+          runtime: { status: "ready", recoveryMessage: null },
+        },
+      }),
+    );
+
+    expect(html).toContain("Your Calendar Connection");
+    expect(html).toContain("read-only Calendar access");
+    expect(html).toContain("Google Calendar data remains in Google");
+    expect(html).not.toContain("Telegram");
+    expect(html).not.toContain("WhatsApp");
+  });
 });

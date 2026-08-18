@@ -102,6 +102,36 @@ export const operatorAiConnectionReceiptKindEnum = pgEnum("operator_ai_connectio
   "disconnected",
 ]);
 
+export const operatorCalendarConnectionStatusEnum = pgEnum("operator_calendar_connection_status", [
+  "authorizing",
+  "selecting",
+  "verifying",
+  "ready",
+  "needs_attention",
+  "disconnected",
+]);
+
+export const operatorCalendarAuthorizationStateEnum = pgEnum(
+  "operator_calendar_authorization_state",
+  ["pending", "authorized", "expired", "revoked", "revocation_unconfirmed"],
+);
+
+export const operatorCalendarResourceStatusEnum = pgEnum("operator_calendar_resource_status", [
+  "available",
+  "removed",
+]);
+
+export const operatorCalendarConnectionReceiptKindEnum = pgEnum(
+  "operator_calendar_connection_receipt_kind",
+  ["authorized", "reauthorized", "verified", "verification_failed", "revoked", "disconnected"],
+);
+
+export const operatorCalendarEvidenceStateEnum = pgEnum("operator_calendar_evidence_state", [
+  "unknown",
+  "current",
+  "unavailable",
+]);
+
 export const operatorConversationStatusEnum = pgEnum("operator_conversation_status", [
   "active",
   "paused",
@@ -681,6 +711,188 @@ export const operatorAiConnectionReceipts = pgTable(
       table.kind,
     ),
     index("operator_ai_connection_receipts_created_idx").on(table.connectionId, table.createdAt),
+  ],
+);
+
+export const operatorCalendarConnections = pgTable(
+  "operator_calendar_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    provider: text("provider").notNull().default("google_calendar"),
+    providerSubjectId: text("provider_subject_id"),
+    accountLabel: text("account_label"),
+    status: operatorCalendarConnectionStatusEnum("status").notNull().default("authorizing"),
+    authorizationState: operatorCalendarAuthorizationStateEnum("authorization_state")
+      .notNull()
+      .default("pending"),
+    authorizationSessionHash: text("authorization_session_hash"),
+    authorizationExpiresAt: timestamp("authorization_expires_at", { withTimezone: true }),
+    authorizationGeneration: integer("authorization_generation").notNull().default(1),
+    accessTokenCiphertext: text("access_token_ciphertext"),
+    accessTokenIv: text("access_token_iv"),
+    accessTokenAuthTag: text("access_token_auth_tag"),
+    refreshTokenCiphertext: text("refresh_token_ciphertext"),
+    refreshTokenIv: text("refresh_token_iv"),
+    refreshTokenAuthTag: text("refresh_token_auth_tag"),
+    secretKeyVersion: text("secret_key_version"),
+    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
+    grantedScopes: jsonb("granted_scopes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    authorizedAt: timestamp("authorized_at", { withTimezone: true }),
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    lastEvidenceAt: timestamp("last_evidence_at", { withTimezone: true }),
+    evidenceState: operatorCalendarEvidenceStateEnum("evidence_state").notNull().default("unknown"),
+    failureCode: text("failure_code"),
+    recoveryMessage: text("recovery_message"),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_calendar_connections_provider_check",
+      sql`${table.provider} = 'google_calendar'`,
+    ),
+    check(
+      "operator_calendar_connections_subject_check",
+      sql`${table.providerSubjectId} IS NULL OR length(trim(${table.providerSubjectId})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "operator_calendar_connections_account_label_check",
+      sql`${table.accountLabel} IS NULL OR length(trim(${table.accountLabel})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "operator_calendar_connections_session_hash_check",
+      sql`${table.authorizationSessionHash} IS NULL OR ${table.authorizationSessionHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      "operator_calendar_connections_generation_check",
+      sql`${table.authorizationGeneration} >= 1`,
+    ),
+    check(
+      "operator_calendar_connections_token_pair_check",
+      sql`(
+        ${table.accessTokenCiphertext} IS NULL AND ${table.accessTokenIv} IS NULL AND ${table.accessTokenAuthTag} IS NULL
+        AND ${table.refreshTokenCiphertext} IS NULL AND ${table.refreshTokenIv} IS NULL AND ${table.refreshTokenAuthTag} IS NULL
+        AND ${table.secretKeyVersion} IS NULL
+      ) OR (
+        ${table.accessTokenCiphertext} IS NOT NULL AND ${table.accessTokenIv} IS NOT NULL AND ${table.accessTokenAuthTag} IS NOT NULL
+        AND ${table.refreshTokenCiphertext} IS NOT NULL AND ${table.refreshTokenIv} IS NOT NULL AND ${table.refreshTokenAuthTag} IS NOT NULL
+        AND ${table.secretKeyVersion} IS NOT NULL
+      )`,
+    ),
+    check(
+      "operator_calendar_connections_failure_pair_check",
+      sql`(${table.failureCode} IS NULL AND ${table.recoveryMessage} IS NULL) OR (${table.failureCode} IS NOT NULL AND ${table.recoveryMessage} IS NOT NULL)`,
+    ),
+    check(
+      "operator_calendar_connections_ready_shape_check",
+      sql`${table.status} <> 'ready' OR (${table.providerSubjectId} IS NOT NULL AND ${table.accountLabel} IS NOT NULL AND ${table.authorizationState} = 'authorized' AND ${table.authorizationSessionHash} IS NULL AND ${table.accessTokenCiphertext} IS NOT NULL AND ${table.refreshTokenCiphertext} IS NOT NULL AND ${table.lastVerifiedAt} IS NOT NULL AND ${table.lastEvidenceAt} IS NOT NULL)`,
+    ),
+    uniqueIndex("operator_calendar_connections_operator_provider_idx").on(
+      table.operatorId,
+      table.provider,
+    ),
+    index("operator_calendar_connections_status_idx").on(table.status),
+  ],
+);
+
+export const operatorCalendarResources = pgTable(
+  "operator_calendar_resources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => operatorCalendarConnections.id, { onDelete: "cascade" }),
+    providerResourceId: text("provider_resource_id").notNull(),
+    summary: text("summary").notNull(),
+    timeZone: text("time_zone"),
+    accessRole: text("access_role"),
+    primaryCalendar: boolean("primary_calendar").notNull().default(false),
+    selected: boolean("selected").notNull().default(false),
+    status: operatorCalendarResourceStatusEnum("status").notNull().default("available"),
+    selectionReviewedAt: timestamp("selection_reviewed_at", { withTimezone: true }),
+    discoveredAt: timestamp("discovered_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_calendar_resources_provider_id_check",
+      sql`length(trim(${table.providerResourceId})) BETWEEN 1 AND 500`,
+    ),
+    check(
+      "operator_calendar_resources_summary_check",
+      sql`length(trim(${table.summary})) BETWEEN 1 AND 500`,
+    ),
+    check(
+      "operator_calendar_resources_selection_check",
+      sql`${table.selected} = false OR (${table.status} = 'available' AND ${table.selectionReviewedAt} IS NOT NULL)`,
+    ),
+    uniqueIndex("operator_calendar_resources_connection_provider_id_idx").on(
+      table.connectionId,
+      table.providerResourceId,
+    ),
+    index("operator_calendar_resources_connection_selected_idx").on(
+      table.connectionId,
+      table.selected,
+    ),
+  ],
+);
+
+export const operatorCalendarConnectionReceipts = pgTable(
+  "operator_calendar_connection_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => operatorCalendarConnections.id, { onDelete: "restrict" }),
+    generation: integer("generation").notNull(),
+    kind: operatorCalendarConnectionReceiptKindEnum("kind").notNull(),
+    provider: text("provider").notNull().default("google_calendar"),
+    providerSubjectId: text("provider_subject_id"),
+    accountLabel: text("account_label"),
+    grantedScopes: jsonb("granted_scopes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    selectedResourceCount: integer("selected_resource_count").notNull().default(0),
+    selectedResourceDigest: text("selected_resource_digest").notNull(),
+    evidenceState: operatorCalendarEvidenceStateEnum("evidence_state").notNull().default("unknown"),
+    status: text("status").notNull(),
+    evidenceDigest: text("evidence_digest").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_calendar_connection_receipts_provider_check",
+      sql`${table.provider} = 'google_calendar'`,
+    ),
+    check(
+      "operator_calendar_connection_receipts_subject_check",
+      sql`${table.providerSubjectId} IS NULL OR length(trim(${table.providerSubjectId})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "operator_calendar_connection_receipts_account_label_check",
+      sql`${table.accountLabel} IS NULL OR length(trim(${table.accountLabel})) BETWEEN 1 AND 200`,
+    ),
+    check("operator_calendar_connection_receipts_generation_check", sql`${table.generation} >= 1`),
+    check(
+      "operator_calendar_connection_receipts_count_check",
+      sql`${table.selectedResourceCount} >= 0`,
+    ),
+    check(
+      "operator_calendar_connection_receipts_digest_check",
+      sql`${table.evidenceDigest} ~ '^sha256:[a-f0-9]{64}$' AND ${table.selectedResourceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    index("operator_calendar_connection_receipts_generation_idx").on(
+      table.connectionId,
+      table.generation,
+      table.kind,
+    ),
+    index("operator_calendar_connection_receipts_created_idx").on(
+      table.connectionId,
+      table.createdAt,
+    ),
   ],
 );
 
