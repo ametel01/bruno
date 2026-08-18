@@ -7,6 +7,7 @@ import type { FounderOnboardingDto } from "@/src/server/operators/founder-onboar
 import { FounderAiConnection } from "./founder-ai-connection";
 import { FounderCalendarConnection } from "./founder-calendar-connection";
 import { FounderConversation } from "./founder-conversation";
+import { FounderActionInbox } from "./founder-action-inbox";
 import { FounderLimitedOperation } from "./founder-limited-operation";
 import { FounderCoreOperation } from "./founder-core-operation";
 import { FounderMailConnection } from "./founder-mail-connection";
@@ -294,6 +295,8 @@ export function FounderOperatorPreparation({
       </section>
 
       {runtimeReady ? <FounderConversation /> : null}
+
+      {runtimeReady ? <FounderActionInbox /> : null}
 
       {runtimeReady ? <FounderAiConnection /> : null}
 

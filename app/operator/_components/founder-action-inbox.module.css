@@ -1,0 +1,156 @@
+.card {
+  display: grid;
+  gap: 1rem;
+  border: 1px solid var(--operator-rule);
+  border-radius: 24px;
+  background: var(--operator-white);
+  padding: clamp(20px, 3vw, 30px);
+}
+
+.heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.kicker {
+  margin: 0 0 0.35rem;
+  color: var(--operator-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.heading h3 {
+  margin: 0;
+  font-family: var(--font-bruno-display), Georgia, serif;
+  font-size: clamp(1.35rem, 3vw, 1.9rem);
+  letter-spacing: -0.04em;
+}
+
+.badge {
+  border-radius: 999px;
+  background: var(--operator-mint-soft);
+  color: var(--operator-ink);
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.42rem 0.65rem;
+  white-space: nowrap;
+}
+
+.notice,
+.hint,
+.error {
+  margin: 0;
+  color: var(--operator-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.editor {
+  display: grid;
+  gap: 0.55rem;
+  border-top: 1px solid var(--operator-rule);
+  padding-top: 1rem;
+}
+
+.editor label {
+  color: var(--operator-ink);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.editor input,
+.editor textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--operator-rule);
+  border-radius: 12px;
+  background: var(--operator-white);
+  color: var(--operator-ink);
+  font: inherit;
+  line-height: 1.5;
+  padding: 0.7rem;
+}
+
+.editor button {
+  min-height: 42px;
+  width: fit-content;
+  border: 0;
+  border-radius: 999px;
+  background: var(--operator-ink);
+  color: var(--operator-white);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0 1rem;
+}
+
+.editor button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.error {
+  color: #9f452e;
+}
+
+.offer {
+  display: grid;
+  gap: 0.45rem;
+  border-top: 1px solid var(--operator-rule);
+  color: var(--operator-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  padding-top: 1rem;
+}
+
+.offer p,
+.offer strong {
+  margin: 0;
+}
+
+.offer strong {
+  color: var(--operator-ink);
+}
+
+.offerActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.offerActions a,
+.offerActions button {
+  min-height: 2.2rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--operator-ink);
+  color: var(--operator-white);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.5rem 0.8rem;
+  text-decoration: none;
+}
+
+.offerActions button {
+  background: transparent;
+  color: var(--operator-ink);
+  text-decoration: underline;
+}
+
+@media (max-width: 560px) {
+  .heading {
+    flex-direction: column;
+  }
+
+  .editor button {
+    width: 100%;
+  }
+}

@@ -16,6 +16,10 @@ import {
   operatorProcessingConsents,
 } from "@/src/server/db/schema";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  projectFounderActionPreview,
+  type FounderActionPreviewDto,
+} from "@/src/server/operators/founder-action-previews";
 
 type LimitedOperationTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -57,6 +61,7 @@ export type FounderLimitedOperationDto = {
     generatedAt: string;
     openedAt: string | null;
   } | null;
+  actionPreview?: FounderActionPreviewDto;
   activatedAt: string | null;
 };
 
@@ -634,6 +639,7 @@ async function projectOperation(
             openedAt: brief.openedAt?.toISOString() ?? null,
           }
         : null,
+    actionPreview: await projectFounderActionPreview(tx, operatorId),
     activatedAt: limited
       ? (activation?.activatedAt.toISOString() ?? operation.activatedAt?.toISOString() ?? null)
       : null,

@@ -231,6 +231,8 @@ export const operatorConversationWorkStateEnum = pgEnum("operator_conversation_w
   "failed",
 ]);
 
+export const operatorActionPreviewStateEnum = pgEnum("operator_action_preview_state", ["draft"]);
+
 export const operatorRelationshipStateEnum = pgEnum("operator_relationship_state", [
   "lead",
   "client",
@@ -1645,7 +1647,7 @@ export const operatorConversations = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     operatorId: uuid("operator_id")
       .notNull()
-      .references(() => operators.id),
+      .references(() => operators.id, { onDelete: "cascade" }),
     status: operatorConversationStatusEnum("status").notNull().default("active"),
     nextSequence: integer("next_sequence").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1733,6 +1735,76 @@ export const operatorConversationMessages = pgTable(
       table.conversationId,
       table.createdAt,
     ),
+  ],
+);
+
+/**
+ * A preview has one stable identity and append-only revisions. The table never
+ * carries an executable provider operation; it is deliberately only a
+ * founder-controlled description of a possible future effect.
+ */
+export const operatorActionPreviews = pgTable(
+  "operator_action_previews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    mailSendingOfferDismissedAt: timestamp("mail_sending_offer_dismissed_at", {
+      withTimezone: true,
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("operator_action_previews_operator_idx").on(table.operatorId),
+    index("operator_action_previews_updated_idx").on(table.operatorId, table.updatedAt),
+  ],
+);
+
+export const operatorActionPreviewRevisions = pgTable(
+  "operator_action_preview_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    previewId: uuid("preview_id")
+      .notNull()
+      .references(() => operatorActionPreviews.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    state: operatorActionPreviewStateEnum("state").notNull().default("draft"),
+    recipientName: text("recipient_name").notNull(),
+    recipientAddress: text("recipient_address").notNull(),
+    content: text("content").notNull(),
+    supportingEvidence: jsonb("supporting_evidence")
+      .$type<Array<{ label: string; detail: string }>>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    expectedExternalEffect: text("expected_external_effect").notNull(),
+    supersedesRevisionId: uuid("supersedes_revision_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("operator_action_preview_revisions_revision_check", sql`${table.revision} >= 1`),
+    check(
+      "operator_action_preview_revisions_recipient_name_check",
+      sql`length(trim(${table.recipientName})) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "operator_action_preview_revisions_recipient_address_check",
+      sql`length(trim(${table.recipientAddress})) BETWEEN 1 AND 320`,
+    ),
+    check(
+      "operator_action_preview_revisions_content_check",
+      sql`length(trim(${table.content})) BETWEEN 1 AND 12000`,
+    ),
+    check(
+      "operator_action_preview_revisions_effect_check",
+      sql`length(trim(${table.expectedExternalEffect})) BETWEEN 1 AND 2000`,
+    ),
+    uniqueIndex("operator_action_preview_revisions_identity_idx").on(
+      table.previewId,
+      table.revision,
+    ),
+    index("operator_action_preview_revisions_current_idx").on(table.previewId, table.createdAt),
   ],
 );
 

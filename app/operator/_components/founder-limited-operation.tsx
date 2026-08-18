@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { FounderLimitedOperationDto } from "@/src/server/operators/founder-limited-operation";
 import styles from "./founder-limited-operation.module.css";
+import { FounderActionPreviewCard } from "./founder-action-preview";
 
 export function FounderLimitedOperation() {
   const [operation, setOperation] = useState<FounderLimitedOperationDto | null>(null);
@@ -165,6 +166,9 @@ export function FounderLimitedOperation() {
         <p className={styles.notice}>
           Bruno is waiting for a Current check of the selected Calendar.
         </p>
+      ) : null}
+      {operation.actionPreview ? (
+        <FounderActionPreviewCard preview={operation.actionPreview} compact />
       ) : null}
       {error ? (
         <p className={styles.error} role="alert">

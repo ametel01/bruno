@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { FounderCoreOperationDto } from "@/src/server/operators/founder-core-operation";
 import styles from "./founder-limited-operation.module.css";
+import { FounderActionPreviewCard } from "./founder-action-preview";
 
 export function FounderCoreOperation() {
   const [operation, setOperation] = useState<FounderCoreOperationDto | null>(null);
@@ -147,6 +148,9 @@ export function FounderCoreOperation() {
         <p className={styles.notice}>
           Bruno is waiting for Current evidence from both Calendar and Mail.
         </p>
+      ) : null}
+      {operation.actionPreview ? (
+        <FounderActionPreviewCard preview={operation.actionPreview} compact />
       ) : null}
       {error ? (
         <p className={styles.error} role="alert">

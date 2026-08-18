@@ -5,6 +5,7 @@ import type {
   FounderConversationDto,
   FounderConversationMessageDto,
 } from "@/src/server/operators/founder-conversation";
+import { FounderActionPreviewCard } from "./founder-action-preview";
 import styles from "./founder-conversation.module.css";
 
 export function FounderConversation() {
@@ -108,6 +109,10 @@ export function FounderConversation() {
               "Bruno is waiting for your connected AI account."}
           </span>
         </div>
+      ) : null}
+
+      {conversation?.actionPreview ? (
+        <FounderActionPreviewCard preview={conversation.actionPreview} compact />
       ) : null}
 
       <form className={styles.composer} onSubmit={sendMessage}>

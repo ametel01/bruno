@@ -10,6 +10,10 @@ import {
   operatorConversationWorks,
   operatorConversations,
 } from "@/src/server/db/schema";
+import {
+  projectFounderActionPreview,
+  type FounderActionPreviewDto,
+} from "@/src/server/operators/founder-action-previews";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
   requireReadyFounderOpenAiConnectionForUser,
@@ -46,6 +50,7 @@ export type FounderConversationDto = {
   status: "active" | "paused";
   messages: FounderConversationMessageDto[];
   activeWork: FounderConversationWorkDto | null;
+  actionPreview: FounderActionPreviewDto;
   createdAt: string;
   updatedAt: string;
 };
@@ -325,6 +330,7 @@ async function projectConversation(
     .where(eq(operatorConversationWorks.conversationId, conversation.id))
     .orderBy(desc(operatorConversationWorks.createdAt), desc(operatorConversationWorks.id))
     .limit(1);
+  const actionPreview = await projectFounderActionPreview(tx, conversation.operatorId);
   return {
     id: conversation.id,
     status: conversation.status,
@@ -347,6 +353,7 @@ async function projectConversation(
           updatedAt: work.updatedAt.toISOString(),
         }
       : null,
+    actionPreview,
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
   };

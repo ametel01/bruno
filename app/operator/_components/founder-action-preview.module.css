@@ -1,0 +1,96 @@
+.card {
+  display: grid;
+  gap: 0.9rem;
+  border: 1px solid #d8e1ed;
+  border-radius: 1rem;
+  background: #f7faff;
+  padding: 1rem;
+}
+
+.compact {
+  padding: 0.85rem;
+}
+
+.heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.kicker {
+  margin: 0 0 0.25rem;
+  color: #61708a;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.heading h4 {
+  margin: 0;
+  color: #15233b;
+  font-size: 1rem;
+}
+
+.badge {
+  border-radius: 999px;
+  background: #e6eefb;
+  color: #254b84;
+  font-size: 0.7rem;
+  font-weight: 750;
+  padding: 0.35rem 0.55rem;
+  text-transform: capitalize;
+}
+
+.details {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.details > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.details dt {
+  color: #65728a;
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.details dd {
+  margin: 0;
+  color: #2d3a4f;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.content {
+  white-space: pre-wrap;
+}
+
+.details ul {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.safety {
+  margin: 0;
+  border-top: 1px solid #d8e1ed;
+  color: #315f55;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  padding-top: 0.75rem;
+}
+
+@media (max-width: 560px) {
+  .heading {
+    flex-direction: column;
+  }
+}

@@ -27,6 +27,11 @@ test("founder can converse with Bruno and see the same history after reload and 
       await expect(
         page.getByText("Conversation is saved across reloads and devices."),
       ).toBeVisible();
+      await expect(page.getByText("Canonical Action Preview")).toHaveCount(3);
+      await expect(
+        page.locator(`[data-preview-id="${conversation.actionPreview.id}"]`),
+      ).toHaveCount(3);
+      await expect(page.getByText("preview@example.com", { exact: false }).first()).toBeVisible();
 
       await page.getByLabel("Message Bruno").fill("Find the most important follow-up for today.");
       await page.getByRole("button", { name: "Send to Bruno" }).click();
@@ -36,6 +41,10 @@ test("founder can converse with Bruno and see the same history after reload and 
       await expect(page.locator('[data-role="operator"]')).toContainText(
         "I found one follow-up worth reviewing today.",
       );
+
+      await page.getByLabel("Content").fill("A revised prepared note.");
+      await page.getByRole("button", { name: "Save as new draft" }).click();
+      await expect(page.getByRole("heading", { name: /revision 2/ })).toBeVisible();
 
       await page.reload();
       await expect(page.locator('[data-role="founder"]')).toContainText(
@@ -53,6 +62,9 @@ test("founder can converse with Bruno and see the same history after reload and 
         await expect(secondPage.locator('[data-role="founder"]')).toContainText(
           "Find the most important follow-up for today.",
         );
+        await expect(
+          secondPage.getByText("A revised prepared note.", { exact: true }).first(),
+        ).toBeVisible();
       } finally {
         await secondContext.close();
       }
@@ -75,6 +87,25 @@ type Conversation = {
     createdAt: string;
   }>;
   activeWork: null;
+  actionPreview: {
+    id: string;
+    current: {
+      id: string;
+      revision: number;
+      state: "draft";
+      recipient: { name: string; address: string };
+      content: string;
+      supportingEvidence: Array<{ label: string; detail: string }>;
+      expectedExternalEffect: string;
+      createdAt: string;
+    };
+    history: unknown[];
+    authority: "none";
+    executable: false;
+    mailSendingOffer: "available" | "dismissed";
+    createdAt: string;
+    updatedAt: string;
+  };
   updatedAt: string;
 };
 
@@ -84,6 +115,25 @@ function createConversation(): Conversation {
     status: "active",
     messages: [],
     activeWork: null,
+    actionPreview: {
+      id: randomUUID(),
+      current: {
+        id: randomUUID(),
+        revision: 1,
+        state: "draft",
+        recipient: { name: "Preview Recipient", address: "preview@example.com" },
+        content: "A prepared note awaiting Founder review.",
+        supportingEvidence: [{ label: "Calendar", detail: "Planning call" }],
+        expectedExternalEffect: "Nothing is sent; this preview has no authority.",
+        createdAt: new Date().toISOString(),
+      },
+      history: [],
+      authority: "none",
+      executable: false,
+      mailSendingOffer: "available",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
     updatedAt: new Date().toISOString(),
   };
 }
@@ -130,6 +180,59 @@ async function installConversationRoutes(
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({ conversation }),
+    });
+  });
+
+  await context.route("**/api/operator/action-preview", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ preview: conversation.actionPreview }),
+      });
+      return;
+    }
+    const body = route.request().postDataJSON() as { action?: string; content?: string };
+    if (body.action === "dismiss_mail_offer") {
+      conversation.actionPreview.mailSendingOffer = "dismissed";
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ preview: conversation.actionPreview }),
+      });
+      return;
+    }
+    conversation.actionPreview.current = {
+      ...conversation.actionPreview.current,
+      id: randomUUID(),
+      revision: conversation.actionPreview.current.revision + 1,
+      content: body.content ?? conversation.actionPreview.current.content,
+    };
+    conversation.actionPreview.history = [conversation.actionPreview.current];
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ preview: conversation.actionPreview }),
+    });
+  });
+
+  await context.route("**/api/operator/limited-operation", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        operation: {
+          name: "Calendar-only Limited Operation",
+          status: "limited",
+          mailIncluded: false,
+          access: { ai: "ready", calendar: "ready", evidence: "current" },
+          consent: {
+            status: "active",
+            purpose: "calendar_morning_brief",
+            confirmedAt: new Date().toISOString(),
+          },
+          authorityPolicy: null,
+          brief: null,
+          actionPreview: conversation.actionPreview,
+          activatedAt: null,
+        },
+      }),
     });
   });
 
