@@ -231,6 +231,39 @@ export const operatorConversationWorkStateEnum = pgEnum("operator_conversation_w
   "failed",
 ]);
 
+export const operatorRelationshipStateEnum = pgEnum("operator_relationship_state", [
+  "lead",
+  "client",
+  "partner",
+  "ignored",
+]);
+
+export const operatorRelationshipStatusEnum = pgEnum("operator_relationship_status", [
+  "active",
+  "closed",
+  "ignored",
+]);
+
+export const operatorRelationshipCandidateMatchKindEnum = pgEnum(
+  "operator_relationship_candidate_match_kind",
+  ["exact_provider_identity", "exact_email", "fuzzy_name", "fuzzy_company", "fuzzy_domain"],
+);
+
+export const operatorRelationshipCandidateStatusEnum = pgEnum(
+  "operator_relationship_candidate_status",
+  ["pending", "confirmed", "rejected"],
+);
+
+export const operatorRelationshipEvidenceSourceKindEnum = pgEnum(
+  "operator_relationship_evidence_source_kind",
+  ["calendar", "mail"],
+);
+
+export const operatorRelationshipEvidenceStateEnum = pgEnum(
+  "operator_relationship_evidence_state",
+  ["current", "stale", "disconnected", "unavailable"],
+);
+
 export const agentDesiredStatusEnum = pgEnum("agent_desired_status", ["stopped", "running"]);
 
 export const agentDeploymentStageEnum = pgEnum("agent_deployment_stage", [
@@ -1403,6 +1436,206 @@ export const operatorFounderActivations = pgTable(
     ),
     uniqueIndex("operator_founder_activations_operator_idx").on(table.operatorId),
     uniqueIndex("operator_founder_activations_brief_idx").on(table.firstBriefId),
+  ],
+);
+
+export const operatorRelationshipRecords = pgTable(
+  "operator_relationship_records",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    displayName: text("display_name").notNull(),
+    company: text("company"),
+    primaryEmail: text("primary_email"),
+    provider: text("provider"),
+    providerIdentity: text("provider_identity"),
+    relationshipState: operatorRelationshipStateEnum("relationship_state")
+      .notNull()
+      .default("lead"),
+    status: operatorRelationshipStatusEnum("status").notNull().default("active"),
+    nextAction: text("next_action"),
+    nextActionDueAt: timestamp("next_action_due_at", { withTimezone: true }),
+    commitments: jsonb("commitments").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    revision: integer("revision").notNull().default(1),
+    founderConfirmedAt: timestamp("founder_confirmed_at", { withTimezone: true }),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_relationship_records_display_name_check",
+      sql`length(trim(${table.displayName})) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "operator_relationship_records_company_check",
+      sql`${table.company} IS NULL OR length(trim(${table.company})) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "operator_relationship_records_email_check",
+      sql`${table.primaryEmail} IS NULL OR length(trim(${table.primaryEmail})) BETWEEN 3 AND 320`,
+    ),
+    check(
+      "operator_relationship_records_provider_check",
+      sql`(${table.provider} IS NULL AND ${table.providerIdentity} IS NULL) OR (${table.provider} IS NOT NULL AND ${table.providerIdentity} IS NOT NULL)`,
+    ),
+    check("operator_relationship_records_revision_check", sql`${table.revision} >= 1`),
+    check(
+      "operator_relationship_records_closed_shape_check",
+      sql`(${table.status} = 'active' AND ${table.closedAt} IS NULL) OR (${table.status} <> 'active' AND ${table.closedAt} IS NOT NULL)`,
+    ),
+    uniqueIndex("operator_relationship_records_provider_identity_idx")
+      .on(table.operatorId, table.provider, table.providerIdentity)
+      .where(sql`${table.providerIdentity} IS NOT NULL`),
+    uniqueIndex("operator_relationship_records_primary_email_idx")
+      .on(table.operatorId, table.primaryEmail)
+      .where(sql`${table.primaryEmail} IS NOT NULL`),
+    index("operator_relationship_records_operator_status_idx").on(
+      table.operatorId,
+      table.status,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const operatorRelationshipCandidates = pgTable(
+  "operator_relationship_candidates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    matchKind: operatorRelationshipCandidateMatchKindEnum("match_kind").notNull(),
+    status: operatorRelationshipCandidateStatusEnum("status").notNull().default("pending"),
+    displayName: text("display_name").notNull(),
+    company: text("company"),
+    primaryEmail: text("primary_email"),
+    provider: text("provider"),
+    providerIdentity: text("provider_identity"),
+    domain: text("domain"),
+    candidateKey: text("candidate_key").notNull(),
+    proposedRecordId: uuid("proposed_record_id").references(() => operatorRelationshipRecords.id),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_relationship_candidates_display_name_check",
+      sql`length(trim(${table.displayName})) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "operator_relationship_candidates_status_shape_check",
+      sql`(${table.status} = 'pending' AND ${table.resolvedAt} IS NULL) OR (${table.status} <> 'pending' AND ${table.resolvedAt} IS NOT NULL)`,
+    ),
+    check(
+      "operator_relationship_candidates_provider_check",
+      sql`(${table.provider} IS NULL AND ${table.providerIdentity} IS NULL) OR (${table.provider} IS NOT NULL AND ${table.providerIdentity} IS NOT NULL)`,
+    ),
+    uniqueIndex("operator_relationship_candidates_key_idx").on(
+      table.operatorId,
+      table.candidateKey,
+    ),
+    index("operator_relationship_candidates_operator_status_idx").on(
+      table.operatorId,
+      table.status,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const operatorRelationshipEvidence = pgTable(
+  "operator_relationship_evidence",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    recordId: uuid("record_id").references(() => operatorRelationshipRecords.id, {
+      onDelete: "set null",
+    }),
+    candidateId: uuid("candidate_id").references(() => operatorRelationshipCandidates.id, {
+      onDelete: "set null",
+    }),
+    sourceKind: operatorRelationshipEvidenceSourceKindEnum("source_kind").notNull(),
+    calendarConnectionId: uuid("calendar_connection_id").references(
+      () => operatorCalendarConnections.id,
+      { onDelete: "set null" },
+    ),
+    mailConnectionId: uuid("mail_connection_id").references(() => operatorMailConnections.id, {
+      onDelete: "set null",
+    }),
+    provider: text("provider").notNull(),
+    providerItemId: text("provider_item_id").notNull(),
+    providerIdentity: text("provider_identity"),
+    email: text("email"),
+    displayName: text("display_name"),
+    company: text("company"),
+    domain: text("domain"),
+    excerpt: text("excerpt"),
+    evidenceState: operatorRelationshipEvidenceStateEnum("evidence_state")
+      .notNull()
+      .default("current"),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    sourceFingerprint: text("source_fingerprint").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_relationship_evidence_source_connection_check",
+      sql`(${table.sourceKind} = 'calendar' AND ${table.mailConnectionId} IS NULL) OR (${table.sourceKind} = 'mail' AND ${table.calendarConnectionId} IS NULL)`,
+    ),
+    check(
+      "operator_relationship_evidence_provider_item_check",
+      sql`length(trim(${table.providerItemId})) BETWEEN 1 AND 500`,
+    ),
+    check(
+      "operator_relationship_evidence_display_name_check",
+      sql`${table.displayName} IS NULL OR length(trim(${table.displayName})) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "operator_relationship_evidence_excerpt_check",
+      sql`${table.excerpt} IS NULL OR length(trim(${table.excerpt})) BETWEEN 1 AND 2000`,
+    ),
+    uniqueIndex("operator_relationship_evidence_source_fingerprint_idx").on(
+      table.operatorId,
+      table.sourceFingerprint,
+    ),
+    index("operator_relationship_evidence_record_idx").on(table.operatorId, table.recordId),
+    index("operator_relationship_evidence_candidate_idx").on(table.operatorId, table.candidateId),
+  ],
+);
+
+export const operatorRelationshipCorrections = pgTable(
+  "operator_relationship_corrections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    recordId: uuid("record_id")
+      .notNull()
+      .references(() => operatorRelationshipRecords.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    field: text("field").notNull(),
+    previousValue: jsonb("previous_value"),
+    nextValue: jsonb("next_value"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_relationship_corrections_field_check",
+      sql`${table.field} IN ('relationship_state', 'status', 'next_action', 'next_action_due_at', 'commitments')`,
+    ),
+    check("operator_relationship_corrections_revision_check", sql`${table.revision} >= 1`),
+    index("operator_relationship_corrections_record_idx").on(
+      table.operatorId,
+      table.recordId,
+      table.revision,
+    ),
   ],
 );
 

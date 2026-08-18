@@ -1,0 +1,2 @@
+ALTER TABLE "operator_relationship_evidence" DROP CONSTRAINT "operator_relationship_evidence_source_connection_check";--> statement-breakpoint
+ALTER TABLE "operator_relationship_evidence" ADD CONSTRAINT "operator_relationship_evidence_source_connection_check" CHECK (("operator_relationship_evidence"."source_kind" = 'calendar' AND "operator_relationship_evidence"."mail_connection_id" IS NULL) OR ("operator_relationship_evidence"."source_kind" = 'mail' AND "operator_relationship_evidence"."calendar_connection_id" IS NULL));

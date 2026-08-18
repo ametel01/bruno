@@ -10,6 +10,7 @@ import { FounderConversation } from "./founder-conversation";
 import { FounderLimitedOperation } from "./founder-limited-operation";
 import { FounderCoreOperation } from "./founder-core-operation";
 import { FounderMailConnection } from "./founder-mail-connection";
+import { FounderRelationships } from "./founder-relationships";
 import styles from "./founder-operator-preparation.module.css";
 
 const TIMEZONE_OPTIONS = buildTimezoneOptions();
@@ -305,6 +306,8 @@ export function FounderOperatorPreparation({
       {runtimeReady && onboarding?.operation === "core" ? <FounderCoreOperation /> : null}
 
       {runtimeReady && onboarding?.operation !== "core" ? <FounderLimitedOperation /> : null}
+
+      {runtimeReady ? <FounderRelationships /> : null}
 
       <section className={styles.resume} aria-labelledby="resume-title">
         <p className={styles.kicker}>Safe to resume</p>

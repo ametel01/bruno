@@ -15,6 +15,10 @@ import {
 } from "@/src/server/db/schema";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
+  ingestFounderRelationshipEvidenceForUser,
+  type FounderRelationshipObservation,
+} from "@/src/server/operators/founder-relationships";
+import {
   decryptOperatorSecret,
   digestOperatorSecret,
   encryptOperatorSecret,
@@ -143,6 +147,26 @@ export type FounderGoogleMailAdapter = {
     refreshToken?: string;
     tokenExpiresAt?: Date;
   }>;
+  readSelectedResources?(input: {
+    accessToken: string;
+    resources: FounderGoogleMailResource[];
+    timeMin: Date;
+    timeMax: Date;
+  }): Promise<
+    Array<
+      Pick<
+        FounderRelationshipObservation,
+        | "providerItemId"
+        | "providerIdentity"
+        | "email"
+        | "displayName"
+        | "company"
+        | "domain"
+        | "excerpt"
+        | "observedAt"
+      >
+    >
+  >;
   revokeAuthorization(input: {
     accessToken: string | null;
     refreshToken: string | null;
@@ -838,6 +862,28 @@ export async function verifyFounderGoogleMailForUser(
         );
       return toDto(bundle);
     });
+    if (verification.evidenceState === "current" && adapter.readSelectedResources) {
+      try {
+        const observations = await adapter.readSelectedResources({
+          accessToken: verification.accessToken ?? accessToken,
+          resources: selected.map(toProviderResource),
+          timeMin: new Date(now().getTime() - EVIDENCE_WINDOW_MS),
+          timeMax: now(),
+        });
+        await ingestFounderRelationshipEvidenceForUser(
+          userId,
+          observations.map((observation) => ({
+            ...observation,
+            sourceKind: "mail" as const,
+            connectionId: current.connection.id,
+            provider: current.connection.provider,
+          })),
+          { createConnection: () => connection, now },
+        );
+      } catch {
+        // Keep the verified source state even if this bounded projection refresh fails.
+      }
+    }
     return updated;
   } catch (error) {
     if (error instanceof FounderMailConnectionError) throw error;
@@ -1104,6 +1150,75 @@ export function createGoogleMailAdapter(
           : {}),
       };
     },
+    async readSelectedResources({ accessToken, resources, timeMin, timeMax }) {
+      const observations: Array<
+        Pick<
+          FounderRelationshipObservation,
+          | "providerItemId"
+          | "providerIdentity"
+          | "email"
+          | "displayName"
+          | "company"
+          | "domain"
+          | "excerpt"
+          | "observedAt"
+        >
+      > = [];
+      for (const resource of resources) {
+        const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
+        listUrl.searchParams.set("labelIds", resource.providerResourceId);
+        listUrl.searchParams.set("maxResults", "50");
+        listUrl.searchParams.set("includeSpamTrash", "false");
+        listUrl.searchParams.set(
+          "q",
+          `after:${Math.floor(timeMin.getTime() / 1000)} before:${Math.floor(timeMax.getTime() / 1000)}`,
+        );
+        const listResponse = await request(listUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const listBody = await readJson(listResponse);
+        if (!listResponse.ok) throw new Error("Gmail evidence list request failed.");
+        const messages = Array.isArray(listBody.messages) ? listBody.messages : [];
+        for (const message of messages) {
+          if (!isRecord(message)) continue;
+          const messageId = readString(message.id);
+          if (!messageId) continue;
+          const detailUrl = new URL(
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}`,
+          );
+          detailUrl.searchParams.set("format", "metadata");
+          detailUrl.searchParams.set("metadataHeaders", "From");
+          detailUrl.searchParams.append("metadataHeaders", "Subject");
+          const detailResponse = await request(detailUrl, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          const detailBody = await readJson(detailResponse);
+          if (!detailResponse.ok || !isRecord(detailBody)) continue;
+          const payload = isRecord(detailBody.payload) ? detailBody.payload : null;
+          const headers = payload && Array.isArray(payload.headers) ? payload.headers : [];
+          const from = headerValue(headers, "From");
+          const email =
+            from
+              ?.match(/<([^>]+)>/)?.[1]
+              ?.trim()
+              .toLowerCase() ?? from?.trim().toLowerCase();
+          if (!email?.includes("@")) continue;
+          const displayName =
+            from
+              ?.replace(/<[^>]+>/, "")
+              .replace(/"/g, "")
+              .trim() || email;
+          observations.push({
+            providerItemId: messageId,
+            email,
+            displayName,
+            excerpt: headerValue(headers, "Subject"),
+            observedAt: new Date(),
+          });
+        }
+      }
+      return observations;
+    },
     async revokeAuthorization({ accessToken, refreshToken }) {
       const token = refreshToken ?? accessToken;
       if (!token) return { providerRevoked: false };
@@ -1152,6 +1267,13 @@ function assertReleased(env: Record<string, string | undefined> | undefined): vo
       409,
     );
   }
+}
+
+function headerValue(headers: unknown[], name: string): string | null {
+  const header = headers.find(
+    (value) => isRecord(value) && readString(value.name)?.toLowerCase() === name.toLowerCase(),
+  );
+  return isRecord(header) ? readString(header.value) : null;
 }
 
 async function ensureReadyOperator(

@@ -14,6 +14,10 @@ import {
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import { reconcileFounderLimitedOperationForUser } from "@/src/server/operators/founder-limited-operation";
 import {
+  ingestFounderRelationshipEvidenceForUser,
+  type FounderRelationshipObservation,
+} from "@/src/server/operators/founder-relationships";
+import {
   decryptOperatorSecret,
   digestOperatorSecret,
   encryptOperatorSecret,
@@ -110,6 +114,26 @@ export type FounderGoogleCalendarAdapter = {
     refreshToken?: string;
     tokenExpiresAt?: Date;
   }>;
+  readSelectedResources?(input: {
+    accessToken: string;
+    resources: FounderGoogleCalendarResource[];
+    timeMin: Date;
+    timeMax: Date;
+  }): Promise<
+    Array<
+      Pick<
+        FounderRelationshipObservation,
+        | "providerItemId"
+        | "providerIdentity"
+        | "email"
+        | "displayName"
+        | "company"
+        | "domain"
+        | "excerpt"
+        | "observedAt"
+      >
+    >
+  >;
   revokeAuthorization(input: {
     accessToken: string | null;
     refreshToken: string | null;
@@ -703,6 +727,29 @@ export async function verifyFounderGoogleCalendarForUser(
         );
       return toDto(bundle);
     });
+    if (verification.evidenceState === "current" && adapter.readSelectedResources) {
+      try {
+        const observations = await adapter.readSelectedResources({
+          accessToken: verification.accessToken ?? accessToken,
+          resources: selected.map(toProviderResource),
+          timeMin: new Date(now().getTime() - 24 * 60 * 60 * 1000),
+          timeMax: new Date(now().getTime() + 7 * 24 * 60 * 60 * 1000),
+        });
+        await ingestFounderRelationshipEvidenceForUser(
+          userId,
+          observations.map((observation) => ({
+            ...observation,
+            sourceKind: "calendar" as const,
+            connectionId: current.connection.id,
+            provider: current.connection.provider,
+          })),
+          { createConnection: () => connection, now },
+        );
+      } catch {
+        // A successful connection check remains authoritative even if the bounded
+        // relationship projection could not be refreshed in this attempt.
+      }
+    }
     await reconcileFounderLimitedOperationForUser(userId, {
       createConnection: () => connection,
       now,
@@ -981,6 +1028,58 @@ export function createGoogleCalendarAdapter(
           ? { accessToken: currentAccessToken, refreshToken: currentRefreshToken, tokenExpiresAt }
           : {}),
       };
+    },
+    async readSelectedResources({ accessToken, resources, timeMin, timeMax }) {
+      const observations: Array<
+        Pick<
+          FounderRelationshipObservation,
+          | "providerItemId"
+          | "providerIdentity"
+          | "email"
+          | "displayName"
+          | "company"
+          | "domain"
+          | "excerpt"
+          | "observedAt"
+        >
+      > = [];
+      for (const resource of resources) {
+        const url = new URL(
+          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(resource.providerResourceId)}/events`,
+        );
+        url.searchParams.set("timeMin", timeMin.toISOString());
+        url.searchParams.set("timeMax", timeMax.toISOString());
+        url.searchParams.set("maxResults", "100");
+        url.searchParams.set("singleEvents", "true");
+        url.searchParams.set("orderBy", "startTime");
+        const response = await request(url, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const body = await readJson(response);
+        if (!response.ok) throw new Error("Google Calendar evidence request failed.");
+        const items = Array.isArray(body.items) ? body.items : [];
+        for (const item of items) {
+          if (!isRecord(item)) continue;
+          const eventId = readString(item.id);
+          if (!eventId) continue;
+          const summary = readString(item.summary);
+          const attendees = Array.isArray(item.attendees) ? item.attendees : [];
+          for (const attendee of attendees) {
+            if (!isRecord(attendee)) continue;
+            const email = readString(attendee.email)?.toLowerCase();
+            if (!email || attendee.self === true) continue;
+            const displayName = readString(attendee.displayName) ?? email;
+            observations.push({
+              providerItemId: `${eventId}:${email}`,
+              email,
+              displayName,
+              excerpt: summary,
+              observedAt: new Date(),
+            });
+          }
+        }
+      }
+      return observations;
     },
     async revokeAuthorization({ accessToken, refreshToken }) {
       const token = refreshToken ?? accessToken;
