@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
+import { FounderAiConnection } from "./founder-ai-connection";
 import styles from "./founder-operator-preparation.module.css";
 
 const TIMEZONE_OPTIONS = buildTimezoneOptions();
@@ -204,6 +205,8 @@ export function FounderOperatorPreparation({
           ) : null}
         </form>
       </section>
+
+      {runtimeReady ? <FounderAiConnection /> : null}
 
       <section className={styles.resume} aria-labelledby="resume-title">
         <p className={styles.kicker}>Safe to resume</p>

@@ -63,6 +63,45 @@ export const operatorRuntimeSafetyStateEnum = pgEnum("operator_runtime_safety_st
   "failed",
 ]);
 
+export const operatorAiConnectionStatusEnum = pgEnum("operator_ai_connection_status", [
+  "authorizing",
+  "verifying",
+  "ready",
+  "needs_attention",
+  "paused",
+  "disconnected",
+]);
+
+export const operatorAiAuthorizationStateEnum = pgEnum("operator_ai_authorization_state", [
+  "pending",
+  "authorized",
+  "denied",
+  "expired",
+  "revoked",
+  "revocation_unconfirmed",
+]);
+
+export const operatorAiCapacityStateEnum = pgEnum("operator_ai_capacity_state", [
+  "unknown",
+  "available",
+  "exhausted",
+  "unavailable",
+]);
+
+export const operatorAiInferenceStateEnum = pgEnum("operator_ai_inference_state", [
+  "unknown",
+  "passed",
+  "failed",
+]);
+
+export const operatorAiConnectionReceiptKindEnum = pgEnum("operator_ai_connection_receipt_kind", [
+  "authorized",
+  "reauthorized",
+  "verification_failed",
+  "revoked",
+  "disconnected",
+]);
+
 export const agentDesiredStatusEnum = pgEnum("agent_desired_status", ["stopped", "running"]);
 
 export const agentDeploymentStageEnum = pgEnum("agent_deployment_stage", [
@@ -513,6 +552,113 @@ export const operatorRuntimes = pgTable(
     ),
     uniqueIndex("operator_runtimes_operator_id_idx").on(table.operatorId),
     index("operator_runtimes_status_idx").on(table.status),
+  ],
+);
+
+export const operatorAiConnections = pgTable(
+  "operator_ai_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    provider: text("provider").notNull().default("openai"),
+    providerSubjectId: text("provider_subject_id"),
+    accountLabel: text("account_label"),
+    status: operatorAiConnectionStatusEnum("status").notNull().default("authorizing"),
+    authorizationState: operatorAiAuthorizationStateEnum("authorization_state")
+      .notNull()
+      .default("pending"),
+    capacityState: operatorAiCapacityStateEnum("capacity_state").notNull().default("unknown"),
+    inferenceState: operatorAiInferenceStateEnum("inference_state").notNull().default("unknown"),
+    eligibleAccount: boolean("eligible_account").notNull().default(false),
+    authorizationPersisted: boolean("authorization_persisted").notNull().default(false),
+    authorizationSessionHash: text("authorization_session_hash"),
+    authorizationExpiresAt: timestamp("authorization_expires_at", { withTimezone: true }),
+    approvedModelAssignment: text("approved_model_assignment"),
+    authorizationGeneration: integer("authorization_generation").notNull().default(1),
+    authorizedAt: timestamp("authorized_at", { withTimezone: true }),
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    failureCode: text("failure_code"),
+    recoveryMessage: text("recovery_message"),
+    workPausedReason: text("work_paused_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("operator_ai_connections_provider_check", sql`${table.provider} = 'openai'`),
+    check(
+      "operator_ai_connections_subject_check",
+      sql`${table.providerSubjectId} IS NULL OR length(trim(${table.providerSubjectId})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "operator_ai_connections_account_label_check",
+      sql`${table.accountLabel} IS NULL OR length(trim(${table.accountLabel})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "operator_ai_connections_session_hash_check",
+      sql`${table.authorizationSessionHash} IS NULL OR ${table.authorizationSessionHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check("operator_ai_connections_generation_check", sql`${table.authorizationGeneration} >= 1`),
+    check(
+      "operator_ai_connections_failure_pair_check",
+      sql`(${table.failureCode} IS NULL AND ${table.recoveryMessage} IS NULL) OR (${table.failureCode} IS NOT NULL AND ${table.recoveryMessage} IS NOT NULL)`,
+    ),
+    check(
+      "operator_ai_connections_ready_shape_check",
+      sql`${table.status} <> 'ready' OR (${table.providerSubjectId} IS NOT NULL AND ${table.accountLabel} IS NOT NULL AND ${table.authorizationState} = 'authorized' AND ${table.eligibleAccount} = true AND ${table.authorizationPersisted} = true AND ${table.approvedModelAssignment} IS NOT NULL AND ${table.capacityState} = 'available' AND ${table.inferenceState} = 'passed' AND ${table.lastVerifiedAt} IS NOT NULL)`,
+    ),
+    uniqueIndex("operator_ai_connections_operator_provider_idx").on(
+      table.operatorId,
+      table.provider,
+    ),
+    index("operator_ai_connections_status_idx").on(table.status),
+  ],
+);
+
+export const operatorAiConnectionReceipts = pgTable(
+  "operator_ai_connection_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => operatorAiConnections.id, { onDelete: "restrict" }),
+    generation: integer("generation").notNull(),
+    kind: operatorAiConnectionReceiptKindEnum("kind").notNull(),
+    provider: text("provider").notNull().default("openai"),
+    providerSubjectId: text("provider_subject_id"),
+    accountLabel: text("account_label"),
+    status: text("status").notNull(),
+    evidenceDigest: text("evidence_digest").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("operator_ai_connection_receipts_provider_check", sql`${table.provider} = 'openai'`),
+    check(
+      "operator_ai_connection_receipts_subject_check",
+      sql`${table.providerSubjectId} IS NULL OR length(trim(${table.providerSubjectId})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "operator_ai_connection_receipts_account_label_check",
+      sql`${table.accountLabel} IS NULL OR length(trim(${table.accountLabel})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "operator_ai_connection_receipts_status_check",
+      sql`${table.status} IN ('ready', 'needs_attention', 'paused', 'disconnected')`,
+    ),
+    check("operator_ai_connection_receipts_generation_check", sql`${table.generation} >= 1`),
+    check(
+      "operator_ai_connection_receipts_digest_check",
+      sql`${table.evidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    uniqueIndex("operator_ai_connection_receipts_generation_idx").on(
+      table.connectionId,
+      table.generation,
+      table.kind,
+    ),
+    index("operator_ai_connection_receipts_created_idx").on(table.connectionId, table.createdAt),
   ],
 );
 
