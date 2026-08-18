@@ -72,6 +72,7 @@ describe("Founder Operator application seam", () => {
   it("isolates Operators and preparation state by Owner", async () => {
     const ownerA = await ensureFounderOperatorForUser(OWNER_A_ID, {
       createConnection: () => connection,
+      now: () => new Date("2026-08-18T00:00:00.000Z"),
     });
     const ownerB = await ensureFounderOperatorForUser(OWNER_B_ID, {
       createConnection: () => connection,

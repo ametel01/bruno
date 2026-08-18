@@ -120,15 +120,18 @@ export async function confirmFounderTimezoneForUser(
       }
 
       const timezoneChanged = preparation.timezone !== normalizedTimezone;
-      const confirmedAt = timezoneChanged ? now() : (preparation.timezoneConfirmedAt ?? now());
+      const currentNow = now();
+      const confirmedAt = timezoneChanged
+        ? currentNow
+        : (preparation.timezoneConfirmedAt ?? currentNow);
       const [updatedPreparation] = await tx
         .update(operatorPreparations)
         .set({
           status: preparation.status === "ready" && !timezoneChanged ? "ready" : "preparing",
           timezone: normalizedTimezone,
           timezoneConfirmedAt: confirmedAt,
-          startedAt: preparation.startedAt ?? now(),
-          updatedAt: now(),
+          startedAt: preparation.startedAt ?? laterDate(currentNow, preparation.createdAt),
+          updatedAt: currentNow,
         })
         .where(eq(operatorPreparations.id, preparation.id))
         .returning();
@@ -297,4 +300,8 @@ function normalizeTimezone(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+function laterDate(left: Date, right: Date): Date {
+  return left.getTime() >= right.getTime() ? left : right;
 }
