@@ -16,18 +16,23 @@ import {
   operatorProcessingConsents,
   operatorProductGuardrails,
 } from "@/src/server/db/schema";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
-  projectFounderActionPreview,
   type FounderActionPreviewDto,
+  projectFounderActionPreview,
 } from "@/src/server/operators/founder-action-previews";
 import {
-  projectFounderProposedAction,
-  type FounderProposedActionDto,
-} from "@/src/server/operators/founder-proposed-actions";
+  type FounderMorningBriefProjection,
+  prepareFounderMorningBrief,
+  projectFounderMorningBrief,
+} from "@/src/server/operators/founder-morning-brief";
+import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import type {
   FounderActionFamily,
   FounderAuthorityMode,
+} from "@/src/server/operators/founder-proposed-actions";
+import {
+  type FounderProposedActionDto,
+  projectFounderProposedAction,
 } from "@/src/server/operators/founder-proposed-actions";
 
 type LimitedOperationTransaction = Parameters<
@@ -72,6 +77,11 @@ export type FounderLimitedOperationDto = {
     content: string;
     generatedAt: string;
     openedAt: string | null;
+    evidenceWatermark?: string;
+    calendarWindow?: { startedAt: string; endedAt: string };
+    mailWindow?: { startedAt: string; endedAt: string } | null;
+    items?: FounderMorningBriefProjection["items"];
+    delivery?: FounderMorningBriefProjection["delivery"];
   } | null;
   actionPreview?: FounderActionPreviewDto;
   proposedAction?: FounderProposedActionDto | null;
@@ -203,7 +213,7 @@ export async function confirmFounderProcessingConsentForUser(
           503,
         );
       }
-      await ensureFirstBrief(tx, saved, pair.calendar.lastEvidenceCount, at);
+      await ensureFirstBrief(tx, saved, at);
       return projectOperation(tx, saved, operator.id);
     });
   });
@@ -233,7 +243,7 @@ export async function reconcileFounderLimitedOperationForUser(
         .where(eq(operatorCalendarConnections.id, operation.calendarConnectionId))
         .limit(1);
       if (calendar?.status === "ready" && calendar.evidenceState === "current") {
-        await ensureFirstBrief(tx, operation, calendar.lastEvidenceCount, now());
+        await ensureFirstBrief(tx, operation, now());
       }
       const [fresh] = await tx
         .select()
@@ -262,15 +272,12 @@ export async function openFounderMorningBriefForUser(
           "Confirm Processing Consent before opening the Founder Morning Brief.",
         );
       }
+      await ensureFirstBrief(tx, operation, at);
       const [brief] = await tx
         .select()
         .from(operatorMorningBriefs)
-        .where(
-          and(
-            eq(operatorMorningBriefs.operationId, operation.id),
-            eq(operatorMorningBriefs.generation, 1),
-          ),
-        )
+        .where(and(eq(operatorMorningBriefs.operationId, operation.id)))
+        .orderBy(desc(operatorMorningBriefs.generation))
         .limit(1);
       if (!brief) {
         throw new FounderLimitedOperationError(
@@ -512,50 +519,16 @@ async function upsertSafePolicy(tx: LimitedOperationTransaction, operatorId: str
 async function ensureFirstBrief(
   tx: LimitedOperationTransaction,
   operation: typeof operatorLimitedOperations.$inferSelect,
-  evidenceCount: number,
   at: Date,
 ): Promise<void> {
   if (operation.status !== "limited") return;
-  const [existing] = await tx
-    .select()
-    .from(operatorMorningBriefs)
-    .where(
-      and(
-        eq(operatorMorningBriefs.operationId, operation.id),
-        eq(operatorMorningBriefs.generation, 1),
-      ),
-    )
-    .limit(1);
-  if (existing) return;
-  const quiet = evidenceCount === 0;
-  const windowStartedAt = new Date(at.getTime() - 24 * 60 * 60 * 1000);
-  const windowEndedAt = new Date(at.getTime() + 7 * 24 * 60 * 60 * 1000);
-  const content = quiet
-    ? "Nothing needs attention in your selected Calendar right now. This is a verified quiet brief."
-    : "Your selected Calendar is Current. Bruno found calendar evidence in the brief window and is ready to help you prepare for it.";
-  await tx
-    .insert(operatorMorningBriefs)
-    .values({
-      operatorId: operation.operatorId,
-      operationId: operation.id,
-      generation: 1,
-      status: "prepared",
-      evidenceState: "current",
-      quiet,
-      attentionCount: evidenceCount,
-      content,
-      evidenceDigest: digest({
-        operationId: operation.id,
-        generation: 1,
-        evidenceCount,
-        at: at.toISOString(),
-      }),
-      windowStartedAt,
-      windowEndedAt,
-      generatedAt: at,
-      createdAt: at,
-    })
-    .onConflictDoNothing();
+  await prepareFounderMorningBrief(tx, {
+    operatorId: operation.operatorId,
+    operationId: operation.id,
+    calendarConnectionId: operation.calendarConnectionId,
+    mailConnectionId: null,
+    now: at,
+  });
 }
 
 async function projectOperation(
@@ -596,12 +569,8 @@ async function projectOperation(
   const [brief] = await tx
     .select()
     .from(operatorMorningBriefs)
-    .where(
-      and(
-        eq(operatorMorningBriefs.operationId, operation.id),
-        eq(operatorMorningBriefs.generation, 1),
-      ),
-    )
+    .where(and(eq(operatorMorningBriefs.operationId, operation.id)))
+    .orderBy(desc(operatorMorningBriefs.generation))
     .limit(1);
   const [activation] = await tx
     .select()
@@ -611,6 +580,7 @@ async function projectOperation(
   const limited = operation.status === "limited";
   const projectedStatus: FounderLimitedOperationStatus =
     operation.status === "core" ? "needs_attention" : operation.status;
+  const briefProjection = brief ? await projectFounderMorningBrief(tx, brief) : null;
   return {
     name: "Calendar-only Limited Operation",
     status: projectedStatus,
@@ -645,20 +615,7 @@ async function projectOperation(
             },
           }
         : null,
-    brief:
-      limited && brief
-        ? {
-            id: brief.id,
-            generation: brief.generation,
-            status: brief.status,
-            evidenceState: brief.evidenceState === "current" ? "current" : "unavailable",
-            quiet: brief.quiet,
-            attentionCount: brief.attentionCount,
-            content: brief.content,
-            generatedAt: brief.generatedAt.toISOString(),
-            openedAt: brief.openedAt?.toISOString() ?? null,
-          }
-        : null,
+    brief: limited && briefProjection ? briefProjection : null,
     actionPreview: await projectFounderActionPreview(tx, operatorId),
     proposedAction: await projectFounderProposedAction(tx, operatorId),
     activatedAt: limited

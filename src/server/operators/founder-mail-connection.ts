@@ -13,10 +13,11 @@ import {
   operatorPrimaryCommunicationsSuites,
   operators,
 } from "@/src/server/db/schema";
+import { reconcileFounderCoreOperationForUser } from "@/src/server/operators/founder-core-operation";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
-  ingestFounderRelationshipEvidenceForUser,
   type FounderRelationshipObservation,
+  ingestFounderRelationshipEvidenceForUser,
 } from "@/src/server/operators/founder-relationships";
 import {
   decryptOperatorSecret,
@@ -163,6 +164,7 @@ export type FounderGoogleMailAdapter = {
         | "company"
         | "domain"
         | "excerpt"
+        | "sourceMetadata"
         | "observedAt"
       >
     >
@@ -880,6 +882,10 @@ export async function verifyFounderGoogleMailForUser(
           })),
           { createConnection: () => connection, now },
         );
+        await reconcileFounderCoreOperationForUser(userId, {
+          createConnection: () => connection,
+          now,
+        });
       } catch {
         // Keep the verified source state even if this bounded projection refresh fails.
       }
@@ -1161,6 +1167,7 @@ export function createGoogleMailAdapter(
           | "company"
           | "domain"
           | "excerpt"
+          | "sourceMetadata"
           | "observedAt"
         >
       > = [];
@@ -1188,7 +1195,16 @@ export function createGoogleMailAdapter(
           );
           detailUrl.searchParams.set("format", "metadata");
           detailUrl.searchParams.set("metadataHeaders", "From");
-          detailUrl.searchParams.append("metadataHeaders", "Subject");
+          for (const header of [
+            "Subject",
+            "To",
+            "Date",
+            "Message-ID",
+            "In-Reply-To",
+            "References",
+          ]) {
+            detailUrl.searchParams.append("metadataHeaders", header);
+          }
           const detailResponse = await request(detailUrl, {
             headers: { Authorization: `Bearer ${accessToken}` },
           });
@@ -1208,12 +1224,27 @@ export function createGoogleMailAdapter(
               ?.replace(/<[^>]+>/, "")
               .replace(/"/g, "")
               .trim() || email;
+          const messageAt = headerValue(headers, "Date");
+          const sent = Array.isArray(detailBody.labelIds) && detailBody.labelIds.includes("SENT");
           observations.push({
             providerItemId: messageId,
             email,
             displayName,
             excerpt: headerValue(headers, "Subject"),
             observedAt: new Date(),
+            sourceMetadata: {
+              kind: "mail_message",
+              threadId: readString(message.threadId) ?? messageId,
+              direction: sent ? "outbound" : "inbound",
+              messageAt:
+                messageAt && !Number.isNaN(Date.parse(messageAt))
+                  ? new Date(messageAt).toISOString()
+                  : null,
+              to: headerValue(headers, "To"),
+              messageId: headerValue(headers, "Message-ID"),
+              inReplyTo: headerValue(headers, "In-Reply-To"),
+              references: headerValue(headers, "References"),
+            },
           });
         }
       }

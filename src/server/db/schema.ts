@@ -240,6 +240,11 @@ export const operatorMorningBriefStatusEnum = pgEnum("operator_morning_brief_sta
   "opened",
 ]);
 
+export const operatorMorningBriefAttentionKindEnum = pgEnum(
+  "operator_morning_brief_attention_kind",
+  ["unanswered_inbound", "external_meeting", "overdue_relationship_work", "proposed_action"],
+);
+
 export const operatorConversationStatusEnum = pgEnum("operator_conversation_status", [
   "active",
   "paused",
@@ -1433,8 +1438,13 @@ export const operatorMorningBriefs = pgTable(
     attentionCount: integer("attention_count").notNull().default(0),
     content: text("content").notNull(),
     evidenceDigest: text("evidence_digest").notNull(),
+    evidenceWatermark: text("evidence_watermark").notNull().default(""),
     windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull(),
     windowEndedAt: timestamp("window_ended_at", { withTimezone: true }).notNull(),
+    calendarWindowStartedAt: timestamp("calendar_window_started_at", { withTimezone: true }),
+    calendarWindowEndedAt: timestamp("calendar_window_ended_at", { withTimezone: true }),
+    mailWindowStartedAt: timestamp("mail_window_started_at", { withTimezone: true }),
+    mailWindowEndedAt: timestamp("mail_window_ended_at", { withTimezone: true }),
     generatedAt: timestamp("generated_at", { withTimezone: true }).notNull(),
     openedAt: timestamp("opened_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1467,6 +1477,65 @@ export const operatorMorningBriefs = pgTable(
       table.generation,
     ),
     index("operator_morning_briefs_operator_status_idx").on(table.operatorId, table.status),
+  ],
+);
+
+export const operatorMorningBriefPreferences = pgTable(
+  "operator_morning_brief_preferences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    deliveryLocalTime: text("delivery_local_time").notNull().default("07:00"),
+    nextDeliveryAt: timestamp("next_delivery_at", { withTimezone: true }),
+    lastDeliveredLocalDate: text("last_delivered_local_date"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_morning_brief_preferences_delivery_time_check",
+      sql`${table.deliveryLocalTime} ~ '^[0-2][0-9]:[0-5][0-9]$' AND substring(${table.deliveryLocalTime} from 1 for 2)::integer BETWEEN 0 AND 23`,
+    ),
+    uniqueIndex("operator_morning_brief_preferences_operator_idx").on(table.operatorId),
+  ],
+);
+
+export const operatorMorningBriefItems = pgTable(
+  "operator_morning_brief_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    briefId: uuid("brief_id")
+      .notNull()
+      .references(() => operatorMorningBriefs.id, { onDelete: "cascade" }),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    kind: operatorMorningBriefAttentionKindEnum("kind").notNull(),
+    sourceId: text("source_id").notNull(),
+    title: text("title").notNull(),
+    detail: text("detail").notNull(),
+    priority: integer("priority").notNull().default(50),
+    sourceWatermark: text("source_watermark").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("operator_morning_brief_items_priority_check", sql`${table.priority} BETWEEN 0 AND 100`),
+    check(
+      "operator_morning_brief_items_title_check",
+      sql`length(trim(${table.title})) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "operator_morning_brief_items_detail_check",
+      sql`length(trim(${table.detail})) BETWEEN 1 AND 2000`,
+    ),
+    uniqueIndex("operator_morning_brief_items_identity_idx").on(
+      table.briefId,
+      table.kind,
+      table.sourceId,
+    ),
+    index("operator_morning_brief_items_brief_priority_idx").on(table.briefId, table.priority),
   ],
 );
 
@@ -1629,6 +1698,10 @@ export const operatorRelationshipEvidence = pgTable(
     company: text("company"),
     domain: text("domain"),
     excerpt: text("excerpt"),
+    sourceMetadata: jsonb("source_metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     evidenceState: operatorRelationshipEvidenceStateEnum("evidence_state")
       .notNull()
       .default("current"),

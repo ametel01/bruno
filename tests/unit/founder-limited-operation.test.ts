@@ -12,7 +12,9 @@ import {
   operatorMorningBriefs,
   operatorPreparations,
   operatorProcessingConsents,
+  operatorRelationshipEvidence,
   operatorRuntimes,
+  operators,
   users,
 } from "@/src/server/db/schema";
 import {
@@ -182,7 +184,7 @@ describe("Founder Calendar-only Limited Operation", () => {
     expect(await connection.db.select().from(operatorLimitedOperations)).toHaveLength(1);
   });
 
-  it("does not call positive Calendar evidence a quiet brief", async () => {
+  it("keeps a verified quiet brief when evidence matches no deterministic rule", async () => {
     await connection.db.update(operatorCalendarConnections).set({ lastEvidenceCount: 2 });
     const [calendar] = await connection.db.select().from(operatorCalendarConnections).limit(1);
     expect(calendar).toMatchObject({ lastEvidenceCount: 2 });
@@ -193,11 +195,59 @@ describe("Founder Calendar-only Limited Operation", () => {
     });
 
     expect(operation.brief).toMatchObject({
-      quiet: false,
-      attentionCount: 2,
+      quiet: true,
+      attentionCount: 0,
       evidenceState: "current",
     });
-    expect(operation.brief?.content).toContain("calendar evidence");
+    expect(operation.brief?.content).toContain("verified quiet brief");
+  });
+
+  it("creates a new generation when material Calendar evidence changes", async () => {
+    const first = await confirmFounderProcessingConsentForUser(OWNER_ID, {
+      createConnection: () => connection,
+      now: () => NOW,
+    });
+    const [operator] = await connection.db
+      .select()
+      .from(operators)
+      .where(eq(operators.userId, OWNER_ID));
+    const [calendar] = await connection.db.select().from(operatorCalendarConnections).limit(1);
+    if (!operator || !calendar) throw new Error("test fixtures could not be loaded");
+    await connection.db.insert(operatorRelationshipEvidence).values({
+      operatorId: operator.id,
+      sourceKind: "calendar",
+      calendarConnectionId: calendar.id,
+      mailConnectionId: null,
+      provider: "google_calendar",
+      providerItemId: "event-material:person@example.com",
+      providerIdentity: null,
+      email: "person@example.com",
+      displayName: "Person",
+      company: null,
+      domain: "example.com",
+      excerpt: "Planning",
+      sourceMetadata: {
+        kind: "calendar_event",
+        eventId: "event-material",
+        eventStartAt: "2026-08-19T02:00:00.000Z",
+        external: true,
+      },
+      evidenceState: "current",
+      observedAt: NOW,
+      sourceFingerprint: "material-calendar-fingerprint",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    const refreshed = await reconcileFounderLimitedOperationForUser(OWNER_ID, {
+      createConnection: () => connection,
+      now: () => NOW,
+    });
+    expect(refreshed?.brief?.generation).toBe((first.brief?.generation ?? 0) + 1);
+    expect(refreshed?.brief?.attentionCount).toBe(1);
+    expect(refreshed?.brief?.calendarWindow).toEqual({
+      startedAt: new Date(NOW.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+      endedAt: new Date(NOW.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    });
   });
 
   it("does not inherit a Limited Operation when the Calendar connection is replaced", async () => {

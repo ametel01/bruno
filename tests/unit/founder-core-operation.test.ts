@@ -9,8 +9,8 @@ import {
   operatorMorningBriefs,
   operatorPreparations,
   operatorPrimaryCommunicationsSuites,
-  operatorRuntimes,
   operatorProcessingConsents,
+  operatorRuntimes,
   users,
 } from "@/src/server/db/schema";
 import {
@@ -18,8 +18,8 @@ import {
   getFounderCoreOperationForUser,
   openFounderCoreBriefForUser,
 } from "@/src/server/operators/founder-core-operation";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import { getFounderOnboardingForUser } from "@/src/server/operators/founder-onboarding";
+import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003450";
 const NOW = new Date("2026-08-19T01:00:00.000Z");
@@ -155,7 +155,7 @@ describe("Founder Core Operation", () => {
     expect(confirmed).toMatchObject({
       status: "core",
       consent: { status: "active", purpose: "core_operation" },
-      brief: { attentionCount: 3, evidenceState: "current" },
+      brief: { attentionCount: 0, evidenceState: "current" },
       authorityPolicy: { mailIncluded: false },
       activatedAt: null,
     });

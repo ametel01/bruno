@@ -106,6 +106,7 @@ export type FounderRelationshipObservation = {
   company?: string | null;
   domain?: string | null;
   excerpt?: string | null;
+  sourceMetadata?: Record<string, unknown>;
   observedAt: Date;
 };
 
@@ -205,6 +206,7 @@ export async function ingestFounderRelationshipEvidenceForUser(
           company: observation.company,
           domain: observation.domain,
           excerpt: observation.excerpt,
+          sourceMetadata: observation.sourceMetadata ?? {},
           evidenceState: source.evidenceState,
           observedAt: observation.observedAt,
           sourceFingerprint,
@@ -550,6 +552,7 @@ function normalizeObservation(raw: FounderRelationshipObservation): FounderRelat
   const providerIdentity = normalizeOptionalText(raw.providerIdentity, 240);
   const domain = normalizeDomain(raw.domain ?? email?.split("@")[1] ?? null);
   const excerpt = normalizeOptionalText(raw.excerpt, MAX_TEXT_LENGTH);
+  const sourceMetadata = isJsonRecord(raw.sourceMetadata) ? raw.sourceMetadata : {};
   if (
     !providerItemId ||
     !provider ||
@@ -580,6 +583,7 @@ function normalizeObservation(raw: FounderRelationshipObservation): FounderRelat
     company,
     domain,
     excerpt,
+    sourceMetadata,
     observedAt: raw.observedAt,
   };
 }
@@ -934,6 +938,10 @@ function normalizeText(value: unknown, maxLength: number): string {
 function normalizeOptionalText(value: unknown, maxLength: number): string | null {
   const normalized = normalizeText(value, maxLength);
   return normalized || null;
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function normalizeEmail(value: unknown): string | null {

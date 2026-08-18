@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import type { FounderCoreOperationDto } from "@/src/server/operators/founder-core-operation";
-import styles from "./founder-limited-operation.module.css";
 import { FounderActionPreviewCard } from "./founder-action-preview";
+import styles from "./founder-limited-operation.module.css";
+import { FounderMorningBriefSettings } from "./founder-morning-brief-settings";
 import { FounderProposedActionCard } from "./founder-proposed-action";
 
 export function FounderCoreOperation() {
@@ -135,6 +136,16 @@ export function FounderCoreOperation() {
             Calendar and Mail evidence:{" "}
             {operation.brief.evidenceState === "current" ? "Current" : "Unavailable"}.
           </p>
+          {operation.brief.items && operation.brief.items.length > 0 ? (
+            <ul className={styles.hint}>
+              {operation.brief.items.map((item) => (
+                <li key={item.id}>
+                  {item.title}: {item.detail}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <FounderMorningBriefSettings />
           {!activated ? (
             <button
               className={styles.button}

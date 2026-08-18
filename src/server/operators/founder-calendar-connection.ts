@@ -3,26 +3,26 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type * as schema from "@/src/server/db/schema";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import {
   operatorCalendarConnectionReceipts,
   operatorCalendarConnections,
   operatorCalendarResources,
   operators,
 } from "@/src/server/db/schema";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import { reconcileFounderLimitedOperationForUser } from "@/src/server/operators/founder-limited-operation";
+import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
-  ingestFounderRelationshipEvidenceForUser,
   type FounderRelationshipObservation,
+  ingestFounderRelationshipEvidenceForUser,
 } from "@/src/server/operators/founder-relationships";
 import {
   decryptOperatorSecret,
   digestOperatorSecret,
   encryptOperatorSecret,
-  parseOperatorSecretKeyring,
   type OperatorSecretKeyring,
+  parseOperatorSecretKeyring,
 } from "@/src/server/secrets/operator-secret-keyring";
 
 type FounderCalendarTransaction = Parameters<
@@ -130,6 +130,7 @@ export type FounderGoogleCalendarAdapter = {
         | "company"
         | "domain"
         | "excerpt"
+        | "sourceMetadata"
         | "observedAt"
       >
     >
@@ -1040,6 +1041,7 @@ export function createGoogleCalendarAdapter(
           | "company"
           | "domain"
           | "excerpt"
+          | "sourceMetadata"
           | "observedAt"
         >
       > = [];
@@ -1063,6 +1065,8 @@ export function createGoogleCalendarAdapter(
           const eventId = readString(item.id);
           if (!eventId) continue;
           const summary = readString(item.summary);
+          const start = readCalendarDate(item.start);
+          const end = readCalendarDate(item.end);
           const attendees = Array.isArray(item.attendees) ? item.attendees : [];
           for (const attendee of attendees) {
             if (!isRecord(attendee)) continue;
@@ -1075,6 +1079,13 @@ export function createGoogleCalendarAdapter(
               displayName,
               excerpt: summary,
               observedAt: new Date(),
+              sourceMetadata: {
+                kind: "calendar_event",
+                eventId,
+                eventStartAt: start?.toISOString() ?? null,
+                eventEndAt: end?.toISOString() ?? null,
+                external: true,
+              },
             });
           }
         }
@@ -1469,6 +1480,14 @@ function readString(value: unknown): string | null {
 
 function readNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readCalendarDate(value: unknown): Date | null {
+  if (!isRecord(value)) return null;
+  const dateTime = readString(value.dateTime) ?? readString(value.date);
+  if (!dateTime) return null;
+  const date = new Date(dateTime);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
