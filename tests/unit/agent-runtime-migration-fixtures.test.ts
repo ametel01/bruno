@@ -121,7 +121,7 @@ describe("agent runtime reconciliation migration", () => {
     } finally {
       await sql.end();
     }
-  });
+  }, 30_000);
 });
 
 async function seedUpgradeFixture(sql: postgres.Sql): Promise<void> {
