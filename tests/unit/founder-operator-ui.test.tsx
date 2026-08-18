@@ -72,4 +72,29 @@ describe("Founder Operator preparation shell", () => {
     expect(html).toContain("Confirmed");
     expect(html).toContain("Your progress is saved");
   });
+
+  it("keeps the built-in Conversation in Bruno and out of external channel setup", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: {
+          ...OPERATOR,
+          preparation: {
+            ...OPERATOR.preparation,
+            status: "ready",
+            timezone: "Asia/Manila",
+            timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+            startedAt: "2026-08-18T01:00:00.000Z",
+            completedAt: "2026-08-18T01:00:01.000Z",
+          },
+          runtime: { status: "ready", recoveryMessage: null },
+        },
+      }),
+    );
+
+    expect(html).toContain("Bruno Conversation");
+    expect(html).toContain("What should we handle today?");
+    expect(html).toContain("Conversation is saved across reloads and devices.");
+    expect(html).not.toContain("Telegram");
+    expect(html).not.toContain("WhatsApp");
+  });
 });

@@ -1,0 +1,2 @@
+ALTER TABLE "operator_conversation_works" ADD COLUMN "response_sequence" integer NOT NULL;--> statement-breakpoint
+ALTER TABLE "operator_conversation_works" ADD CONSTRAINT "operator_conversation_works_response_sequence_check" CHECK ("operator_conversation_works"."response_sequence" >= 1);

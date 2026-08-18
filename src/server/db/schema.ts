@@ -102,6 +102,28 @@ export const operatorAiConnectionReceiptKindEnum = pgEnum("operator_ai_connectio
   "disconnected",
 ]);
 
+export const operatorConversationStatusEnum = pgEnum("operator_conversation_status", [
+  "active",
+  "paused",
+]);
+
+export const operatorConversationMessageRoleEnum = pgEnum("operator_conversation_message_role", [
+  "founder",
+  "operator",
+]);
+
+export const operatorConversationMessageStatusEnum = pgEnum(
+  "operator_conversation_message_status",
+  ["complete", "paused"],
+);
+
+export const operatorConversationWorkStateEnum = pgEnum("operator_conversation_work_state", [
+  "running",
+  "completed",
+  "paused",
+  "failed",
+]);
+
 export const agentDesiredStatusEnum = pgEnum("agent_desired_status", ["stopped", "running"]);
 
 export const agentDeploymentStageEnum = pgEnum("agent_deployment_stage", [
@@ -659,6 +681,103 @@ export const operatorAiConnectionReceipts = pgTable(
       table.kind,
     ),
     index("operator_ai_connection_receipts_created_idx").on(table.connectionId, table.createdAt),
+  ],
+);
+
+export const operatorConversations = pgTable(
+  "operator_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    status: operatorConversationStatusEnum("status").notNull().default("active"),
+    nextSequence: integer("next_sequence").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("operator_conversations_next_sequence_check", sql`${table.nextSequence} >= 1`),
+    uniqueIndex("operator_conversations_operator_id_idx").on(table.operatorId),
+    index("operator_conversations_status_idx").on(table.status),
+  ],
+);
+
+export const operatorConversationWorks = pgTable(
+  "operator_conversation_works",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => operatorConversations.id),
+    requestId: text("request_id").notNull(),
+    checkpointId: text("checkpoint_id").notNull(),
+    responseSequence: integer("response_sequence").notNull(),
+    state: operatorConversationWorkStateEnum("state").notNull().default("running"),
+    founderMessageId: uuid("founder_message_id"),
+    operatorMessageId: uuid("operator_message_id"),
+    providerConnectionId: uuid("provider_connection_id"),
+    recoveryMessage: text("recovery_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_conversation_works_request_id_check",
+      sql`length(trim(${table.requestId})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "operator_conversation_works_checkpoint_id_check",
+      sql`length(trim(${table.checkpointId})) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "operator_conversation_works_response_sequence_check",
+      sql`${table.responseSequence} >= 1`,
+    ),
+    check(
+      "operator_conversation_works_recovery_message_check",
+      sql`${table.state} IN ('paused', 'failed') OR ${table.recoveryMessage} IS NULL`,
+    ),
+    uniqueIndex("operator_conversation_works_request_id_idx").on(
+      table.conversationId,
+      table.requestId,
+    ),
+    index("operator_conversation_works_checkpoint_idx").on(
+      table.conversationId,
+      table.checkpointId,
+    ),
+    index("operator_conversation_works_state_idx").on(table.conversationId, table.state),
+  ],
+);
+
+export const operatorConversationMessages = pgTable(
+  "operator_conversation_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => operatorConversations.id),
+    workId: uuid("work_id").references(() => operatorConversationWorks.id),
+    sequence: integer("sequence").notNull(),
+    role: operatorConversationMessageRoleEnum("role").notNull(),
+    status: operatorConversationMessageStatusEnum("status").notNull().default("complete"),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_conversation_messages_body_check",
+      sql`length(trim(${table.body})) BETWEEN 1 AND 12000`,
+    ),
+    check("operator_conversation_messages_sequence_check", sql`${table.sequence} >= 1`),
+    uniqueIndex("operator_conversation_messages_sequence_idx").on(
+      table.conversationId,
+      table.sequence,
+    ),
+    index("operator_conversation_messages_conversation_idx").on(
+      table.conversationId,
+      table.createdAt,
+    ),
   ],
 );
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
 import { FounderAiConnection } from "./founder-ai-connection";
+import { FounderConversation } from "./founder-conversation";
 import styles from "./founder-operator-preparation.module.css";
 
 const TIMEZONE_OPTIONS = buildTimezoneOptions();
@@ -205,6 +206,8 @@ export function FounderOperatorPreparation({
           ) : null}
         </form>
       </section>
+
+      {runtimeReady ? <FounderConversation /> : null}
 
       {runtimeReady ? <FounderAiConnection /> : null}
 
