@@ -19,18 +19,8 @@ export type FounderOperatorRuntimeTransportState = "unknown" | "starting" | "con
 export type FounderOperatorRuntimeSafetyState = "unknown" | "verified" | "failed";
 
 export type FounderOperatorRuntimeDto = {
-  id: string;
   status: FounderOperatorRuntimeStatus;
-  transportState: FounderOperatorRuntimeTransportState;
-  safetyState: FounderOperatorRuntimeSafetyState;
-  configRevision: string | null;
-  attemptCount: number;
-  startedAt: string | null;
-  readyAt: string | null;
   recoveryMessage: string | null;
-  failureCode: string | null;
-  createdAt: string;
-  updatedAt: string;
 };
 
 export type FounderOperatorDto = {
@@ -354,18 +344,8 @@ function selectRuntimeForOperator(
 
 function runtimeToDto(runtime: typeof operatorRuntimes.$inferSelect): FounderOperatorRuntimeDto {
   return {
-    id: runtime.id,
     status: runtime.status,
-    transportState: runtime.transportState,
-    safetyState: runtime.safetyState,
-    configRevision: runtime.configRevision,
-    attemptCount: runtime.attemptCount,
-    startedAt: runtime.startedAt?.toISOString() ?? null,
-    readyAt: runtime.readyAt?.toISOString() ?? null,
     recoveryMessage: runtime.recoveryMessage,
-    failureCode: runtime.failureCode,
-    createdAt: runtime.createdAt.toISOString(),
-    updatedAt: runtime.updatedAt.toISOString(),
   };
 }
 

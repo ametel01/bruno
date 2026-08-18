@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { chmod, lstat, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { and, eq, sql } from "drizzle-orm";
@@ -16,7 +16,10 @@ import {
 } from "@/src/server/operators/founder-operator";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { operatorPreparations, operatorRuntimes, operators } from "@/src/server/db/schema";
-import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
+import {
+  DEFAULT_HERMES_STATE_ROOT,
+  DEFAULT_HERMES_WORKLOAD_IMAGE,
+} from "@/src/runner-service/constants";
 import {
   AGENT_LAUNCH_SPEC_VERSION,
   type NativeAgentLaunchSpec,
@@ -42,6 +45,7 @@ export type FounderOperatorRuntimeAdapterInput = {
   runtimeIdentity: string;
   configRevision: string;
   now: Date;
+  launchSpec?: NativeAgentLaunchSpec;
 };
 
 export type FounderOperatorRuntimeAdapterResult =
@@ -133,6 +137,7 @@ export async function prepareFounderOperatorRuntimeForUser(
           transportState: "starting",
           safetyState: "unknown",
           configRevision,
+          operationId: makeId(),
           attemptCount: runtime.attemptCount + 1,
           leaseOwner,
           leaseExpiresAt: new Date(current.getTime() + RUNTIME_LEASE_MS),
@@ -180,6 +185,13 @@ export async function prepareFounderOperatorRuntimeForUser(
       runtimeIdentity: `${RUNTIME_IDENTITY_PREFIX}-${operator.id}`,
       configRevision,
       now: current,
+      launchSpec: buildFounderOperatorNativeLaunchSpec({
+        operatorId: operator.id,
+        timezone: operator.preparation.timezone ?? "UTC",
+        configRevision,
+        apiServerKey: `bruno_agent_${randomBytes(24).toString("base64url")}`,
+        requestId: leaseOwner,
+      }),
     };
     const adapter =
       dependencies.adapter ??
@@ -332,28 +344,11 @@ export class FounderOperatorRuntimeInvariantError extends Error {
 export function createFounderOperatorFilesystemAdapter(input: {
   stateRoot?: string;
 }): FounderOperatorRuntimeAdapter {
-  const stateRoot = input.stateRoot ?? process.env.BRUNO_OPERATOR_RUNTIME_STATE_ROOT;
-
-  if (!stateRoot) {
-    return {
-      async prepare(runtime) {
-        return {
-          ok: true,
-          runtimeIdentity: runtime.runtimeIdentity,
-          transportState: "connected",
-          safetyState: "verified",
-        };
-      },
-      async verify(runtime) {
-        return {
-          ok: true,
-          runtimeIdentity: runtime.runtimeIdentity,
-          transportState: "connected",
-          safetyState: "verified",
-        };
-      },
-    };
-  }
+  const stateRoot =
+    input.stateRoot ??
+    process.env.BRUNO_OPERATOR_RUNTIME_STATE_ROOT ??
+    process.env.BRUNO_HERMES_STATE_ROOT ??
+    DEFAULT_HERMES_STATE_ROOT;
 
   return {
     async prepare(runtime) {
@@ -361,7 +356,13 @@ export function createFounderOperatorFilesystemAdapter(input: {
       const markerPath = join(root, "hermes", "bruno-operator-runtime.json");
       try {
         const { prepareHermesState } = await import("@/src/runner-service/hermes-projection");
-        await prepareHermesState(runtime.operatorId, stateRoot === undefined ? {} : { stateRoot });
+        await prepareHermesState(runtime.operatorId, { stateRoot });
+        if (runtime.launchSpec) {
+          const configPath = join(root, "hermes", "config.yaml");
+          await ensureNativeHermesConfig(configPath);
+          const { projectHermesHome } = await import("@/src/runner-service/hermes-projection");
+          await projectHermesHome(runtime.launchSpec, { stateRoot });
+        }
         const marker = `${JSON.stringify({
           contractVersion: SAFETY_CONTRACT_VERSION,
           operatorId: runtime.operatorId,
@@ -417,6 +418,22 @@ export function createFounderOperatorFilesystemAdapter(input: {
         ) {
           throw new Error("invalid marker");
         }
+        if (runtime.launchSpec) {
+          const revision = JSON.parse(
+            await readFile(
+              join(stateRoot, runtime.operatorId, "hermes", "bruno-config-revision.json"),
+              "utf8",
+            ),
+          ) as Record<string, unknown>;
+          if (
+            revision.version !== runtime.launchSpec.version ||
+            revision.agentId !== runtime.operatorId ||
+            revision.configRevision !== runtime.configRevision ||
+            revision.image !== runtime.launchSpec.image.ref
+          ) {
+            throw new Error("native launch revision mismatch");
+          }
+        }
         return {
           ok: true,
           runtimeIdentity: runtime.runtimeIdentity,
@@ -447,4 +464,20 @@ function isMissingFileError(error: unknown): boolean {
     "code" in error &&
     (error as { code?: unknown }).code === "ENOENT"
   );
+}
+
+async function ensureNativeHermesConfig(configPath: string): Promise<void> {
+  try {
+    const stats = await lstat(configPath);
+    if (!stats.isFile() || stats.nlink !== 1) throw new Error("unsafe Hermes config");
+    return;
+  } catch (error) {
+    if (!isMissingFileError(error)) throw error;
+  }
+
+  await writeFile(configPath, "model:\n  provider: hermes\n  default: configured-by-hermes\n", {
+    encoding: "utf8",
+    mode: 0o644,
+    flag: "wx",
+  });
 }

@@ -26,6 +26,12 @@ describe("Founder Operator Hermes runtime boundary", () => {
       runtimeIdentity: "bruno-operator-00000000-0000-4000-8000-000000003381",
       configRevision: "operator-runtime-1-1723939200000",
       now: new Date("2026-08-18T00:00:00.000Z"),
+      launchSpec: buildFounderOperatorNativeLaunchSpec({
+        operatorId: "00000000-0000-4000-8000-000000003381",
+        timezone: "Asia/Manila",
+        configRevision: "operator-runtime-1-1723939200000",
+        apiServerKey: "bruno_agent_abcdefghijklmnopqrstuvwxyz0123456789",
+      }),
     };
 
     await expect(adapter.prepare(input)).resolves.toMatchObject({
@@ -45,6 +51,21 @@ describe("Founder Operator Hermes runtime boundary", () => {
       configRevision: input.configRevision,
       telegramRequired: false,
       providerConfigOwner: "hermes",
+    });
+    expect(
+      await readFile(join(stateRoot, input.operatorId, "hermes", "config.yaml"), "utf8"),
+    ).toContain("provider: hermes");
+    expect(
+      JSON.parse(
+        await readFile(
+          join(stateRoot, input.operatorId, "hermes", "bruno-config-revision.json"),
+          "utf8",
+        ),
+      ),
+    ).toMatchObject({
+      version: "bruno.hermes.launch.v2",
+      agentId: input.operatorId,
+      configRevision: input.configRevision,
     });
   });
 

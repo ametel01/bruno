@@ -27,6 +27,35 @@ export function FounderOperatorPreparation({
     }
   }, []);
 
+  useEffect(() => {
+    if (
+      initialOperator.preparation.status === "awaiting_timezone" ||
+      (initialOperator.runtime && initialOperator.runtime.status !== "preparing")
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void fetch("/api/operator", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ action: "prepare" }),
+    })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return (await response.json()) as { operator?: FounderOperatorDto };
+      })
+      .then((body) => {
+        if (!cancelled && body?.operator) setOperator(body.operator);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialOperator]);
+
   const preparation = operator.preparation;
   const awaitingTimezone = preparation.status === "awaiting_timezone";
   const runtime = operator.runtime;
