@@ -221,7 +221,7 @@ export function FounderActionInbox() {
             Sending Connection. This preview remains visible and no message can be sent now.
           </p>
           <div className={styles.offerActions}>
-            <a href="#mail">Review optional Mail Connection</a>
+            <a href="#mail-sending">Review optional Mail Sending Connection</a>
             <button type="button" onClick={() => void dismissMailOffer()} disabled={saving}>
               Not now
             </button>

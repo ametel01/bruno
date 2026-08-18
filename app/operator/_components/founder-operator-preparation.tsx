@@ -11,6 +11,7 @@ import { FounderActionInbox } from "./founder-action-inbox";
 import { FounderLimitedOperation } from "./founder-limited-operation";
 import { FounderCoreOperation } from "./founder-core-operation";
 import { FounderMailConnection } from "./founder-mail-connection";
+import { FounderMailSendingConnection } from "./founder-mail-sending-connection";
 import { FounderRelationships } from "./founder-relationships";
 import styles from "./founder-operator-preparation.module.css";
 
@@ -297,6 +298,8 @@ export function FounderOperatorPreparation({
       {runtimeReady ? <FounderConversation /> : null}
 
       {runtimeReady ? <FounderActionInbox /> : null}
+
+      {runtimeReady ? <FounderMailSendingConnection /> : null}
 
       {runtimeReady ? <FounderAiConnection /> : null}
 

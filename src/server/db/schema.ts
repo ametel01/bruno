@@ -176,6 +176,29 @@ export const operatorMailSuiteStatusEnum = pgEnum("operator_mail_suite_status", 
   "mismatch",
 ]);
 
+export const operatorMailSendingConnectionStatusEnum = pgEnum(
+  "operator_mail_sending_connection_status",
+  ["authorizing", "verifying", "ready", "needs_attention", "disconnected"],
+);
+
+export const operatorMailSendingAuthorizationStateEnum = pgEnum(
+  "operator_mail_sending_authorization_state",
+  ["pending", "authorized", "denied", "expired", "revoked", "revocation_unconfirmed"],
+);
+
+export const operatorMailSendingConnectionReceiptKindEnum = pgEnum(
+  "operator_mail_sending_connection_receipt_kind",
+  [
+    "authorized",
+    "reauthorized",
+    "verified",
+    "verification_failed",
+    "denied",
+    "revoked",
+    "disconnected",
+  ],
+);
+
 export const operatorPrimaryCommunicationsSuiteStatusEnum = pgEnum(
   "operator_primary_communications_suite_status",
   ["active", "needs_attention"],
@@ -1222,6 +1245,128 @@ export const operatorMailConnectionReceipts = pgTable(
       table.kind,
     ),
     index("operator_mail_connection_receipts_created_idx").on(table.connectionId, table.createdAt),
+  ],
+);
+
+export const operatorMailSendingConnections = pgTable(
+  "operator_mail_sending_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    mailConnectionId: uuid("mail_connection_id").references(() => operatorMailConnections.id, {
+      onDelete: "set null",
+    }),
+    provider: text("provider").notNull().default("google_gmail_sending"),
+    providerSubjectId: text("provider_subject_id"),
+    accountLabel: text("account_label"),
+    status: operatorMailSendingConnectionStatusEnum("status").notNull().default("authorizing"),
+    authorizationState: operatorMailSendingAuthorizationStateEnum("authorization_state")
+      .notNull()
+      .default("pending"),
+    authorizationSessionHash: text("authorization_session_hash"),
+    authorizationExpiresAt: timestamp("authorization_expires_at", { withTimezone: true }),
+    authorizationGeneration: integer("authorization_generation").notNull().default(1),
+    accessTokenCiphertext: text("access_token_ciphertext"),
+    accessTokenIv: text("access_token_iv"),
+    accessTokenAuthTag: text("access_token_auth_tag"),
+    refreshTokenCiphertext: text("refresh_token_ciphertext"),
+    refreshTokenIv: text("refresh_token_iv"),
+    refreshTokenAuthTag: text("refresh_token_auth_tag"),
+    secretKeyVersion: text("secret_key_version"),
+    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
+    grantedScopes: jsonb("granted_scopes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    authorizedAt: timestamp("authorized_at", { withTimezone: true }),
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    failureCode: text("failure_code"),
+    recoveryMessage: text("recovery_message"),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_mail_sending_connections_provider_check",
+      sql`${table.provider} = 'google_gmail_sending'`,
+    ),
+    check(
+      "operator_mail_sending_connections_subject_check",
+      sql`${table.providerSubjectId} IS NULL OR length(trim(${table.providerSubjectId})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "operator_mail_sending_connections_session_hash_check",
+      sql`${table.authorizationSessionHash} IS NULL OR ${table.authorizationSessionHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      "operator_mail_sending_connections_generation_check",
+      sql`${table.authorizationGeneration} >= 1`,
+    ),
+    check(
+      "operator_mail_sending_connections_token_pair_check",
+      sql`(
+        ${table.accessTokenCiphertext} IS NULL AND ${table.accessTokenIv} IS NULL AND ${table.accessTokenAuthTag} IS NULL
+        AND ${table.refreshTokenCiphertext} IS NULL AND ${table.refreshTokenIv} IS NULL AND ${table.refreshTokenAuthTag} IS NULL
+        AND ${table.secretKeyVersion} IS NULL
+      ) OR (
+        ${table.accessTokenCiphertext} IS NOT NULL AND ${table.accessTokenIv} IS NOT NULL AND ${table.accessTokenAuthTag} IS NOT NULL
+        AND ${table.refreshTokenCiphertext} IS NOT NULL AND ${table.refreshTokenIv} IS NOT NULL AND ${table.refreshTokenAuthTag} IS NOT NULL
+        AND ${table.secretKeyVersion} IS NOT NULL
+      )`,
+    ),
+    check(
+      "operator_mail_sending_connections_failure_pair_check",
+      sql`(${table.failureCode} IS NULL AND ${table.recoveryMessage} IS NULL) OR (${table.failureCode} IS NOT NULL AND ${table.recoveryMessage} IS NOT NULL)`,
+    ),
+    check(
+      "operator_mail_sending_connections_ready_shape_check",
+      sql`${table.status} <> 'ready' OR (${table.providerSubjectId} IS NOT NULL AND ${table.accountLabel} IS NOT NULL AND ${table.authorizationState} = 'authorized' AND ${table.authorizationSessionHash} IS NULL AND ${table.accessTokenCiphertext} IS NOT NULL AND ${table.refreshTokenCiphertext} IS NOT NULL AND ${table.lastVerifiedAt} IS NOT NULL)`,
+    ),
+    uniqueIndex("operator_mail_sending_connections_operator_idx").on(table.operatorId),
+    index("operator_mail_sending_connections_status_idx").on(table.status),
+  ],
+);
+
+export const operatorMailSendingConnectionReceipts = pgTable(
+  "operator_mail_sending_connection_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    connectionId: uuid("connection_id")
+      .notNull()
+      .references(() => operatorMailSendingConnections.id, { onDelete: "restrict" }),
+    generation: integer("generation").notNull(),
+    kind: operatorMailSendingConnectionReceiptKindEnum("kind").notNull(),
+    provider: text("provider").notNull().default("google_gmail_sending"),
+    providerSubjectId: text("provider_subject_id"),
+    accountLabel: text("account_label"),
+    grantedScopes: jsonb("granted_scopes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    status: text("status").notNull(),
+    evidenceDigest: text("evidence_digest").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_mail_sending_connection_receipts_provider_check",
+      sql`${table.provider} = 'google_gmail_sending'`,
+    ),
+    check(
+      "operator_mail_sending_connection_receipts_generation_check",
+      sql`${table.generation} >= 1`,
+    ),
+    check(
+      "operator_mail_sending_connection_receipts_digest_check",
+      sql`${table.evidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    uniqueIndex("operator_mail_sending_connection_receipts_generation_idx").on(
+      table.connectionId,
+      table.generation,
+      table.kind,
+    ),
+    index("operator_mail_sending_connection_receipts_created_idx").on(
+      table.connectionId,
+      table.createdAt,
+    ),
   ],
 );
 
