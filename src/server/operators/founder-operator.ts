@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
-import { operatorPreparations, operators } from "@/src/server/db/schema";
+import { operatorPreparations, operatorRuntimes, operators } from "@/src/server/db/schema";
 
 type OperatorTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -13,6 +13,25 @@ export type FounderOperatorPreparationStatus =
   | "preparing"
   | "ready"
   | "needs_attention";
+
+export type FounderOperatorRuntimeStatus = FounderOperatorPreparationStatus;
+export type FounderOperatorRuntimeTransportState = "unknown" | "starting" | "connected" | "failed";
+export type FounderOperatorRuntimeSafetyState = "unknown" | "verified" | "failed";
+
+export type FounderOperatorRuntimeDto = {
+  id: string;
+  status: FounderOperatorRuntimeStatus;
+  transportState: FounderOperatorRuntimeTransportState;
+  safetyState: FounderOperatorRuntimeSafetyState;
+  configRevision: string | null;
+  attemptCount: number;
+  startedAt: string | null;
+  readyAt: string | null;
+  recoveryMessage: string | null;
+  failureCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type FounderOperatorDto = {
   id: string;
@@ -31,6 +50,7 @@ export type FounderOperatorDto = {
     createdAt: string;
     updatedAt: string;
   };
+  runtime?: FounderOperatorRuntimeDto;
 };
 
 export type FounderOperatorDependencies = {
@@ -83,7 +103,7 @@ export async function getFounderOperatorForUser(
   try {
     return await connection.db.transaction(async (tx) => {
       const row = await selectFounderOperatorInTransaction(tx, userId);
-      return row ? toDto(row.operator, row.preparation) : null;
+      return row ? toDto(row.operator, row.preparation, row.runtime ?? undefined) : null;
     });
   } finally {
     if (ownsConnection) {
@@ -140,6 +160,18 @@ export async function confirmFounderTimezoneForUser(
         throw new FounderOperatorInvariantError("Operator preparation could not be updated.");
       }
 
+      await tx
+        .update(operatorRuntimes)
+        .set({
+          status: "preparing",
+          transportState: "starting",
+          safetyState: "unknown",
+          recoveryMessage: null,
+          failureCode: null,
+          updatedAt: currentNow,
+        })
+        .where(eq(operatorRuntimes.operatorId, current.id));
+
       const [operator] = await tx
         .select()
         .from(operators)
@@ -150,7 +182,13 @@ export async function confirmFounderTimezoneForUser(
         throw new FounderOperatorInvariantError("Active Founder Operator could not be reloaded.");
       }
 
-      return toDto(operator, updatedPreparation);
+      const [runtime] = await tx
+        .select()
+        .from(operatorRuntimes)
+        .where(eq(operatorRuntimes.operatorId, current.id))
+        .limit(1);
+
+      return toDto(operator, updatedPreparation, runtime);
     });
   } finally {
     if (ownsConnection) {
@@ -219,6 +257,16 @@ async function ensureFounderOperatorInTransaction(
     preparation = createdPreparation;
   }
 
+  let runtime = await selectRuntimeForOperator(tx, operator.id);
+  if (!runtime) {
+    const [createdRuntime] = await tx
+      .insert(operatorRuntimes)
+      .values({ operatorId: operator.id })
+      .onConflictDoNothing({ target: operatorRuntimes.operatorId })
+      .returning();
+    runtime = createdRuntime ?? (await selectRuntimeForOperator(tx, operator.id));
+  }
+
   if (!preparation) {
     const afterConflict = await tx
       .select()
@@ -234,7 +282,7 @@ async function ensureFounderOperatorInTransaction(
     );
   }
 
-  return toDto(operator, preparation);
+  return toDto(operator, preparation, runtime ?? undefined);
 }
 
 async function selectFounderOperatorInTransaction(
@@ -243,11 +291,13 @@ async function selectFounderOperatorInTransaction(
 ): Promise<{
   operator: typeof operators.$inferSelect;
   preparation: typeof operatorPreparations.$inferSelect;
+  runtime: typeof operatorRuntimes.$inferSelect | null;
 } | null> {
   const [row] = await tx
-    .select({ operator: operators, preparation: operatorPreparations })
+    .select({ operator: operators, preparation: operatorPreparations, runtime: operatorRuntimes })
     .from(operators)
     .innerJoin(operatorPreparations, eq(operatorPreparations.operatorId, operators.id))
+    .leftJoin(operatorRuntimes, eq(operatorRuntimes.operatorId, operators.id))
     .where(and(eq(operators.userId, userId), eq(operators.status, "active")))
     .limit(1);
 
@@ -263,6 +313,7 @@ async function lockFounderOperatorOwner(tx: OperatorTransaction, userId: string)
 function toDto(
   operator: typeof operators.$inferSelect,
   preparation: typeof operatorPreparations.$inferSelect,
+  runtime?: typeof operatorRuntimes.$inferSelect,
 ): FounderOperatorDto {
   if (operator.status !== "active") {
     throw new FounderOperatorInvariantError("Only active Founder Operators are customer-visible.");
@@ -285,6 +336,36 @@ function toDto(
       createdAt: preparation.createdAt.toISOString(),
       updatedAt: preparation.updatedAt.toISOString(),
     },
+    ...(runtime ? { runtime: runtimeToDto(runtime) } : {}),
+  };
+}
+
+function selectRuntimeForOperator(
+  tx: OperatorTransaction,
+  operatorId: string,
+): Promise<typeof operatorRuntimes.$inferSelect | undefined> {
+  return tx
+    .select()
+    .from(operatorRuntimes)
+    .where(eq(operatorRuntimes.operatorId, operatorId))
+    .limit(1)
+    .then(([runtime]) => runtime);
+}
+
+function runtimeToDto(runtime: typeof operatorRuntimes.$inferSelect): FounderOperatorRuntimeDto {
+  return {
+    id: runtime.id,
+    status: runtime.status,
+    transportState: runtime.transportState,
+    safetyState: runtime.safetyState,
+    configRevision: runtime.configRevision,
+    attemptCount: runtime.attemptCount,
+    startedAt: runtime.startedAt?.toISOString() ?? null,
+    readyAt: runtime.readyAt?.toISOString() ?? null,
+    recoveryMessage: runtime.recoveryMessage,
+    failureCode: runtime.failureCode,
+    createdAt: runtime.createdAt.toISOString(),
+    updatedAt: runtime.updatedAt.toISOString(),
   };
 }
 

@@ -29,9 +29,16 @@ export function FounderOperatorPreparation({
 
   const preparation = operator.preparation;
   const awaitingTimezone = preparation.status === "awaiting_timezone";
+  const runtime = operator.runtime;
+  const runtimeReady = runtime?.status === "ready";
+  const runtimeNeedsAttention = runtime?.status === "needs_attention";
 
   async function confirmTimezone(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    await saveTimezone();
+  }
+
+  async function saveTimezone() {
     setSaving(true);
     setError(null);
 
@@ -56,6 +63,19 @@ export function FounderOperatorPreparation({
 
       setOperator(body.operator);
       setTimezone(body.operator.preparation.timezone ?? timezone.trim());
+
+      const preparationResponse = await fetch("/api/operator", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "prepare" }),
+      });
+      const preparationBody = (await preparationResponse.json()) as
+        | { operator: FounderOperatorDto }
+        | { error?: { message?: string } };
+      if (preparationResponse.ok && "operator" in preparationBody) {
+        setOperator(preparationBody.operator);
+      }
     } catch (submissionError) {
       setError(
         submissionError instanceof Error
@@ -77,14 +97,42 @@ export function FounderOperatorPreparation({
         <h2 id="operator-preparation-title">
           {awaitingTimezone
             ? "One quick choice, then Bruno can get to work."
-            : "Your Operator is being prepared."}
+            : runtimeReady
+              ? "Your Operator is ready."
+              : runtimeNeedsAttention
+                ? "Your Operator needs one recovery step."
+                : "Your Operator is being prepared."}
         </h2>
         <p className={styles.intro}>
           {awaitingTimezone
             ? "Bruno keeps your workspace on your local time. Confirm where you are based and we’ll continue from here if you leave and come back."
-            : "Bruno is keeping your progress safe while the private operating workspace is prepared. You can leave this page and return without starting over."}
+            : runtimeReady
+              ? "Your private operating workspace is ready. Bruno will keep its progress and provider setup in place across restarts."
+              : runtimeNeedsAttention
+                ? (runtime?.recoveryMessage ??
+                  "Bruno could not finish preparing the private workspace.")
+                : "Bruno is keeping your progress safe while the private operating workspace is prepared. You can leave this page and return without starting over."}
         </p>
       </section>
+
+      {!awaitingTimezone && runtimeNeedsAttention ? (
+        <section className={styles.card} aria-labelledby="recovery-title">
+          <div className={styles.cardHeading}>
+            <div>
+              <p className={styles.kicker}>Needs you</p>
+              <h3 id="recovery-title">Try preparing again</h3>
+            </div>
+          </div>
+          <button
+            className={styles.button}
+            type="button"
+            onClick={() => void saveTimezone()}
+            disabled={saving}
+          >
+            {saving ? "Trying again…" : "Try again"}
+          </button>
+        </section>
+      ) : null}
 
       <section className={styles.card} aria-labelledby="timezone-title">
         <div className={styles.cardHeading}>

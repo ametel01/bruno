@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   confirmTimezone: vi.fn(),
   ensureOperator: vi.fn(),
+  prepareRuntime: vi.fn(),
   requireApplicationUser: vi.fn(),
 }));
 
@@ -53,11 +54,48 @@ describe("Founder Operator route", () => {
         timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
       },
     });
+    mocks.prepareRuntime.mockResolvedValue({
+      operator: {
+        ...OPERATOR,
+        preparation: { ...OPERATOR.preparation, status: "ready" },
+        runtime: {
+          id: "00000000-0000-4000-8000-000000003393",
+          status: "ready",
+          transportState: "connected",
+          safetyState: "verified",
+          configRevision: "operator-runtime-1-1723939200000",
+          runtimeIdentity: "bruno-operator-test",
+          attemptCount: 1,
+          startedAt: "2026-08-18T01:00:00.000Z",
+          readyAt: "2026-08-18T01:00:01.000Z",
+          recoveryMessage: null,
+          failureCode: null,
+          createdAt: "2026-08-18T00:00:00.000Z",
+          updatedAt: "2026-08-18T01:00:01.000Z",
+        },
+      },
+      runtime: {
+        id: "00000000-0000-4000-8000-000000003393",
+        status: "ready",
+        transportState: "connected",
+        safetyState: "verified",
+        configRevision: "operator-runtime-1-1723939200000",
+        runtimeIdentity: "bruno-operator-test",
+        attemptCount: 1,
+        startedAt: "2026-08-18T01:00:00.000Z",
+        readyAt: "2026-08-18T01:00:01.000Z",
+        recoveryMessage: null,
+        failureCode: null,
+        createdAt: "2026-08-18T00:00:00.000Z",
+        updatedAt: "2026-08-18T01:00:01.000Z",
+      },
+    });
   });
 
   afterEach(() => {
     mocks.confirmTimezone.mockReset();
     mocks.ensureOperator.mockReset();
+    mocks.prepareRuntime.mockReset();
     mocks.requireApplicationUser.mockReset();
   });
 
@@ -118,5 +156,23 @@ describe("Founder Operator route", () => {
     );
     expect(invalid.status).toBe(400);
     expect(await invalid.json()).toMatchObject({ error: { code: "validation_failed" } });
+  });
+
+  it("starts idempotent runtime preparation without exposing infrastructure phases", async () => {
+    const { POST } = await import("@/app/api/operator/route");
+    const response = await POST(
+      new Request("http://localhost/api/operator", {
+        method: "POST",
+        body: JSON.stringify({ action: "prepare" }),
+      }),
+      undefined,
+      { prepareRuntime: mocks.prepareRuntime },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      runtime: { status: "ready", transportState: "connected", safetyState: "verified" },
+    });
+    expect(mocks.prepareRuntime).toHaveBeenCalledWith(USER_ID);
   });
 });

@@ -3,12 +3,14 @@ import {
   ensureFounderOperatorForUser,
   FounderOperatorTimezoneError,
 } from "@/src/server/operators/founder-operator";
+import { prepareFounderOperatorRuntimeForUser } from "@/src/server/operators/founder-operator-runtime";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 type OperatorRouteDependencies = {
   requireApplicationUser?: typeof requireConfiguredApplicationUser;
   ensureOperator?: typeof ensureFounderOperatorForUser;
   confirmTimezone?: typeof confirmFounderTimezoneForUser;
+  prepareRuntime?: typeof prepareFounderOperatorRuntimeForUser;
 };
 
 type OperatorRouteContext = {
@@ -57,6 +59,16 @@ export async function POST(
     return validationResponse("Request body must be valid JSON.");
   }
 
+  if (readAction(payload) === "prepare") {
+    const result = await (dependencies.prepareRuntime ?? prepareFounderOperatorRuntimeForUser)(
+      applicationUser.userId,
+    );
+    return Response.json(
+      { operator: result.operator, runtime: result.runtime },
+      { headers: noStoreHeaders() },
+    );
+  }
+
   const timezone = readTimezone(payload);
   if (!timezone) {
     return validationResponse("Timezone is required.");
@@ -83,6 +95,14 @@ function readTimezone(payload: unknown): string | null {
 
   const timezone = payload.timezone;
   return typeof timezone === "string" ? timezone : null;
+}
+
+function readAction(payload: unknown): "prepare" | null {
+  if (!payload || typeof payload !== "object" || !("action" in payload)) {
+    return null;
+  }
+
+  return payload.action === "prepare" ? "prepare" : null;
 }
 
 function authenticationResponse(status: 401 | 503): Response {

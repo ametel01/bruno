@@ -43,6 +43,26 @@ export const operatorPreparationStatusEnum = pgEnum("operator_preparation_status
   "needs_attention",
 ]);
 
+export const operatorRuntimeStatusEnum = pgEnum("operator_runtime_status", [
+  "awaiting_timezone",
+  "preparing",
+  "ready",
+  "needs_attention",
+]);
+
+export const operatorRuntimeTransportStateEnum = pgEnum("operator_runtime_transport_state", [
+  "unknown",
+  "starting",
+  "connected",
+  "failed",
+]);
+
+export const operatorRuntimeSafetyStateEnum = pgEnum("operator_runtime_safety_state", [
+  "unknown",
+  "verified",
+  "failed",
+]);
+
 export const agentDesiredStatusEnum = pgEnum("agent_desired_status", ["stopped", "running"]);
 
 export const agentDeploymentStageEnum = pgEnum("agent_deployment_stage", [
@@ -449,6 +469,50 @@ export const operatorPreparations = pgTable(
     ),
     uniqueIndex("operator_preparations_operator_id_idx").on(table.operatorId),
     index("operator_preparations_status_idx").on(table.status),
+  ],
+);
+
+export const operatorRuntimes = pgTable(
+  "operator_runtimes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    status: operatorRuntimeStatusEnum("status").notNull().default("awaiting_timezone"),
+    transportState: operatorRuntimeTransportStateEnum("transport_state")
+      .notNull()
+      .default("unknown"),
+    safetyState: operatorRuntimeSafetyStateEnum("safety_state").notNull().default("unknown"),
+    configRevision: text("config_revision"),
+    runtimeIdentity: text("runtime_identity"),
+    operationId: uuid("operation_id"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
+    recoveryMessage: text("recovery_message"),
+    failureCode: text("failure_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("operator_runtimes_attempt_count_check", sql`${table.attemptCount} >= 0`),
+    check(
+      "operator_runtimes_lease_pair_check",
+      sql`(${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL) OR (${table.leaseOwner} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "operator_runtimes_recovery_message_check",
+      sql`${table.status} = 'needs_attention' OR ${table.recoveryMessage} IS NULL`,
+    ),
+    check(
+      "operator_runtimes_failure_code_check",
+      sql`${table.failureCode} IS NULL OR ${table.failureCode} ~ '^[a-z0-9_.:-]{1,64}$'`,
+    ),
+    uniqueIndex("operator_runtimes_operator_id_idx").on(table.operatorId),
+    index("operator_runtimes_status_idx").on(table.status),
   ],
 );
 
