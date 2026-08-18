@@ -34,6 +34,15 @@ export const agentStatusEnum = pgEnum("agent_status", [
   "deleting",
 ]);
 
+export const operatorStatusEnum = pgEnum("operator_status", ["active", "archived"]);
+
+export const operatorPreparationStatusEnum = pgEnum("operator_preparation_status", [
+  "awaiting_timezone",
+  "preparing",
+  "ready",
+  "needs_attention",
+]);
+
 export const agentDesiredStatusEnum = pgEnum("agent_desired_status", ["stopped", "running"]);
 
 export const agentDeploymentStageEnum = pgEnum("agent_deployment_stage", [
@@ -380,6 +389,66 @@ export const runners = pgTable(
     uniqueIndex("runners_active_user_endpoint_idx")
       .on(table.userId, table.endpointUrl)
       .where(sql`${table.deletedAt} IS NULL AND ${table.endpointUrl} IS NOT NULL`),
+  ],
+);
+
+export const operators = pgTable(
+  "operators",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    status: operatorStatusEnum("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "operators_archived_status_check",
+      sql`(${table.status} = 'archived' AND ${table.archivedAt} IS NOT NULL) OR (${table.status} = 'active' AND ${table.archivedAt} IS NULL)`,
+    ),
+    uniqueIndex("operators_user_id_idx").on(table.userId),
+    index("operators_status_idx").on(table.status),
+  ],
+);
+
+export const operatorPreparations = pgTable(
+  "operator_preparations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    status: operatorPreparationStatusEnum("status").notNull().default("awaiting_timezone"),
+    timezone: text("timezone"),
+    timezoneConfirmedAt: timestamp("timezone_confirmed_at", { withTimezone: true }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    recoveryMessage: text("recovery_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_preparations_timezone_confirmation_check",
+      sql`(${table.timezone} IS NULL AND ${table.timezoneConfirmedAt} IS NULL) OR (${table.timezone} IS NOT NULL AND ${table.timezoneConfirmedAt} IS NOT NULL)`,
+    ),
+    check(
+      "operator_preparations_started_after_created_check",
+      sql`${table.startedAt} IS NULL OR ${table.startedAt} >= ${table.createdAt}`,
+    ),
+    check(
+      "operator_preparations_completed_after_started_check",
+      sql`${table.completedAt} IS NULL OR ${table.startedAt} IS NULL OR ${table.completedAt} >= ${table.startedAt}`,
+    ),
+    check(
+      "operator_preparations_recovery_message_check",
+      sql`${table.status} = 'needs_attention' OR ${table.recoveryMessage} IS NULL`,
+    ),
+    uniqueIndex("operator_preparations_operator_id_idx").on(table.operatorId),
+    index("operator_preparations_status_idx").on(table.status),
   ],
 );
 

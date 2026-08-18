@@ -89,7 +89,7 @@ describe("Clerk authentication surfaces", () => {
       "Clerk sign-in widget",
       () => mocks.signInProps,
       {
-        fallbackRedirectUrl: "/dashboard",
+        fallbackRedirectUrl: "/operator",
         path: "/sign-in",
         routing: "path",
         signUpUrl: "/sign-up",
@@ -101,7 +101,7 @@ describe("Clerk authentication surfaces", () => {
       "Clerk sign-up widget",
       () => mocks.signUpProps,
       {
-        fallbackRedirectUrl: "/dashboard",
+        fallbackRedirectUrl: "/operator",
         path: "/sign-up",
         routing: "path",
         signInUrl: "/sign-in",

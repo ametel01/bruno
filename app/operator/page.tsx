@@ -1,0 +1,29 @@
+import { FounderOperatorPreparation } from "@/app/operator/_components/founder-operator-preparation";
+import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
+import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
+
+export const dynamic = "force-dynamic";
+
+export default async function FounderOperatorPage() {
+  const applicationUser = await requireConfiguredApplicationUser();
+
+  if (!applicationUser.ok) {
+    return (
+      <FounderOperatorShell>
+        <section aria-labelledby="operator-auth-title">
+          <h2 id="operator-auth-title">Sign in to continue</h2>
+          <p>Authentication is required to open your private Founder workspace.</p>
+        </section>
+      </FounderOperatorShell>
+    );
+  }
+
+  const operator = await ensureFounderOperatorForUser(applicationUser.userId);
+
+  return (
+    <FounderOperatorShell>
+      <FounderOperatorPreparation initialOperator={operator} />
+    </FounderOperatorShell>
+  );
+}

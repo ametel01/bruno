@@ -61,12 +61,7 @@ export function SignInSurface() {
       description="Use your Bruno.Ai account to continue to your always-on operator."
       title="Sign in to Bruno.Ai"
     >
-      <SignIn
-        fallbackRedirectUrl="/dashboard"
-        path="/sign-in"
-        routing="path"
-        signUpUrl="/sign-up"
-      />
+      <SignIn fallbackRedirectUrl="/operator" path="/sign-in" routing="path" signUpUrl="/sign-up" />
     </AuthSurface>
   );
 }
@@ -77,12 +72,7 @@ export function SignUpSurface() {
       description="Create a Bruno.Ai account to start an always-on agent that learns how you run your one-person company."
       title="Create your Bruno.Ai account"
     >
-      <SignUp
-        fallbackRedirectUrl="/dashboard"
-        path="/sign-up"
-        routing="path"
-        signInUrl="/sign-in"
-      />
+      <SignUp fallbackRedirectUrl="/operator" path="/sign-up" routing="path" signInUrl="/sign-in" />
     </AuthSurface>
   );
 }

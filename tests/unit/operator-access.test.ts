@@ -7,6 +7,8 @@ describe("operator access path decisions", () => {
   it.each([
     "/dashboard",
     "/dashboard/runners",
+    "/operator",
+    "/operator/preparation",
     "/agents",
     "/agents/abc",
     "/settings",

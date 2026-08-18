@@ -69,6 +69,7 @@ export function isOperatorProtectedPath(pathname: string): boolean {
 
   return (
     pathname === "/" ||
+    isPathOrDescendant(pathname, "/operator") ||
     isPathOrDescendant(pathname, "/dashboard") ||
     isPathOrDescendant(pathname, "/agents") ||
     isPathOrDescendant(pathname, "/settings") ||
