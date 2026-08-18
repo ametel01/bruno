@@ -562,7 +562,7 @@ export async function disconnectFounderOpenAiForUser(
           approvedModelAssignment: null,
           disconnectedAt: at,
           revokedAt: revocation.providerRevoked ? at : null,
-          failureCode: null,
+          failureCode: revocation.providerRevoked ? null : "provider_revocation_unconfirmed",
           recoveryMessage: providerRevokedMessage,
           workPausedReason: "OpenAI is disconnected. Bruno paused work that needs it.",
           updatedAt: at,
@@ -657,6 +657,16 @@ async function insertReceipt(
   kind: "authorized" | "reauthorized" | "verification_failed" | "revoked" | "disconnected",
   at: Date,
 ): Promise<void> {
+  const [latest] = await tx
+    .select({ createdAt: operatorAiConnectionReceipts.createdAt })
+    .from(operatorAiConnectionReceipts)
+    .where(eq(operatorAiConnectionReceipts.connectionId, connection.id))
+    .orderBy(desc(operatorAiConnectionReceipts.createdAt), desc(operatorAiConnectionReceipts.id))
+    .limit(1);
+  const createdAt =
+    latest && latest.createdAt.getTime() >= at.getTime()
+      ? new Date(latest.createdAt.getTime() + 1)
+      : at;
   const evidenceDigest = digestOpaqueValue(
     JSON.stringify({
       connectionId: connection.id,
@@ -665,7 +675,7 @@ async function insertReceipt(
       provider: connection.provider,
       providerSubjectId: connection.providerSubjectId,
       status: connection.status,
-      at: at.toISOString(),
+      at: createdAt.toISOString(),
     }),
   );
   await tx
@@ -679,7 +689,7 @@ async function insertReceipt(
       accountLabel: connection.accountLabel,
       status: connection.status,
       evidenceDigest: `sha256:${evidenceDigest}`,
-      createdAt: at,
+      createdAt,
     })
     .onConflictDoNothing();
 }
