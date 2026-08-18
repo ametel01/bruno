@@ -1,0 +1,140 @@
+.card {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, var(--accent) 28%);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--panel) 92%, var(--accent) 8%);
+}
+
+.compact {
+  padding: 0.85rem;
+}
+
+.heading,
+.actions,
+.decisionMeta,
+.fieldRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.kicker,
+.label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.heading h4,
+.card p {
+  margin: 0;
+}
+
+.heading h4 {
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.badge {
+  padding: 0.3rem 0.55rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.blocked {
+  background: color-mix(in srgb, var(--panel) 86%, #b45309 14%);
+}
+
+.details {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.details div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.details dt {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.details dd {
+  margin: 0;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.preconditions {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.actions {
+  justify-content: flex-start;
+  border: 0;
+  padding: 0;
+}
+
+.actions button,
+.saveButton {
+  border: 0;
+  border-radius: 0.7rem;
+  padding: 0.6rem 0.85rem;
+  background: var(--accent);
+  color: white;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.actions button[data-kind="decline"] {
+  background: var(--line);
+  color: var(--ink);
+}
+
+.actions button:disabled,
+.saveButton:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.changeForm {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.changeForm textarea {
+  width: 100%;
+  min-height: 5rem;
+  resize: vertical;
+}
+
+.error {
+  margin: 0;
+  color: #b42318;
+  font-size: 0.85rem;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+}

@@ -14,12 +14,21 @@ import {
   operatorLimitedOperations,
   operatorMorningBriefs,
   operatorProcessingConsents,
+  operatorProductGuardrails,
 } from "@/src/server/db/schema";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
   projectFounderActionPreview,
   type FounderActionPreviewDto,
 } from "@/src/server/operators/founder-action-previews";
+import {
+  projectFounderProposedAction,
+  type FounderProposedActionDto,
+} from "@/src/server/operators/founder-proposed-actions";
+import type {
+  FounderActionFamily,
+  FounderAuthorityMode,
+} from "@/src/server/operators/founder-proposed-actions";
 
 type LimitedOperationTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -42,6 +51,7 @@ export type FounderLimitedOperationDto = {
     status: "active" | "missing";
     purpose: typeof CALENDAR_PURPOSE;
     confirmedAt: string | null;
+    version?: number;
   };
   authorityPolicy: {
     version: number;
@@ -49,6 +59,8 @@ export type FounderLimitedOperationDto = {
     preparation: "always";
     externalEffects: "approval_required";
     mailIncluded: false;
+    actionFamilies?: Record<FounderActionFamily, FounderAuthorityMode>;
+    productGuardrails?: { version: number; blockedSubtypes: string[] };
   } | null;
   brief: {
     id: string;
@@ -62,6 +74,7 @@ export type FounderLimitedOperationDto = {
     openedAt: string | null;
   } | null;
   actionPreview?: FounderActionPreviewDto;
+  proposedAction?: FounderProposedActionDto | null;
   activatedAt: string | null;
 };
 
@@ -430,24 +443,19 @@ async function upsertConsent(
         eq(operatorProcessingConsents.operatorId, operatorId),
         eq(operatorProcessingConsents.aiConnectionId, aiConnectionId),
         eq(operatorProcessingConsents.calendarConnectionId, calendarConnectionId),
+        eq(operatorProcessingConsents.purpose, CALENDAR_PURPOSE),
       ),
     )
+    .orderBy(desc(operatorProcessingConsents.version))
     .limit(1);
   if (existing?.status === "active") return existing;
-  if (existing) {
-    const [reactivated] = await tx
-      .update(operatorProcessingConsents)
-      .set({ status: "active", confirmedAt: at, revokedAt: null })
-      .where(eq(operatorProcessingConsents.id, existing.id))
-      .returning();
-    if (reactivated) return reactivated;
-  }
   const [created] = await tx
     .insert(operatorProcessingConsents)
     .values({
       operatorId,
       aiConnectionId,
       calendarConnectionId,
+      version: (existing?.version ?? 0) + 1,
       status: "active",
       purpose: CALENDAR_PURPOSE,
       confirmedAt: at,
@@ -569,6 +577,12 @@ async function projectOperation(
         .where(eq(operatorAuthorityPolicies.id, operation.authorityPolicyId))
         .limit(1)
     : [];
+  const [guardrails] = await tx
+    .select()
+    .from(operatorProductGuardrails)
+    .where(eq(operatorProductGuardrails.operatorId, operatorId))
+    .orderBy(desc(operatorProductGuardrails.version))
+    .limit(1);
   const [ai] = await tx
     .select()
     .from(operatorAiConnections)
@@ -610,6 +624,7 @@ async function projectOperation(
       status: limited && consent?.status === "active" ? "active" : "missing",
       purpose: CALENDAR_PURPOSE,
       confirmedAt: limited ? (consent?.confirmedAt.toISOString() ?? null) : null,
+      version: consent?.version ?? 1,
     },
     authorityPolicy:
       limited &&
@@ -623,6 +638,11 @@ async function projectOperation(
             preparation: "always",
             externalEffects: "approval_required",
             mailIncluded: false,
+            actionFamilies: policy.actionFamilies,
+            productGuardrails: {
+              version: guardrails?.version ?? 1,
+              blockedSubtypes: guardrails?.blockedSubtypes ?? [],
+            },
           }
         : null,
     brief:
@@ -640,6 +660,7 @@ async function projectOperation(
           }
         : null,
     actionPreview: await projectFounderActionPreview(tx, operatorId),
+    proposedAction: await projectFounderProposedAction(tx, operatorId),
     activatedAt: limited
       ? (activation?.activatedAt.toISOString() ?? operation.activatedAt?.toISOString() ?? null)
       : null,

@@ -31,6 +31,9 @@ test("founder can converse with Bruno and see the same history after reload and 
       await expect(
         page.locator(`[data-preview-id="${conversation.actionPreview.id}"]`),
       ).toHaveCount(3);
+      await expect(
+        page.locator(`[data-proposed-action-id="${conversation.proposedAction.id}"]`),
+      ).toHaveCount(3);
       await expect(page.getByText("preview@example.com", { exact: false }).first()).toBeVisible();
 
       await page.getByLabel("Message Bruno").fill("Find the most important follow-up for today.");
@@ -106,6 +109,35 @@ type Conversation = {
     createdAt: string;
     updatedAt: string;
   };
+  proposedAction: {
+    id: string;
+    version: number;
+    supersedesId: string | null;
+    actionFamily: "external_communication";
+    actionSubtype: string | null;
+    businessOutcome: string;
+    connection: {
+      companyConnectionId: string | null;
+      connectionResourceId: string | null;
+      accessVersion: number | null;
+      processingConsentId: string | null;
+      consentVersion: number | null;
+    };
+    destination: Record<string, unknown>;
+    materialContent: Record<string, unknown>;
+    sideEffects: string[];
+    policy: { id: string | null; version: number; mode: "approval_required" };
+    productGuardrails: { version: number; blocked: boolean; reason: string | null };
+    preconditions: Array<{ key: string; description: string }>;
+    validUntil: string;
+    executionWindow: { start: string | null; end: string | null };
+    idempotencyKey: string;
+    state: "awaiting_approval";
+    decision: null;
+    authorization: null;
+    createdAt: string;
+    updatedAt: string;
+  };
   updatedAt: string;
 };
 
@@ -131,6 +163,35 @@ function createConversation(): Conversation {
       authority: "none",
       executable: false,
       mailSendingOffer: "available",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    proposedAction: {
+      id: randomUUID(),
+      version: 1,
+      supersedesId: null,
+      actionFamily: "external_communication",
+      actionSubtype: "one_to_one_follow_up",
+      businessOutcome: "Send one exact follow-up to the known relationship.",
+      connection: {
+        companyConnectionId: null,
+        connectionResourceId: null,
+        accessVersion: null,
+        processingConsentId: null,
+        consentVersion: null,
+      },
+      destination: { recipient: "preview@example.com" },
+      materialContent: { body: "A proposed follow-up." },
+      sideEffects: ["One message would be sent."],
+      policy: { id: null, version: 1, mode: "approval_required" },
+      productGuardrails: { version: 1, blocked: false, reason: null },
+      preconditions: [{ key: "mail_sending_ready", description: "Mail Sending is Ready." }],
+      validUntil: new Date(Date.now() + 86_400_000).toISOString(),
+      executionWindow: { start: null, end: null },
+      idempotencyKey: randomUUID(),
+      state: "awaiting_approval",
+      decision: null,
+      authorization: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     },
@@ -213,6 +274,13 @@ async function installConversationRoutes(
     });
   });
 
+  await context.route("**/api/operator/proposed-actions", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ actions: [conversation.proposedAction] }),
+    });
+  });
+
   await context.route("**/api/operator/limited-operation", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -230,6 +298,7 @@ async function installConversationRoutes(
           authorityPolicy: null,
           brief: null,
           actionPreview: conversation.actionPreview,
+          proposedAction: conversation.proposedAction,
           activatedAt: null,
         },
       }),

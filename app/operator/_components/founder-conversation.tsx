@@ -6,6 +6,7 @@ import type {
   FounderConversationMessageDto,
 } from "@/src/server/operators/founder-conversation";
 import { FounderActionPreviewCard } from "./founder-action-preview";
+import { FounderProposedActionCard } from "./founder-proposed-action";
 import styles from "./founder-conversation.module.css";
 
 export function FounderConversation() {
@@ -113,6 +114,17 @@ export function FounderConversation() {
 
       {conversation?.actionPreview ? (
         <FounderActionPreviewCard preview={conversation.actionPreview} compact />
+      ) : null}
+      {conversation?.proposedAction ? (
+        <FounderProposedActionCard
+          action={conversation.proposedAction}
+          compact
+          onUpdated={(action) =>
+            setConversation((current) =>
+              current ? { ...current, proposedAction: action } : current,
+            )
+          }
+        />
       ) : null}
 
       <form className={styles.composer} onSubmit={sendMessage}>

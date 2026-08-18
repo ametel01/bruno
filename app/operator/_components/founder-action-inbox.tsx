@@ -2,24 +2,38 @@
 
 import { useEffect, useState } from "react";
 import type { FounderActionPreviewDto } from "@/src/server/operators/founder-action-previews";
+import type { FounderProposedActionDto } from "@/src/server/operators/founder-proposed-actions";
 import { FounderActionPreviewCard } from "./founder-action-preview";
+import { FounderProposedActionCard } from "./founder-proposed-action";
 import styles from "./founder-action-inbox.module.css";
 
 export function FounderActionInbox() {
   const [preview, setPreview] = useState<FounderActionPreviewDto | null>(null);
+  const [proposedActions, setProposedActions] = useState<FounderProposedActionDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void fetch("/api/operator/action-preview", { credentials: "same-origin" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Action Inbox could not be loaded.");
-        return (await response.json()) as { preview: FounderActionPreviewDto };
+    void Promise.all([
+      fetch("/api/operator/action-preview", { credentials: "same-origin" }),
+      fetch("/api/operator/proposed-actions", { credentials: "same-origin" }),
+    ])
+      .then(async ([previewResponse, actionsResponse]) => {
+        if (!previewResponse.ok || !actionsResponse.ok) {
+          throw new Error("Action Inbox could not be loaded.");
+        }
+        return {
+          preview: (await previewResponse.json()) as { preview: FounderActionPreviewDto },
+          actions: (await actionsResponse.json()) as { actions: FounderProposedActionDto[] },
+        };
       })
       .then((body) => {
-        if (!cancelled) setPreview(body.preview);
+        if (!cancelled) {
+          setPreview(body.preview.preview);
+          setProposedActions(body.actions.actions);
+        }
       })
       .catch((loadError) => {
         if (!cancelled)
@@ -120,6 +134,21 @@ export function FounderActionInbox() {
       </div>
       {loading ? <p className={styles.notice}>Loading your canonical preview…</p> : null}
       {preview ? <FounderActionPreviewCard preview={preview} /> : null}
+      {proposedActions.map((action) => (
+        <FounderProposedActionCard
+          key={action.id}
+          action={action}
+          onUpdated={(updated) =>
+            setProposedActions((current) =>
+              updated.supersedesId
+                ? current.some((item) => item.id === updated.id)
+                  ? current.map((item) => (item.id === updated.id ? updated : item))
+                  : [updated, ...current.filter((item) => item.id !== action.id)]
+                : current.map((item) => (item.id === updated.id ? updated : item)),
+            )
+          }
+        />
+      ))}
       {preview ? (
         <form className={styles.editor} onSubmit={saveDraft}>
           <p className={styles.kicker}>Edit creates a new draft revision</p>

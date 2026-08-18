@@ -1,0 +1,5 @@
+DROP INDEX "operator_processing_consents_connection_pair_idx";--> statement-breakpoint
+ALTER TABLE "operator_action_authorizations" ALTER COLUMN "decision_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "operator_proposed_actions" ADD COLUMN "connection_access_version" integer;--> statement-breakpoint
+CREATE UNIQUE INDEX "operator_processing_consents_connection_version_idx" ON "operator_processing_consents" USING btree ("operator_id","ai_connection_id","calendar_connection_id","mail_connection_id","purpose","version");--> statement-breakpoint
+ALTER TABLE "operator_proposed_actions" ADD CONSTRAINT "operator_proposed_actions_connection_access_version_check" CHECK ("operator_proposed_actions"."connection_access_version" IS NULL OR "operator_proposed_actions"."connection_access_version" >= 1);

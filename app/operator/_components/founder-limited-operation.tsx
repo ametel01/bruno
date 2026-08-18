@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { FounderLimitedOperationDto } from "@/src/server/operators/founder-limited-operation";
 import styles from "./founder-limited-operation.module.css";
 import { FounderActionPreviewCard } from "./founder-action-preview";
+import { FounderProposedActionCard } from "./founder-proposed-action";
 
 export function FounderLimitedOperation() {
   const [operation, setOperation] = useState<FounderLimitedOperationDto | null>(null);
@@ -135,6 +136,11 @@ export function FounderLimitedOperation() {
           <span>Preparation: always allowed</span>
           <span>External effects: approval required</span>
           <span>Mail evidence: not included</span>
+          {operation.authorityPolicy.actionFamilies ? (
+            <span>
+              Action Families: {summarizeActionFamilies(operation.authorityPolicy.actionFamilies)}
+            </span>
+          ) : null}
         </div>
       ) : null}
 
@@ -170,6 +176,15 @@ export function FounderLimitedOperation() {
       {operation.actionPreview ? (
         <FounderActionPreviewCard preview={operation.actionPreview} compact />
       ) : null}
+      {operation.proposedAction ? (
+        <FounderProposedActionCard
+          action={operation.proposedAction}
+          compact
+          onUpdated={(action) =>
+            setOperation((current) => (current ? { ...current, proposedAction: action } : current))
+          }
+        />
+      ) : null}
       {error ? (
         <p className={styles.error} role="alert">
           {error}
@@ -177,4 +192,13 @@ export function FounderLimitedOperation() {
       ) : null}
     </section>
   );
+}
+
+function summarizeActionFamilies(
+  families: NonNullable<FounderLimitedOperationDto["authorityPolicy"]>["actionFamilies"],
+): string {
+  if (!families) return "safe defaults";
+  return Object.entries(families)
+    .map(([family, mode]) => `${family.replaceAll("_", " ")} (${mode.replaceAll("_", " ")})`)
+    .join(" · ");
 }

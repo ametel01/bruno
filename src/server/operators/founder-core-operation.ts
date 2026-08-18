@@ -16,12 +16,21 @@ import {
   operatorMorningBriefs,
   operatorPrimaryCommunicationsSuites,
   operatorProcessingConsents,
+  operatorProductGuardrails,
 } from "@/src/server/db/schema";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
   projectFounderActionPreview,
   type FounderActionPreviewDto,
 } from "@/src/server/operators/founder-action-previews";
+import {
+  projectFounderProposedAction,
+  type FounderProposedActionDto,
+} from "@/src/server/operators/founder-proposed-actions";
+import type {
+  FounderActionFamily,
+  FounderAuthorityMode,
+} from "@/src/server/operators/founder-proposed-actions";
 
 type CoreTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -50,6 +59,7 @@ export type FounderCoreOperationDto = {
     status: "active" | "missing";
     purpose: typeof CORE_PURPOSE;
     confirmedAt: string | null;
+    version?: number;
   };
   authorityPolicy: {
     version: number;
@@ -57,6 +67,8 @@ export type FounderCoreOperationDto = {
     preparation: "always";
     externalEffects: "approval_required";
     mailIncluded: false;
+    actionFamilies?: Record<FounderActionFamily, FounderAuthorityMode>;
+    productGuardrails?: { version: number; blockedSubtypes: string[] };
   } | null;
   brief: {
     id: string;
@@ -70,6 +82,7 @@ export type FounderCoreOperationDto = {
     openedAt: string | null;
   } | null;
   actionPreview?: FounderActionPreviewDto;
+  proposedAction?: FounderProposedActionDto | null;
   activatedAt: string | null;
 };
 
@@ -490,16 +503,9 @@ async function upsertCoreConsent(
         eq(operatorProcessingConsents.purpose, CORE_PURPOSE),
       ),
     )
+    .orderBy(desc(operatorProcessingConsents.version))
     .limit(1);
   if (existing?.status === "active") return existing;
-  if (existing) {
-    const [reactivated] = await tx
-      .update(operatorProcessingConsents)
-      .set({ status: "active", confirmedAt: at, revokedAt: null })
-      .where(eq(operatorProcessingConsents.id, existing.id))
-      .returning();
-    if (reactivated) return reactivated;
-  }
   const [created] = await tx
     .insert(operatorProcessingConsents)
     .values({
@@ -507,6 +513,7 @@ async function upsertCoreConsent(
       aiConnectionId: pair.ai.id,
       calendarConnectionId: pair.calendar.id,
       mailConnectionId: pair.mail.id,
+      version: (existing?.version ?? 0) + 1,
       status: "active",
       purpose: CORE_PURPOSE,
       confirmedAt: at,
@@ -629,6 +636,12 @@ async function projectCoreOperation(
         .where(eq(operatorAuthorityPolicies.id, operation.authorityPolicyId))
         .limit(1)
     : [];
+  const [guardrails] = await tx
+    .select()
+    .from(operatorProductGuardrails)
+    .where(eq(operatorProductGuardrails.operatorId, operatorId))
+    .orderBy(desc(operatorProductGuardrails.version))
+    .limit(1);
   const [ai] = await tx
     .select()
     .from(operatorAiConnections)
@@ -721,6 +734,7 @@ async function projectCoreOperation(
         operation.status === "core" && consent?.purpose === CORE_PURPOSE
           ? consent.confirmedAt.toISOString()
           : null,
+      version: consent?.version ?? 1,
     },
     authorityPolicy:
       operation.status === "core" &&
@@ -734,6 +748,11 @@ async function projectCoreOperation(
             preparation: "always",
             externalEffects: "approval_required",
             mailIncluded: false,
+            actionFamilies: policy.actionFamilies,
+            productGuardrails: {
+              version: guardrails?.version ?? 1,
+              blockedSubtypes: guardrails?.blockedSubtypes ?? [],
+            },
           }
         : null,
     brief:
@@ -751,6 +770,7 @@ async function projectCoreOperation(
           }
         : null,
     actionPreview: await projectFounderActionPreview(tx, operatorId),
+    proposedAction: await projectFounderProposedAction(tx, operatorId),
     activatedAt:
       operation.status === "core"
         ? (activation?.activatedAt.toISOString() ?? operation.activatedAt?.toISOString() ?? null)

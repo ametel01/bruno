@@ -204,6 +204,37 @@ export const operatorGovernanceReceiptKindEnum = pgEnum("operator_governance_rec
   "authority_policy",
 ]);
 
+export const operatorActionFamilyEnum = pgEnum("operator_action_family", [
+  "observe_evidence",
+  "relationship_maintenance",
+  "prepare_work",
+  "external_communication",
+  "meeting_management",
+  "commercial_commitment",
+  "data_control",
+]);
+
+export const operatorProposedActionStateEnum = pgEnum("operator_proposed_action_state", [
+  "proposed",
+  "awaiting_approval",
+  "authorized",
+  "executing",
+  "succeeded",
+  "failed",
+  "outcome_uncertain",
+  "declined",
+  "expired",
+  "superseded",
+  "cancelled",
+  "blocked",
+]);
+
+export const operatorActionDecisionKindEnum = pgEnum("operator_action_decision_kind", [
+  "approve",
+  "request_changes",
+  "decline",
+]);
+
 export const operatorMorningBriefStatusEnum = pgEnum("operator_morning_brief_status", [
   "prepared",
   "opened",
@@ -1234,6 +1265,7 @@ export const operatorProcessingConsents = pgTable(
       .notNull()
       .references(() => operatorCalendarConnections.id),
     mailConnectionId: uuid("mail_connection_id").references(() => operatorMailConnections.id),
+    version: integer("version").notNull().default(1),
     status: operatorProcessingConsentStatusEnum("status").notNull().default("active"),
     purpose: text("purpose").notNull().default("calendar_morning_brief"),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1241,6 +1273,7 @@ export const operatorProcessingConsents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check("operator_processing_consents_version_check", sql`${table.version} >= 1`),
     check(
       "operator_processing_consents_purpose_check",
       sql`${table.purpose} IN ('calendar_morning_brief', 'core_operation')`,
@@ -1249,11 +1282,13 @@ export const operatorProcessingConsents = pgTable(
       "operator_processing_consents_revocation_check",
       sql`(${table.status} = 'active' AND ${table.revokedAt} IS NULL) OR (${table.status} = 'revoked' AND ${table.revokedAt} IS NOT NULL)`,
     ),
-    uniqueIndex("operator_processing_consents_connection_pair_idx").on(
+    uniqueIndex("operator_processing_consents_connection_version_idx").on(
       table.operatorId,
       table.aiConnectionId,
       table.calendarConnectionId,
       table.mailConnectionId,
+      table.purpose,
+      table.version,
     ),
     index("operator_processing_consents_status_idx").on(table.operatorId, table.status),
   ],
@@ -1267,6 +1302,23 @@ export const operatorAuthorityPolicies = pgTable(
       .notNull()
       .references(() => operators.id),
     version: integer("version").notNull(),
+    actionFamilies: jsonb("action_families")
+      .$type<
+        Record<
+          | "observe_evidence"
+          | "relationship_maintenance"
+          | "prepare_work"
+          | "external_communication"
+          | "meeting_management"
+          | "commercial_commitment"
+          | "data_control",
+          "always" | "approval_required" | "never"
+        >
+      >()
+      .notNull()
+      .default(
+        sql`'{"observe_evidence":"always","relationship_maintenance":"always","prepare_work":"always","external_communication":"approval_required","meeting_management":"approval_required","commercial_commitment":"approval_required","data_control":"approval_required"}'::jsonb`,
+      ),
     observation: operatorAuthorityModeEnum("observation").notNull().default("always"),
     preparation: operatorAuthorityModeEnum("preparation").notNull().default("always"),
     externalEffects: operatorAuthorityModeEnum("external_effects")
@@ -1805,6 +1857,147 @@ export const operatorActionPreviewRevisions = pgTable(
       table.revision,
     ),
     index("operator_action_preview_revisions_current_idx").on(table.previewId, table.createdAt),
+  ],
+);
+
+export const operatorProductGuardrails = pgTable(
+  "operator_product_guardrails",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    version: integer("version").notNull().default(1),
+    blockedActionFamilies: jsonb("blocked_action_families")
+      .$type<Array<(typeof operatorActionFamilyEnum.enumValues)[number]>>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    blockedSubtypes: jsonb("blocked_subtypes")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("operator_product_guardrails_version_check", sql`${table.version} >= 1`),
+    uniqueIndex("operator_product_guardrails_operator_version_idx").on(
+      table.operatorId,
+      table.version,
+    ),
+    index("operator_product_guardrails_operator_idx").on(table.operatorId, table.createdAt),
+  ],
+);
+
+export const operatorProposedActions = pgTable(
+  "operator_proposed_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    supersedesActionId: uuid("supersedes_action_id"),
+    actionFamily: operatorActionFamilyEnum("action_family").notNull(),
+    actionSubtype: text("action_subtype"),
+    businessOutcome: text("business_outcome").notNull(),
+    companyConnectionId: uuid("company_connection_id"),
+    connectionResourceId: uuid("connection_resource_id"),
+    connectionAccessVersion: integer("connection_access_version"),
+    destination: jsonb("destination").$type<Record<string, unknown>>().notNull(),
+    materialContent: jsonb("material_content").$type<Record<string, unknown>>().notNull(),
+    sideEffects: jsonb("side_effects").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    processingConsentId: uuid("processing_consent_id"),
+    processingConsentVersion: integer("processing_consent_version"),
+    authorityPolicyId: uuid("authority_policy_id"),
+    authorityPolicyVersion: integer("authority_policy_version").notNull(),
+    authorityMode: operatorAuthorityModeEnum("authority_mode").notNull(),
+    productGuardrailsVersion: integer("product_guardrails_version").notNull().default(1),
+    preconditions: jsonb("preconditions")
+      .$type<Array<{ key: string; description: string }>>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    validUntil: timestamp("valid_until", { withTimezone: true }).notNull(),
+    executionWindowStart: timestamp("execution_window_start", { withTimezone: true }),
+    executionWindowEnd: timestamp("execution_window_end", { withTimezone: true }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    state: operatorProposedActionStateEnum("state").notNull().default("proposed"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("operator_proposed_actions_version_check", sql`${table.version} >= 1`),
+    check(
+      "operator_proposed_actions_connection_access_version_check",
+      sql`${table.connectionAccessVersion} IS NULL OR ${table.connectionAccessVersion} >= 1`,
+    ),
+    check(
+      "operator_proposed_actions_processing_consent_version_check",
+      sql`${table.processingConsentVersion} IS NULL OR ${table.processingConsentVersion} >= 1`,
+    ),
+    check(
+      "operator_proposed_actions_business_outcome_check",
+      sql`length(trim(${table.businessOutcome})) BETWEEN 1 AND 2000`,
+    ),
+    check(
+      "operator_proposed_actions_validity_check",
+      sql`${table.executionWindowStart} IS NULL OR ${table.executionWindowEnd} IS NULL OR ${table.executionWindowStart} < ${table.executionWindowEnd}`,
+    ),
+    uniqueIndex("operator_proposed_actions_operator_version_idx").on(
+      table.operatorId,
+      table.id,
+      table.version,
+    ),
+    uniqueIndex("operator_proposed_actions_idempotency_idx").on(
+      table.operatorId,
+      table.idempotencyKey,
+    ),
+    index("operator_proposed_actions_operator_state_idx").on(
+      table.operatorId,
+      table.state,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const operatorActionDecisions = pgTable(
+  "operator_action_decisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    proposedActionId: uuid("proposed_action_id")
+      .notNull()
+      .references(() => operatorProposedActions.id, { onDelete: "cascade" }),
+    proposedActionVersion: integer("proposed_action_version").notNull(),
+    kind: operatorActionDecisionKindEnum("kind").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("operator_action_decisions_proposed_action_idx").on(table.proposedActionId),
+    index("operator_action_decisions_operator_created_idx").on(table.operatorId, table.createdAt),
+  ],
+);
+
+export const operatorActionAuthorizations = pgTable(
+  "operator_action_authorizations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    proposedActionId: uuid("proposed_action_id")
+      .notNull()
+      .references(() => operatorProposedActions.id, { onDelete: "cascade" }),
+    decisionId: uuid("decision_id").references(() => operatorActionDecisions.id, {
+      onDelete: "cascade",
+    }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("operator_action_authorizations_proposed_action_idx").on(table.proposedActionId),
+    index("operator_action_authorizations_operator_idx").on(table.operatorId, table.createdAt),
   ],
 );
 

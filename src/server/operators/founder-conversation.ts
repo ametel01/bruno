@@ -14,6 +14,10 @@ import {
   projectFounderActionPreview,
   type FounderActionPreviewDto,
 } from "@/src/server/operators/founder-action-previews";
+import {
+  projectFounderProposedAction,
+  type FounderProposedActionDto,
+} from "@/src/server/operators/founder-proposed-actions";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
   requireReadyFounderOpenAiConnectionForUser,
@@ -51,6 +55,7 @@ export type FounderConversationDto = {
   messages: FounderConversationMessageDto[];
   activeWork: FounderConversationWorkDto | null;
   actionPreview: FounderActionPreviewDto;
+  proposedAction?: FounderProposedActionDto | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -331,6 +336,7 @@ async function projectConversation(
     .orderBy(desc(operatorConversationWorks.createdAt), desc(operatorConversationWorks.id))
     .limit(1);
   const actionPreview = await projectFounderActionPreview(tx, conversation.operatorId);
+  const proposedAction = await projectFounderProposedAction(tx, conversation.operatorId);
   return {
     id: conversation.id,
     status: conversation.status,
@@ -354,6 +360,7 @@ async function projectConversation(
         }
       : null,
     actionPreview,
+    proposedAction,
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
   };

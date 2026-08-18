@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { FounderCoreOperationDto } from "@/src/server/operators/founder-core-operation";
 import styles from "./founder-limited-operation.module.css";
 import { FounderActionPreviewCard } from "./founder-action-preview";
+import { FounderProposedActionCard } from "./founder-proposed-action";
 
 export function FounderCoreOperation() {
   const [operation, setOperation] = useState<FounderCoreOperationDto | null>(null);
@@ -118,6 +119,11 @@ export function FounderCoreOperation() {
           <span>Calendar + Mail evidence: read-only preparation</span>
           <span>Mail Sending: not required</span>
           <span>External effects: approval required</span>
+          {operation.authorityPolicy.actionFamilies ? (
+            <span>
+              Action Families: {summarizeActionFamilies(operation.authorityPolicy.actionFamilies)}
+            </span>
+          ) : null}
         </div>
       ) : null}
       {operation.brief ? (
@@ -152,6 +158,15 @@ export function FounderCoreOperation() {
       {operation.actionPreview ? (
         <FounderActionPreviewCard preview={operation.actionPreview} compact />
       ) : null}
+      {operation.proposedAction ? (
+        <FounderProposedActionCard
+          action={operation.proposedAction}
+          compact
+          onUpdated={(action) =>
+            setOperation((current) => (current ? { ...current, proposedAction: action } : current))
+          }
+        />
+      ) : null}
       {error ? (
         <p className={styles.error} role="alert">
           {error}
@@ -159,4 +174,13 @@ export function FounderCoreOperation() {
       ) : null}
     </section>
   );
+}
+
+function summarizeActionFamilies(
+  families: NonNullable<FounderCoreOperationDto["authorityPolicy"]>["actionFamilies"],
+): string {
+  if (!families) return "safe defaults";
+  return Object.entries(families)
+    .map(([family, mode]) => `${family.replaceAll("_", " ")} (${mode.replaceAll("_", " ")})`)
+    .join(" · ");
 }
