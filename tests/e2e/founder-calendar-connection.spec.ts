@@ -27,9 +27,14 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
         limited: false,
         activated: false,
       };
-      const mailState: { status: "offer" | "selecting" | "ready"; selected: boolean } = {
+      const mailState: {
+        status: "offer" | "selecting" | "ready";
+        selected: boolean;
+        offerDisposition: "unknown" | "enabled" | "dismissed";
+      } = {
         status: "offer",
         selected: false,
+        offerDisposition: "unknown",
       };
       await installCalendarRoutes(context, state);
       await installMailRoutes(context, mailState);
@@ -81,6 +86,32 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
         await expect(secondPage.getByText("Founder Activation recorded.")).toBeVisible();
       } finally {
         await secondContext.close();
+      }
+
+      const dismissContext = await browser.newContext();
+      try {
+        const dismissPage = await dismissContext.newPage();
+        const dismissMailState = {
+          status: "offer" as const,
+          selected: false,
+          offerDisposition: "unknown" as const,
+        };
+        await installCalendarRoutes(dismissContext, state);
+        await installMailRoutes(dismissContext, dismissMailState);
+        await dismissPage.goto("/operator");
+        await expect(
+          dismissPage.getByRole("heading", { name: "Bring Mail evidence into your workspace?" }),
+        ).toBeVisible();
+        await dismissPage.getByRole("button", { name: "Not now" }).click();
+        await expect(
+          dismissPage.getByRole("heading", { name: "Bring Mail evidence into your workspace?" }),
+        ).not.toBeVisible();
+        await dismissPage.reload();
+        await expect(
+          dismissPage.getByRole("heading", { name: "Bring Mail evidence into your workspace?" }),
+        ).not.toBeVisible();
+      } finally {
+        await dismissContext.close();
       }
     });
   } finally {
@@ -169,7 +200,11 @@ async function installCalendarRoutes(
 
 async function installMailRoutes(
   context: import("@playwright/test").BrowserContext,
-  state: { status: "offer" | "selecting" | "ready"; selected: boolean },
+  state: {
+    status: "offer" | "selecting" | "ready";
+    selected: boolean;
+    offerDisposition: "unknown" | "enabled" | "dismissed";
+  },
 ): Promise<void> {
   await context.route("**/api/operator/mail", async (route) => {
     if (route.request().method() === "GET") {
@@ -177,20 +212,26 @@ async function installMailRoutes(
         contentType: "application/json",
         body: JSON.stringify({
           connection: state.status === "offer" ? null : mailDto(state),
-          offerDisposition: state.status === "offer" ? null : "enabled",
+          offerDisposition: state.offerDisposition === "unknown" ? null : state.offerDisposition,
         }),
       });
       return;
     }
-    const body = route.request().postDataJSON() as { action?: string; resourceIds?: string[] };
+    const body = route.request().postDataJSON() as {
+      action?: string;
+      resourceIds?: string[];
+      disposition?: "enabled" | "dismissed";
+    };
     if (body.action === "offer") {
+      state.offerDisposition = body.disposition ?? "dismissed";
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({ connection: null, offerDisposition: "enabled" }),
+        body: JSON.stringify({ connection: null, offerDisposition: state.offerDisposition }),
       });
       return;
     }
     if (body.action === "start") {
+      state.offerDisposition = "enabled";
       state.status = "selecting";
       await route.fulfill({
         contentType: "application/json",
