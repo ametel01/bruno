@@ -1,13 +1,14 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/src/server/db/schema";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   operatorAiConnectionReceipts,
   operatorAiConnections,
+  operatorProcessingConsents,
   operators,
 } from "@/src/server/db/schema";
 import type { FounderAiProvider } from "@/src/server/operators/founder-ai-routing";
@@ -20,6 +21,8 @@ type FounderAiConnectionTransaction = Parameters<
 
 const OPENAI_PROVIDER = "openai" as const;
 const DEFAULT_APPROVED_MODEL = "openai-codex" as const;
+const ANTHROPIC_PROVIDER = "anthropic" as const;
+const DEFAULT_ANTHROPIC_MODEL = "anthropic-claude" as const;
 
 export type FounderAiConnectionStatus =
   | "authorizing"
@@ -56,6 +59,68 @@ export type FounderOpenAiReadinessInput = {
   authorizationState?: "authorized" | "denied" | "expired";
 };
 
+export type FounderAiReadinessInput = FounderOpenAiReadinessInput & {
+  billingVerified?: boolean;
+  privacyAccepted?: boolean;
+  retentionBounded?: boolean;
+  thirdPartyPermissionGranted?: boolean;
+  credentialHealthy?: boolean;
+  reconnectSupported?: boolean;
+  productionUseApproved?: boolean;
+  processingConsentActive?: boolean;
+};
+
+export type FounderAiReadinessResult =
+  | { ok: true }
+  | {
+      ok: false;
+      code:
+        | "authorization_denied"
+        | "authorization_expired"
+        | "provider_identity_missing"
+        | "provider_identity_changed"
+        | "account_label_missing"
+        | "account_not_eligible"
+        | "authorization_not_persisted"
+        | "approved_model_missing"
+        | "billing_unverified"
+        | "privacy_not_accepted"
+        | "retention_unbounded"
+        | "third_party_permission_missing"
+        | "credential_unhealthy"
+        | "reconnect_unsupported"
+        | "production_use_unapproved"
+        | "processing_consent_missing"
+        | "capacity_unavailable"
+        | "inference_failed";
+    };
+
+export type FounderAnthropicCompatibilityInput = {
+  subscriptionPlan: "claude_max" | "claude_pro" | "unknown";
+  extraUsageCredits: boolean;
+  privacyReviewed: boolean;
+  retentionReviewed: boolean;
+  thirdPartyPermissionReviewed: boolean;
+  credentialStorageReviewed: boolean;
+  reconnectReviewed: boolean;
+  productionUseReviewed: boolean;
+};
+
+export type FounderAnthropicCompatibilityResult =
+  | { released: true }
+  | {
+      released: false;
+      code:
+        | "subscription_ineligible"
+        | "extra_usage_credits_missing"
+        | "privacy_unreviewed"
+        | "retention_unreviewed"
+        | "third_party_permission_unreviewed"
+        | "credential_storage_unreviewed"
+        | "reconnect_unreviewed"
+        | "production_use_unreviewed";
+    };
+
 export type FounderOpenAiReadinessResult =
   | { ok: true }
   | {
@@ -69,6 +134,14 @@ export type FounderOpenAiReadinessResult =
         | "account_not_eligible"
         | "authorization_not_persisted"
         | "approved_model_missing"
+        | "billing_unverified"
+        | "privacy_not_accepted"
+        | "retention_unbounded"
+        | "third_party_permission_missing"
+        | "credential_unhealthy"
+        | "reconnect_unsupported"
+        | "production_use_unapproved"
+        | "processing_consent_missing"
         | "capacity_unavailable"
         | "inference_failed";
     };
@@ -86,8 +159,34 @@ export type FounderOpenAiAuthorizationPoll =
   | { state: "expired" }
   | { state: "authorized"; providerIdentity: string; accountLabel: string | null };
 
-export type FounderOpenAiVerification = FounderOpenAiReadinessInput & {
+export type FounderOpenAiVerification = FounderAiReadinessInput & {
   accountLabel: string | null;
+};
+
+export type FounderAiAdapter = {
+  startAuthorization(input: {
+    operatorId: string;
+    userId: string;
+    reconnecting: boolean;
+  }): Promise<
+    | { ok: true; authorization: FounderOpenAiAuthorizationStart }
+    | { ok: false; code: string; message: string }
+  >;
+  pollAuthorization(input: {
+    operatorId: string;
+    userId: string;
+    sessionId: string;
+  }): Promise<FounderOpenAiAuthorizationPoll>;
+  verifyConnection(input: {
+    operatorId: string;
+    userId: string;
+    providerIdentity: string;
+  }): Promise<FounderAiReadinessInput & { accountLabel: string | null }>;
+  revokeAuthorization(input: {
+    operatorId: string;
+    userId: string;
+    providerIdentity: string | null;
+  }): Promise<{ providerRevoked: boolean }>;
 };
 
 export type FounderOpenAiAdapter = {
@@ -116,10 +215,14 @@ export type FounderOpenAiAdapter = {
   }): Promise<{ providerRevoked: boolean }>;
 };
 
+export type FounderAnthropicAdapter = FounderAiAdapter;
+
 export type FounderAiConnectionDependencies = {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
   adapter?: FounderOpenAiAdapter;
+  /** Test/release harness override; production keeps Anthropic hidden by default. */
+  anthropicReleased?: boolean;
 };
 
 export type FounderOpenAiAuthorizationResult = {
@@ -131,6 +234,16 @@ export type FounderOpenAiAuthorizationResult = {
     expiresAt: string;
   } | null;
 };
+
+export type FounderAnthropicAuthorizationResult = FounderOpenAiAuthorizationResult;
+
+/**
+ * Anthropic remains hidden unless the deployment explicitly enables the
+ * provider program. Account-level compatibility and readiness gates still
+ * have to pass before a connection can become Ready.
+ */
+export const FOUNDER_ANTHROPIC_CONNECTION_RELEASED =
+  process.env.BRUNO_ANTHROPIC_CONNECTION_RELEASED === "true";
 
 export class FounderAiConnectionError extends Error {
   readonly code: string;
@@ -161,6 +274,52 @@ export function evaluateFounderOpenAiReadiness(
   if (input.capacity !== "available") return { ok: false, code: "capacity_unavailable" };
   if (input.inference !== "passed") return { ok: false, code: "inference_failed" };
   return { ok: true };
+}
+
+export function evaluateFounderAiReadiness(
+  input: FounderAiReadinessInput,
+  provider: FounderAiProvider,
+): FounderAiReadinessResult {
+  const legacy = evaluateFounderOpenAiReadiness(input);
+  if (!legacy.ok) return legacy;
+  if (provider === "openai") return { ok: true };
+  if (input.billingVerified !== true) return { ok: false, code: "billing_unverified" };
+  if (input.privacyAccepted !== true) return { ok: false, code: "privacy_not_accepted" };
+  if (input.retentionBounded !== true) return { ok: false, code: "retention_unbounded" };
+  if (input.thirdPartyPermissionGranted !== true) {
+    return { ok: false, code: "third_party_permission_missing" };
+  }
+  if (input.credentialHealthy !== true) return { ok: false, code: "credential_unhealthy" };
+  if (input.reconnectSupported !== true) return { ok: false, code: "reconnect_unsupported" };
+  if (input.productionUseApproved !== true) {
+    return { ok: false, code: "production_use_unapproved" };
+  }
+  if (input.processingConsentActive !== true) {
+    return { ok: false, code: "processing_consent_missing" };
+  }
+  return { ok: true };
+}
+
+export function evaluateFounderAnthropicCompatibility(
+  input: FounderAnthropicCompatibilityInput,
+): FounderAnthropicCompatibilityResult {
+  if (input.subscriptionPlan !== "claude_max") {
+    return { released: false, code: "subscription_ineligible" };
+  }
+  if (!input.extraUsageCredits) return { released: false, code: "extra_usage_credits_missing" };
+  if (!input.privacyReviewed) return { released: false, code: "privacy_unreviewed" };
+  if (!input.retentionReviewed) return { released: false, code: "retention_unreviewed" };
+  if (!input.thirdPartyPermissionReviewed) {
+    return { released: false, code: "third_party_permission_unreviewed" };
+  }
+  if (!input.credentialStorageReviewed) {
+    return { released: false, code: "credential_storage_unreviewed" };
+  }
+  if (!input.reconnectReviewed) return { released: false, code: "reconnect_unreviewed" };
+  if (!input.productionUseReviewed) {
+    return { released: false, code: "production_use_unreviewed" };
+  }
+  return { released: true };
 }
 
 export async function getFounderAiConnectionForUser(
@@ -628,9 +787,428 @@ export async function disconnectFounderOpenAiForUser(
   }
 }
 
+export async function startFounderAnthropicAuthorizationForUser(
+  userId: string,
+  dependencies: FounderAiConnectionDependencies = {},
+): Promise<FounderAnthropicAuthorizationResult> {
+  if (!dependencies.anthropicReleased && !FOUNDER_ANTHROPIC_CONNECTION_RELEASED) {
+    throw new FounderAiConnectionError(
+      "provider_not_released",
+      "Anthropic remains unavailable until its privacy, billing, credential, and production-use gates pass.",
+      409,
+    );
+  }
+  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  if (operator.preparation.status !== "ready" || operator.runtime?.status !== "ready") {
+    throw new FounderAiConnectionError(
+      "operator_not_ready",
+      "Bruno is still preparing your private workspace. Try again when it is ready.",
+      409,
+    );
+  }
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now ?? (() => new Date());
+  const adapter = dependencies.adapter ?? createHermesAnthropicAdapter();
+  try {
+    const current = await connection.db.transaction(async (tx) => {
+      await lockOperator(tx, operator.id);
+      return selectConnection(tx, operator.id, true, ANTHROPIC_PROVIDER);
+    });
+    if (current?.connection.status === "ready") {
+      return {
+        connection: toConnectionDto(current.connection, current.receipt),
+        authorization: null,
+      };
+    }
+    const started = await adapter.startAuthorization({
+      operatorId: operator.id,
+      userId,
+      reconnecting: Boolean(current?.connection.providerSubjectId),
+    });
+    if (!started.ok) {
+      const failed = await updateConnectionFailure({
+        connection,
+        operatorId: operator.id,
+        provider: ANTHROPIC_PROVIDER,
+        now: now(),
+        code: started.code,
+        message: started.message,
+        authorizationState: "pending",
+      });
+      return { connection: failed, authorization: null };
+    }
+    const startedAt = now();
+    const generation = current
+      ? current.connection.status === "authorizing"
+        ? current.connection.authorizationGeneration
+        : current.connection.authorizationGeneration + 1
+      : 1;
+    const sessionHash = digestOpaqueValue(started.authorization.sessionId);
+    const row = await connection.db.transaction(async (tx) => {
+      await lockOperator(tx, operator.id);
+      const existing = await selectConnection(tx, operator.id, true, ANTHROPIC_PROVIDER);
+      if (existing) {
+        const [updated] = await tx
+          .update(operatorAiConnections)
+          .set({
+            status: "authorizing",
+            authorizationState: "pending",
+            authorizationSessionHash: sessionHash,
+            authorizationExpiresAt: started.authorization.expiresAt,
+            authorizationGeneration: generation,
+            failureCode: null,
+            recoveryMessage: null,
+            workPausedReason: null,
+            updatedAt: startedAt,
+          })
+          .where(eq(operatorAiConnections.id, existing.connection.id))
+          .returning();
+        return updated;
+      }
+      const [created] = await tx
+        .insert(operatorAiConnections)
+        .values({
+          operatorId: operator.id,
+          provider: ANTHROPIC_PROVIDER,
+          status: "authorizing",
+          authorizationState: "pending",
+          authorizationSessionHash: sessionHash,
+          authorizationExpiresAt: started.authorization.expiresAt,
+          authorizationGeneration: generation,
+          createdAt: startedAt,
+          updatedAt: startedAt,
+        })
+        .returning();
+      return created;
+    });
+    if (!row)
+      throw new FounderAiConnectionError(
+        "connection_unavailable",
+        "Connection could not be started.",
+        503,
+      );
+    return {
+      connection: toConnectionDto(row, null),
+      authorization: {
+        sessionId: started.authorization.sessionId,
+        authorizationUrl: started.authorization.authorizationUrl,
+        userCode: started.authorization.userCode,
+        expiresAt: started.authorization.expiresAt.toISOString(),
+      },
+    };
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
+export async function pollFounderAnthropicAuthorizationForUser(
+  userId: string,
+  sessionId: string,
+  dependencies: FounderAiConnectionDependencies = {},
+): Promise<FounderAiConnectionDto> {
+  if (!dependencies.anthropicReleased && !FOUNDER_ANTHROPIC_CONNECTION_RELEASED) {
+    throw new FounderAiConnectionError("provider_not_released", "Anthropic is not released.", 409);
+  }
+  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now ?? (() => new Date());
+  const adapter = dependencies.adapter ?? createHermesAnthropicAdapter();
+  try {
+    const current = await connection.db.transaction(async (tx) => {
+      await lockOperator(tx, operator.id);
+      return selectConnection(tx, operator.id, true, ANTHROPIC_PROVIDER);
+    });
+    if (!current?.connection.authorizationSessionHash) {
+      throw new FounderAiConnectionError(
+        "authorization_not_found",
+        "That authorization has expired.",
+        400,
+      );
+    }
+    if (current.connection.authorizationSessionHash !== digestOpaqueValue(sessionId)) {
+      throw new FounderAiConnectionError(
+        "authorization_session_mismatch",
+        "That authorization is no longer active.",
+        400,
+      );
+    }
+    const outcome = await adapter.pollAuthorization({ operatorId: operator.id, userId, sessionId });
+    if (outcome.state === "pending") return toConnectionDto(current.connection, current.receipt);
+    if (outcome.state === "denied" || outcome.state === "expired") {
+      return updateConnectionFailure({
+        connection,
+        operatorId: operator.id,
+        provider: ANTHROPIC_PROVIDER,
+        now: now(),
+        code: outcome.state === "denied" ? "authorization_denied" : "authorization_expired",
+        message:
+          outcome.state === "denied"
+            ? "Anthropic authorization was declined. You can try connecting again."
+            : "Anthropic authorization expired. Start again to reconnect.",
+        authorizationState: outcome.state,
+      });
+    }
+    const verification = await adapter.verifyConnection({
+      operatorId: operator.id,
+      userId,
+      providerIdentity: outcome.providerIdentity,
+    });
+    if (verification.providerIdentity !== outcome.providerIdentity) {
+      return updateConnectionFailure({
+        connection,
+        operatorId: operator.id,
+        provider: ANTHROPIC_PROVIDER,
+        now: now(),
+        code: "provider_identity_changed",
+        message: "Anthropic returned a different account identity. Reconnect the same account.",
+        authorizationState: "authorized",
+        providerIdentity: current.connection.providerSubjectId,
+        accountLabel: current.connection.accountLabel,
+      });
+    }
+    const processingConsentActive = await connection.db.transaction((tx) =>
+      hasActiveProcessingConsent(tx, operator.id, current.connection.id),
+    );
+    const readiness = evaluateFounderAiReadiness(
+      { ...verification, processingConsentActive },
+      ANTHROPIC_PROVIDER,
+    );
+    if (
+      current.connection.providerSubjectId &&
+      current.connection.providerSubjectId !== outcome.providerIdentity
+    ) {
+      return updateConnectionFailure({
+        connection,
+        operatorId: operator.id,
+        provider: ANTHROPIC_PROVIDER,
+        now: now(),
+        code: "provider_identity_changed",
+        message: "This is a different Anthropic account. Reconnect the same account.",
+        authorizationState: "authorized",
+        providerIdentity: current.connection.providerSubjectId,
+        accountLabel: current.connection.accountLabel,
+      });
+    }
+    const at = now();
+    const status: FounderAiConnectionStatus = readiness.ok
+      ? "ready"
+      : readiness.code === "capacity_unavailable"
+        ? "paused"
+        : "needs_attention";
+    const message = readiness.ok
+      ? null
+      : readinessMessageForProvider(ANTHROPIC_PROVIDER, readiness.code);
+    const receiptKind = readiness.ok
+      ? current.connection.providerSubjectId
+        ? "reauthorized"
+        : "authorized"
+      : "verification_failed";
+    const updated = await connection.db.transaction(async (tx) => {
+      await lockOperator(tx, operator.id);
+      const [saved] = await tx
+        .update(operatorAiConnections)
+        .set({
+          providerSubjectId: outcome.providerIdentity,
+          accountLabel: verification.accountLabel ?? outcome.accountLabel,
+          status,
+          authorizationState: "authorized",
+          capacityState: verification.capacity,
+          inferenceState: verification.inference,
+          eligibleAccount: verification.eligibleAccount,
+          billingVerified: verification.billingVerified ?? false,
+          privacyAccepted: verification.privacyAccepted ?? false,
+          retentionBounded: verification.retentionBounded ?? false,
+          thirdPartyPermissionGranted: verification.thirdPartyPermissionGranted ?? false,
+          credentialHealthy: verification.credentialHealthy ?? false,
+          reconnectSupported: verification.reconnectSupported ?? false,
+          productionUseApproved: verification.productionUseApproved ?? false,
+          processingConsentActive,
+          authorizationPersisted: verification.authorizationPersisted,
+          authorizationSessionHash: null,
+          authorizationExpiresAt: null,
+          approvedModelAssignment: verification.approvedModelAssigned
+            ? DEFAULT_ANTHROPIC_MODEL
+            : null,
+          authorizedAt: current.connection.authorizedAt ?? at,
+          lastVerifiedAt: readiness.ok ? at : null,
+          failureCode: readiness.ok ? null : readiness.code,
+          recoveryMessage: message,
+          workPausedReason: readiness.ok ? null : message,
+          updatedAt: at,
+        })
+        .where(eq(operatorAiConnections.id, current.connection.id))
+        .returning();
+      if (!saved)
+        throw new FounderAiConnectionError(
+          "connection_unavailable",
+          "Connection could not be saved.",
+          503,
+        );
+      await insertReceipt(tx, saved, receiptKind, at);
+      return selectConnection(tx, operator.id, false, ANTHROPIC_PROVIDER);
+    });
+    if (!updated)
+      throw new FounderAiConnectionError(
+        "connection_unavailable",
+        "Connection could not be reloaded.",
+        503,
+      );
+    return toConnectionDto(updated.connection, updated.receipt);
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
+export async function recheckFounderAnthropicConnectionForUser(
+  userId: string,
+  dependencies: FounderAiConnectionDependencies = {},
+): Promise<FounderAiConnectionDto | null> {
+  if (!dependencies.anthropicReleased && !FOUNDER_ANTHROPIC_CONNECTION_RELEASED) return null;
+  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now ?? (() => new Date());
+  const adapter = dependencies.adapter ?? createHermesAnthropicAdapter();
+  try {
+    const current = await connection.db.transaction((tx) =>
+      selectConnection(tx, operator.id, true, ANTHROPIC_PROVIDER),
+    );
+    if (!current) return null;
+    if (!current.connection.providerSubjectId)
+      return toConnectionDto(current.connection, current.receipt);
+    const verification = await adapter.verifyConnection({
+      operatorId: operator.id,
+      userId,
+      providerIdentity: current.connection.providerSubjectId,
+    });
+    if (verification.providerIdentity !== current.connection.providerSubjectId) {
+      return updateConnectionFailure({
+        connection,
+        operatorId: operator.id,
+        provider: ANTHROPIC_PROVIDER,
+        now: now(),
+        code: "provider_identity_changed",
+        message: "Anthropic returned a different account identity. Reconnect the same account.",
+        authorizationState: "authorized",
+        providerIdentity: current.connection.providerSubjectId,
+        accountLabel: current.connection.accountLabel,
+      });
+    }
+    const processingConsentActive = await connection.db.transaction((tx) =>
+      hasActiveProcessingConsent(tx, operator.id, current.connection.id),
+    );
+    const readiness = evaluateFounderAiReadiness(
+      { ...verification, processingConsentActive },
+      ANTHROPIC_PROVIDER,
+    );
+    const at = now();
+    const status: FounderAiConnectionStatus = readiness.ok
+      ? "ready"
+      : readiness.code === "capacity_unavailable"
+        ? "paused"
+        : "needs_attention";
+    const updated = await connection.db.transaction(async (tx) => {
+      await lockOperator(tx, operator.id);
+      const [saved] = await tx
+        .update(operatorAiConnections)
+        .set({
+          status,
+          capacityState: verification.capacity,
+          inferenceState: verification.inference,
+          eligibleAccount: verification.eligibleAccount,
+          billingVerified: verification.billingVerified ?? false,
+          privacyAccepted: verification.privacyAccepted ?? false,
+          retentionBounded: verification.retentionBounded ?? false,
+          thirdPartyPermissionGranted: verification.thirdPartyPermissionGranted ?? false,
+          credentialHealthy: verification.credentialHealthy ?? false,
+          reconnectSupported: verification.reconnectSupported ?? false,
+          productionUseApproved: verification.productionUseApproved ?? false,
+          processingConsentActive,
+          authorizationPersisted: verification.authorizationPersisted,
+          lastVerifiedAt: readiness.ok ? at : current.connection.lastVerifiedAt,
+          failureCode: readiness.ok ? null : readiness.code,
+          recoveryMessage: readiness.ok
+            ? null
+            : readinessMessageForProvider(ANTHROPIC_PROVIDER, readiness.code),
+          workPausedReason: readiness.ok
+            ? null
+            : readinessMessageForProvider(ANTHROPIC_PROVIDER, readiness.code),
+          updatedAt: at,
+        })
+        .where(eq(operatorAiConnections.id, current.connection.id))
+        .returning();
+      if (!saved) return null;
+      if (!readiness.ok) await insertReceipt(tx, saved, "verification_failed", at);
+      return selectConnection(tx, operator.id, false, ANTHROPIC_PROVIDER);
+    });
+    return updated ? toConnectionDto(updated.connection, updated.receipt) : null;
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
+export async function disconnectFounderAnthropicForUser(
+  userId: string,
+  dependencies: FounderAiConnectionDependencies = {},
+): Promise<FounderAiConnectionDto | null> {
+  if (!dependencies.anthropicReleased && !FOUNDER_ANTHROPIC_CONNECTION_RELEASED) return null;
+  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now ?? (() => new Date());
+  const adapter = dependencies.adapter ?? createHermesAnthropicAdapter();
+  try {
+    const current = await connection.db.transaction((tx) =>
+      selectConnection(tx, operator.id, true, ANTHROPIC_PROVIDER),
+    );
+    if (!current) return null;
+    const revocation = await adapter.revokeAuthorization({
+      operatorId: operator.id,
+      userId,
+      providerIdentity: current.connection.providerSubjectId,
+    });
+    const at = now();
+    const updated = await connection.db.transaction(async (tx) => {
+      await lockOperator(tx, operator.id);
+      const providerRevokedMessage = revocation.providerRevoked
+        ? null
+        : "Anthropic was disconnected locally, but provider revocation could not be confirmed. Bruno paused work that needs it.";
+      const [saved] = await tx
+        .update(operatorAiConnections)
+        .set({
+          status: "disconnected",
+          authorizationState: revocation.providerRevoked ? "revoked" : "revocation_unconfirmed",
+          capacityState: "unknown",
+          inferenceState: "unknown",
+          authorizationPersisted: false,
+          authorizationSessionHash: null,
+          authorizationExpiresAt: null,
+          approvedModelAssignment: null,
+          disconnectedAt: at,
+          revokedAt: revocation.providerRevoked ? at : null,
+          failureCode: revocation.providerRevoked ? null : "provider_revocation_unconfirmed",
+          recoveryMessage: providerRevokedMessage,
+          workPausedReason: "Anthropic is disconnected. Bruno paused work that needs it.",
+          updatedAt: at,
+        })
+        .where(eq(operatorAiConnections.id, current.connection.id))
+        .returning();
+      if (!saved) return null;
+      await insertReceipt(tx, saved, revocation.providerRevoked ? "revoked" : "disconnected", at);
+      return selectConnection(tx, operator.id, false, ANTHROPIC_PROVIDER);
+    });
+    return updated ? toConnectionDto(updated.connection, updated.receipt) : null;
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
 async function updateConnectionFailure(input: {
   connection: DatabaseConnection;
   operatorId: string;
+  provider?: FounderAiProvider;
   now: Date;
   code: string;
   message: string;
@@ -638,15 +1216,16 @@ async function updateConnectionFailure(input: {
   providerIdentity?: string | null;
   accountLabel?: string | null;
 }): Promise<FounderAiConnectionDto> {
+  const provider = input.provider ?? OPENAI_PROVIDER;
   const result = await input.connection.db.transaction(async (tx) => {
     await lockOperator(tx, input.operatorId);
-    const current = await selectConnection(tx, input.operatorId, true, "openai");
+    const current = await selectConnection(tx, input.operatorId, true, provider);
     if (!current) {
       const [created] = await tx
         .insert(operatorAiConnections)
         .values({
           operatorId: input.operatorId,
-          provider: OPENAI_PROVIDER,
+          provider,
           status: "needs_attention",
           authorizationState: input.authorizationState,
           providerSubjectId: input.providerIdentity,
@@ -664,7 +1243,7 @@ async function updateConnectionFailure(input: {
           503,
         );
       await insertReceipt(tx, created, "verification_failed", input.now);
-      return selectConnection(tx, input.operatorId, false, "openai");
+      return selectConnection(tx, input.operatorId, false, provider);
     }
     const [saved] = await tx
       .update(operatorAiConnections)
@@ -689,7 +1268,7 @@ async function updateConnectionFailure(input: {
         503,
       );
     await insertReceipt(tx, saved, "verification_failed", input.now);
-    return selectConnection(tx, input.operatorId, false, "openai");
+    return selectConnection(tx, input.operatorId, false, provider);
   });
   if (!result)
     throw new FounderAiConnectionError(
@@ -789,6 +1368,27 @@ async function selectConnection(
   return { connection, receipt: receipt ?? null };
 }
 
+async function hasActiveProcessingConsent(
+  tx: FounderAiConnectionTransaction,
+  operatorId: string,
+  aiConnectionId: string,
+): Promise<boolean> {
+  const [consent] = await tx
+    .select({ id: operatorProcessingConsents.id })
+    .from(operatorProcessingConsents)
+    .where(
+      and(
+        eq(operatorProcessingConsents.operatorId, operatorId),
+        eq(operatorProcessingConsents.aiConnectionId, aiConnectionId),
+        eq(operatorProcessingConsents.status, "active"),
+        inArray(operatorProcessingConsents.purpose, ["calendar_morning_brief", "core_operation"]),
+      ),
+    )
+    .orderBy(desc(operatorProcessingConsents.version))
+    .limit(1);
+  return Boolean(consent);
+}
+
 async function lockOperator(tx: FounderAiConnectionTransaction, operatorId: string): Promise<void> {
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:operator-ai:${operatorId}`}, 0))`,
@@ -844,6 +1444,41 @@ function readinessMessage(
     default:
       return "Bruno could not verify this OpenAI connection. Try connecting again.";
   }
+}
+
+function readinessMessageForProvider(
+  provider: FounderAiProvider,
+  code: Exclude<FounderAiReadinessResult, { ok: true }>["code"],
+): string {
+  if (provider === "anthropic") {
+    switch (code) {
+      case "authorization_denied":
+        return "Anthropic authorization was declined. Try connecting again when you are ready.";
+      case "authorization_expired":
+        return "Anthropic authorization expired. Start again to reconnect.";
+      case "billing_unverified":
+        return "Bruno could not verify an eligible Claude Max plan with extra usage credits.";
+      case "privacy_not_accepted":
+        return "Anthropic privacy requirements are not yet proven for this connection.";
+      case "retention_unbounded":
+        return "Anthropic retention requirements are not yet proven for this connection.";
+      case "third_party_permission_missing":
+        return "Anthropic third-party processing permission is not yet proven.";
+      case "credential_unhealthy":
+        return "Anthropic credentials could not be confirmed healthy. Reconnect to try again.";
+      case "reconnect_unsupported":
+        return "Anthropic reconnect behavior is not yet proven for this connection.";
+      case "production_use_unapproved":
+        return "Anthropic production-use approval is not yet proven for this connection.";
+      case "processing_consent_missing":
+        return "Confirm active Processing Consent before Bruno uses Anthropic for company work.";
+      case "capacity_unavailable":
+        return "Anthropic capacity is unavailable right now. Bruno paused work until it returns.";
+      default:
+        return "Bruno could not verify this Anthropic connection. Try connecting again.";
+    }
+  }
+  return readinessMessage(code);
 }
 
 function digestOpaqueValue(value: string): string {
@@ -993,6 +1628,185 @@ export function createHermesOpenAiAdapter(
   };
 }
 
+/**
+ * Hermes owns Anthropic OAuth and credential persistence. Bruno only receives
+ * the browser handoff and bounded verification facts; raw OAuth/setup tokens
+ * never cross this boundary or enter the Founder-facing DTO.
+ */
+export function createHermesAnthropicAdapter(
+  input: {
+    baseUrl?: string;
+    request?: (path: string, init?: RequestInit) => Promise<unknown>;
+  } = {},
+): FounderAnthropicAdapter {
+  const baseUrl = input.baseUrl ?? process.env.BRUNO_HERMES_CONTROL_URL?.trim();
+  const request =
+    input.request ??
+    (baseUrl
+      ? async (path, init) => {
+          const token = process.env.BRUNO_HERMES_CONTROL_TOKEN?.trim();
+          const response = await fetch(new URL(path, baseUrl), {
+            ...init,
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              ...(init?.headers ?? {}),
+            },
+          });
+          const body = (await response.json().catch(() => null)) as unknown;
+          if (!response.ok) throw new Error(`Hermes request failed (${response.status}).`);
+          return body;
+        }
+      : async () => {
+          throw new Error("Hermes structured authorization is not configured.");
+        });
+
+  return {
+    async startAuthorization() {
+      try {
+        const body = (await request("/api/providers/oauth/anthropic/start", {
+          method: "POST",
+        })) as Record<string, unknown>;
+        const authorizationUrl = readString(
+          body.verification_url ?? body.authorizationUrl ?? body.url,
+        );
+        const userCode = readString(body.user_code ?? body.userCode ?? body.code);
+        const sessionId = readString(body.session_id ?? body.sessionId ?? body.id);
+        const expiresIn = readNumber(body.expires_in);
+        const expiresAt =
+          readDate(body.expiresAt) ?? (expiresIn ? new Date(Date.now() + expiresIn * 1000) : null);
+        if (!authorizationUrl || !userCode || !sessionId || !expiresAt)
+          throw new Error("invalid authorization response");
+        return {
+          ok: true as const,
+          authorization: { authorizationUrl, userCode, sessionId, expiresAt },
+        };
+      } catch {
+        return {
+          ok: false as const,
+          code: "authorization_unavailable",
+          message: "Bruno could not start Anthropic authorization. Try again shortly.",
+        };
+      }
+    },
+    async pollAuthorization({ sessionId }) {
+      try {
+        const body = (await request(
+          `/api/providers/oauth/anthropic/poll/${encodeURIComponent(sessionId)}`,
+        )) as Record<string, unknown>;
+        const state = readString(body.state ?? body.status);
+        if (state === "pending" || state === "authorization_pending")
+          return { state: "pending" as const };
+        if (state === "denied" || state === "access_denied") return { state: "denied" as const };
+        if (state === "expired" || state === "authorization_expired")
+          return { state: "expired" as const };
+        const providerIdentity = readString(
+          body.providerIdentity ??
+            body.provider_identity ??
+            body.subject ??
+            body.accountId ??
+            body.account_id,
+        );
+        if (!providerIdentity) return { state: "pending" as const };
+        return {
+          state: "authorized" as const,
+          providerIdentity,
+          accountLabel: readString(body.accountLabel ?? body.email ?? body.account),
+        };
+      } catch {
+        return { state: "pending" as const };
+      }
+    },
+    async verifyConnection({ providerIdentity }) {
+      try {
+        const providerBody = (await request("/api/providers/oauth")) as Record<string, unknown>;
+        const provider = findAnthropicProvider(providerBody);
+        const modelBody = (await request("/api/model/info")) as Record<string, unknown>;
+        const statusBody = (await request("/api/status")) as Record<string, unknown>;
+        const providerStatus = (provider?.status ?? {}) as Record<string, unknown>;
+        const modelProvider = readString(modelBody.provider);
+        const modelName = readString(modelBody.model ?? modelBody.name);
+        const compatibility = evaluateFounderAnthropicCompatibility({
+          subscriptionPlan:
+            readString(providerStatus.subscription_plan ?? providerStatus.plan) === "claude_max"
+              ? "claude_max"
+              : readString(providerStatus.subscription_plan ?? providerStatus.plan) === "claude_pro"
+                ? "claude_pro"
+                : "unknown",
+          extraUsageCredits:
+            providerStatus.extra_usage_credits === true || statusBody.extra_usage_credits === true,
+          privacyReviewed: statusBody.privacy_accepted === true,
+          retentionReviewed: statusBody.retention_bounded === true,
+          thirdPartyPermissionReviewed: statusBody.third_party_permission_granted === true,
+          credentialStorageReviewed: statusBody.credential_healthy === true,
+          reconnectReviewed: statusBody.reconnect_supported === true,
+          productionUseReviewed: statusBody.production_use_approved === true,
+        });
+        return {
+          providerIdentity:
+            readString(provider?.account_id ?? provider?.provider_identity ?? provider?.subject) ??
+            providerIdentity,
+          accountLabel: readString(provider?.account_label ?? provider?.email ?? provider?.account),
+          eligibleAccount:
+            providerStatus.logged_in === true &&
+            providerStatus.eligible === true &&
+            compatibility.released,
+          billingVerified:
+            providerStatus.billing_verified === true &&
+            (providerStatus.extra_usage_credits === true ||
+              statusBody.extra_usage_credits === true),
+          privacyAccepted: statusBody.privacy_accepted === true,
+          retentionBounded: statusBody.retention_bounded === true,
+          thirdPartyPermissionGranted: statusBody.third_party_permission_granted === true,
+          credentialHealthy: statusBody.credential_healthy === true,
+          reconnectSupported: statusBody.reconnect_supported === true,
+          productionUseApproved: statusBody.production_use_approved === true,
+          processingConsentActive: statusBody.processing_consent_active === true,
+          authorizationPersisted: providerStatus.logged_in === true,
+          approvedModelAssigned:
+            modelProvider === "anthropic" &&
+            modelName !== null &&
+            isApprovedAnthropicModel(modelName),
+          capacity:
+            statusBody.capacity === "available" || statusBody.capacity === "exhausted"
+              ? statusBody.capacity
+              : "unavailable",
+          inference:
+            statusBody.inference === "passed" || statusBody.inferencePassed === true
+              ? "passed"
+              : "failed",
+        };
+      } catch {
+        return {
+          providerIdentity,
+          accountLabel: null,
+          eligibleAccount: false,
+          billingVerified: false,
+          privacyAccepted: false,
+          retentionBounded: false,
+          thirdPartyPermissionGranted: false,
+          credentialHealthy: false,
+          reconnectSupported: false,
+          productionUseApproved: false,
+          processingConsentActive: false,
+          authorizationPersisted: false,
+          approvedModelAssigned: false,
+          capacity: "unavailable" as const,
+          inference: "failed" as const,
+        };
+      }
+    },
+    async revokeAuthorization() {
+      try {
+        await request("/api/providers/oauth/anthropic", { method: "DELETE" });
+        return { providerRevoked: true };
+      } catch {
+        return { providerRevoked: false };
+      }
+    },
+  };
+}
+
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -1012,6 +1826,17 @@ function findOpenAiProvider(body: Record<string, unknown>): Record<string, unkno
   return provider && typeof provider === "object" ? (provider as Record<string, unknown>) : null;
 }
 
+function findAnthropicProvider(body: Record<string, unknown>): Record<string, unknown> | null {
+  const providers = Array.isArray(body.providers) ? body.providers : [];
+  const provider = providers.find(
+    (candidate) =>
+      typeof candidate === "object" &&
+      candidate !== null &&
+      (candidate as Record<string, unknown>).id === ANTHROPIC_PROVIDER,
+  );
+  return provider && typeof provider === "object" ? (provider as Record<string, unknown>) : null;
+}
+
 function isApprovedOpenAiModel(model: string): boolean {
   const configured = process.env.BRUNO_APPROVED_OPENAI_MODELS?.split(",")
     .map((value) => value.trim())
@@ -1019,6 +1844,14 @@ function isApprovedOpenAiModel(model: string): boolean {
   const approved = configured?.length
     ? configured
     : ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.4"];
+  return approved.includes(model);
+}
+
+function isApprovedAnthropicModel(model: string): boolean {
+  const configured = process.env.BRUNO_APPROVED_ANTHROPIC_MODELS?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const approved = configured?.length ? configured : ["claude-sonnet-4-6", "claude-3-7-sonnet"];
   return approved.includes(model);
 }
 

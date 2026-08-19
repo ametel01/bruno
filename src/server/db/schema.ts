@@ -814,6 +814,14 @@ export const operatorAiConnections = pgTable(
     capacityState: operatorAiCapacityStateEnum("capacity_state").notNull().default("unknown"),
     inferenceState: operatorAiInferenceStateEnum("inference_state").notNull().default("unknown"),
     eligibleAccount: boolean("eligible_account").notNull().default(false),
+    billingVerified: boolean("billing_verified").notNull().default(false),
+    privacyAccepted: boolean("privacy_accepted").notNull().default(false),
+    retentionBounded: boolean("retention_bounded").notNull().default(false),
+    thirdPartyPermissionGranted: boolean("third_party_permission_granted").notNull().default(false),
+    credentialHealthy: boolean("credential_healthy").notNull().default(false),
+    reconnectSupported: boolean("reconnect_supported").notNull().default(false),
+    productionUseApproved: boolean("production_use_approved").notNull().default(false),
+    processingConsentActive: boolean("processing_consent_active").notNull().default(false),
     authorizationPersisted: boolean("authorization_persisted").notNull().default(false),
     authorizationSessionHash: text("authorization_session_hash"),
     authorizationExpiresAt: timestamp("authorization_expires_at", { withTimezone: true }),
@@ -853,7 +861,7 @@ export const operatorAiConnections = pgTable(
     ),
     check(
       "operator_ai_connections_ready_shape_check",
-      sql`${table.status} <> 'ready' OR (${table.providerSubjectId} IS NOT NULL AND ${table.accountLabel} IS NOT NULL AND ${table.authorizationState} = 'authorized' AND ${table.eligibleAccount} = true AND ${table.authorizationPersisted} = true AND ${table.approvedModelAssignment} IS NOT NULL AND ${table.capacityState} = 'available' AND ${table.inferenceState} = 'passed' AND ${table.lastVerifiedAt} IS NOT NULL)`,
+      sql`${table.status} <> 'ready' OR (${table.providerSubjectId} IS NOT NULL AND ${table.accountLabel} IS NOT NULL AND ${table.authorizationState} = 'authorized' AND ${table.eligibleAccount} = true AND ${table.authorizationPersisted} = true AND ${table.approvedModelAssignment} IS NOT NULL AND ${table.capacityState} = 'available' AND ${table.inferenceState} = 'passed' AND ${table.lastVerifiedAt} IS NOT NULL AND (${table.provider} <> 'anthropic' OR (${table.billingVerified} = true AND ${table.privacyAccepted} = true AND ${table.retentionBounded} = true AND ${table.thirdPartyPermissionGranted} = true AND ${table.credentialHealthy} = true AND ${table.reconnectSupported} = true AND ${table.productionUseApproved} = true AND ${table.processingConsentActive} = true)))`,
     ),
     uniqueIndex("operator_ai_connections_operator_provider_idx").on(
       table.operatorId,

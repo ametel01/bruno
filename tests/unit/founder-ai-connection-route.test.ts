@@ -6,6 +6,10 @@ const mocks = vi.hoisted(() => ({
   pollAuthorization: vi.fn(),
   recheckConnection: vi.fn(),
   disconnectConnection: vi.fn(),
+  startAnthropicAuthorization: vi.fn(),
+  pollAnthropicAuthorization: vi.fn(),
+  recheckAnthropicConnection: vi.fn(),
+  disconnectAnthropicConnection: vi.fn(),
   requireApplicationUser: vi.fn(),
 }));
 
@@ -19,6 +23,10 @@ vi.mock("@/src/server/operators/founder-ai-connection", async (importOriginal) =
     pollFounderOpenAiAuthorizationForUser: mocks.pollAuthorization,
     recheckFounderOpenAiConnectionForUser: mocks.recheckConnection,
     disconnectFounderOpenAiForUser: mocks.disconnectConnection,
+    startFounderAnthropicAuthorizationForUser: mocks.startAnthropicAuthorization,
+    pollFounderAnthropicAuthorizationForUser: mocks.pollAnthropicAuthorization,
+    recheckFounderAnthropicConnectionForUser: mocks.recheckAnthropicConnection,
+    disconnectFounderAnthropicForUser: mocks.disconnectAnthropicConnection,
   };
 });
 
@@ -62,6 +70,29 @@ describe("Founder AI connection route", () => {
       status: "disconnected",
       workState: "paused",
       receipt: { ...CONNECTION.receipt, outcome: "disconnected" },
+    });
+    mocks.startAnthropicAuthorization.mockResolvedValue({
+      connection: {
+        ...CONNECTION,
+        provider: "anthropic",
+        status: "authorizing",
+        workState: "paused",
+        receipt: null,
+      },
+      authorization: {
+        authorizationUrl: "https://console.anthropic.com/oauth/authorize",
+        userCode: "CLAUDE-CODE",
+        expiresAt: "2026-08-18T01:15:00.000Z",
+      },
+    });
+    mocks.pollAnthropicAuthorization.mockResolvedValue({ ...CONNECTION, provider: "anthropic" });
+    mocks.recheckAnthropicConnection.mockResolvedValue({ ...CONNECTION, provider: "anthropic" });
+    mocks.disconnectAnthropicConnection.mockResolvedValue({
+      ...CONNECTION,
+      provider: "anthropic",
+      status: "disconnected",
+      workState: "paused",
+      receipt: { ...CONNECTION.receipt, provider: "anthropic", outcome: "disconnected" },
     });
   });
 
@@ -111,5 +142,31 @@ describe("Founder AI connection route", () => {
     expect(mocks.pollAuthorization).toHaveBeenCalledWith(USER_ID, "opaque-session");
     expect(mocks.recheckConnection).toHaveBeenCalledWith(USER_ID);
     expect(mocks.disconnectConnection).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it("dispatches Anthropic actions through the same route contract without exposing credentials", async () => {
+    const { POST } = await import("@/app/api/operator/connections/route");
+    const base = "http://localhost/api/operator/connections";
+    const started = await POST(
+      new Request(base, {
+        method: "POST",
+        body: JSON.stringify({ action: "start", provider: "anthropic" }),
+      }),
+    );
+    expect(started.status).toBe(200);
+    expect(mocks.startAnthropicAuthorization).toHaveBeenCalledWith(USER_ID);
+    const polled = await POST(
+      new Request(base, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "poll",
+          provider: "anthropic",
+          sessionId: "claude-session",
+        }),
+      }),
+    );
+    expect(polled.status).toBe(200);
+    expect(mocks.pollAnthropicAuthorization).toHaveBeenCalledWith(USER_ID, "claude-session");
+    expect(JSON.stringify(await polled.json())).not.toMatch(/token|secret|setup-token|api.?key/i);
   });
 });

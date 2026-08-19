@@ -526,6 +526,20 @@
       "when": 1787111211374,
       "tag": "0074_steep_archangel",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1787116718089,
+      "tag": "0075_futuristic_ultron",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1787117416640,
+      "tag": "0076_futuristic_pyro",
+      "breakpoints": true
     }
   ]
 }

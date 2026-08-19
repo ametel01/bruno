@@ -4,6 +4,12 @@ import {
   evaluateFounderOpenAiReadiness,
   type FounderOpenAiReadinessInput,
 } from "@/src/server/operators/founder-ai-connection";
+import { runFounderAiAdapterConformanceSuite } from "./founder-ai-adapter-conformance";
+
+runFounderAiAdapterConformanceSuite({
+  provider: "openai",
+  createAdapter: (request) => createHermesOpenAiAdapter({ request }),
+});
 
 const readyInput: FounderOpenAiReadinessInput = {
   providerIdentity: "acct_founder_123",

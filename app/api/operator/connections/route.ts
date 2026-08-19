@@ -1,8 +1,12 @@
 import {
+  disconnectFounderAnthropicForUser,
   disconnectFounderOpenAiForUser,
   FounderAiConnectionError,
+  pollFounderAnthropicAuthorizationForUser,
   pollFounderOpenAiAuthorizationForUser,
+  recheckFounderAnthropicConnectionForUser,
   recheckFounderOpenAiConnectionForUser,
+  startFounderAnthropicAuthorizationForUser,
   startFounderOpenAiAuthorizationForUser,
 } from "@/src/server/operators/founder-ai-connection";
 import type { getFounderAiConnectionForUser } from "@/src/server/operators/founder-ai-connection";
@@ -15,12 +19,16 @@ type ConnectionRouteDependencies = {
   pollAuthorization?: typeof pollFounderOpenAiAuthorizationForUser;
   recheckConnection?: typeof recheckFounderOpenAiConnectionForUser;
   disconnectConnection?: typeof disconnectFounderOpenAiForUser;
+  startAnthropicAuthorization?: typeof startFounderAnthropicAuthorizationForUser;
+  pollAnthropicAuthorization?: typeof pollFounderAnthropicAuthorizationForUser;
+  recheckAnthropicConnection?: typeof recheckFounderAnthropicConnectionForUser;
+  disconnectAnthropicConnection?: typeof disconnectFounderAnthropicForUser;
 };
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   _context?: unknown,
   dependencies: ConnectionRouteDependencies = {},
 ): Promise<Response> {
@@ -29,9 +37,15 @@ export async function GET(
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
 
-  const connection = dependencies.getConnection
-    ? await dependencies.getConnection(applicationUser.userId)
-    : await recheckFounderOpenAiConnectionForUser(applicationUser.userId);
+  const provider = readProvider(new URL(request.url).searchParams.get("provider"));
+  const connection =
+    provider === "anthropic"
+      ? await (dependencies.recheckAnthropicConnection ?? recheckFounderAnthropicConnectionForUser)(
+          applicationUser.userId,
+        )
+      : dependencies.getConnection
+        ? await dependencies.getConnection(applicationUser.userId)
+        : await recheckFounderOpenAiConnectionForUser(applicationUser.userId);
   return Response.json({ connection }, { headers: noStoreHeaders() });
 }
 
@@ -53,31 +67,55 @@ export async function POST(
   }
 
   const action = readAction(payload);
+  const provider = readProvider(
+    payload && typeof payload === "object" && "provider" in payload ? payload.provider : null,
+  );
   try {
     if (action === "start") {
-      const result = await (
-        dependencies.startAuthorization ?? startFounderOpenAiAuthorizationForUser
-      )(applicationUser.userId);
+      const result =
+        provider === "anthropic"
+          ? await (
+              dependencies.startAnthropicAuthorization ?? startFounderAnthropicAuthorizationForUser
+            )(applicationUser.userId)
+          : await (dependencies.startAuthorization ?? startFounderOpenAiAuthorizationForUser)(
+              applicationUser.userId,
+            );
       return Response.json(result, { headers: noStoreHeaders() });
     }
     if (action === "poll") {
       const sessionId = readSessionId(payload);
       if (!sessionId) return validationResponse("Authorization session is required.");
-      const connection = await (
-        dependencies.pollAuthorization ?? pollFounderOpenAiAuthorizationForUser
-      )(applicationUser.userId, sessionId);
+      const connection =
+        provider === "anthropic"
+          ? await (
+              dependencies.pollAnthropicAuthorization ?? pollFounderAnthropicAuthorizationForUser
+            )(applicationUser.userId, sessionId)
+          : await (dependencies.pollAuthorization ?? pollFounderOpenAiAuthorizationForUser)(
+              applicationUser.userId,
+              sessionId,
+            );
       return Response.json({ connection }, { headers: noStoreHeaders() });
     }
     if (action === "recheck") {
-      const connection = await (
-        dependencies.recheckConnection ?? recheckFounderOpenAiConnectionForUser
-      )(applicationUser.userId);
+      const connection =
+        provider === "anthropic"
+          ? await (
+              dependencies.recheckAnthropicConnection ?? recheckFounderAnthropicConnectionForUser
+            )(applicationUser.userId)
+          : await (dependencies.recheckConnection ?? recheckFounderOpenAiConnectionForUser)(
+              applicationUser.userId,
+            );
       return Response.json({ connection }, { headers: noStoreHeaders() });
     }
     if (action === "disconnect") {
-      const connection = await (
-        dependencies.disconnectConnection ?? disconnectFounderOpenAiForUser
-      )(applicationUser.userId);
+      const connection =
+        provider === "anthropic"
+          ? await (dependencies.disconnectAnthropicConnection ?? disconnectFounderAnthropicForUser)(
+              applicationUser.userId,
+            )
+          : await (dependencies.disconnectConnection ?? disconnectFounderOpenAiForUser)(
+              applicationUser.userId,
+            );
       return Response.json({ connection }, { headers: noStoreHeaders() });
     }
   } catch (error) {
@@ -90,7 +128,7 @@ export async function POST(
     throw error;
   }
 
-  return validationResponse("Choose a supported OpenAI connection action.");
+  return validationResponse("Choose a supported AI connection action.");
 }
 
 function readAction(payload: unknown): "start" | "poll" | "recheck" | "disconnect" | null {
@@ -105,6 +143,10 @@ function readSessionId(payload: unknown): string | null {
   if (!payload || typeof payload !== "object" || !("sessionId" in payload)) return null;
   const sessionId = payload.sessionId;
   return typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : null;
+}
+
+function readProvider(value: unknown): "openai" | "anthropic" {
+  return value === "anthropic" ? "anthropic" : "openai";
 }
 
 function authenticationResponse(status: 401 | 503): Response {
