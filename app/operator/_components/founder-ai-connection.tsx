@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { FounderAiConnectionDto } from "@/src/server/operators/founder-ai-connection";
+import { FounderRecoveryStatus } from "./founder-recovery-status";
 import styles from "./founder-ai-connection.module.css";
 
 type Authorization = {
@@ -139,7 +140,8 @@ export function FounderAiConnection() {
       {connection?.accountLabel ? (
         <p className={styles.account}>{connection.accountLabel}</p>
       ) : null}
-      {connection?.recoveryMessage ? (
+      {connection?.recovery ? <FounderRecoveryStatus recovery={connection.recovery} /> : null}
+      {!connection?.recovery && connection?.recoveryMessage ? (
         <p className={styles.notice} role="status">
           {connection.recoveryMessage}
         </p>

@@ -24,6 +24,10 @@ import {
   type OperatorSecretKeyring,
   parseOperatorSecretKeyring,
 } from "@/src/server/secrets/operator-secret-keyring";
+import {
+  deriveFounderConnectionRecovery,
+  type FounderRecoveryDto,
+} from "@/src/server/operators/founder-recovery";
 
 type FounderCalendarTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -64,6 +68,7 @@ export type FounderCalendarConnectionDto = {
   evidenceState: FounderCalendarEvidenceState;
   workState: "available" | "paused";
   recoveryMessage: string | null;
+  recovery?: FounderRecoveryDto | null;
   resources: FounderCalendarResourceDto[];
   receipt: {
     provider: "google_calendar";
@@ -1424,6 +1429,16 @@ function toDto(bundle: {
     evidenceState: bundle.connection.evidenceState,
     workState: bundle.connection.status === "ready" ? "available" : "paused",
     recoveryMessage: bundle.connection.recoveryMessage,
+    recovery: deriveFounderConnectionRecovery({
+      capability: "calendar",
+      status: bundle.connection.status,
+      evidenceState: bundle.connection.evidenceState,
+      failureCode: bundle.connection.failureCode,
+      recoveryMessage: bundle.connection.recoveryMessage,
+      createdAt: bundle.connection.createdAt,
+      updatedAt: bundle.connection.updatedAt,
+      ...(bundle.receipt?.generation ? { attemptCount: bundle.receipt.generation } : {}),
+    }),
     resources: bundle.resources.map((resource) => ({
       providerResourceId: resource.providerResourceId,
       summary: resource.summary,

@@ -6,6 +6,7 @@ import type {
   FounderConversationMessageDto,
 } from "@/src/server/operators/founder-conversation";
 import { FounderActionPreviewCard } from "./founder-action-preview";
+import { FounderRecoveryStatus } from "./founder-recovery-status";
 import styles from "./founder-conversation.module.css";
 import { FounderProposedActionCard } from "./founder-proposed-action";
 
@@ -136,7 +137,12 @@ export function FounderConversation() {
         </div>
       ) : null}
 
-      {conversation?.activeWork?.state === "paused" ? (
+      {conversation?.activeWork?.recovery ? (
+        <FounderRecoveryStatus
+          recovery={conversation.activeWork.recovery}
+          onAction={resumeCheckpoint}
+        />
+      ) : conversation?.activeWork?.state === "paused" ? (
         <div className={styles.pauseNotice} role="status">
           <strong>This message is safely checkpointed.</strong>
           <span>

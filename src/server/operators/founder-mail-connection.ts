@@ -26,6 +26,10 @@ import {
   type OperatorSecretKeyring,
   parseOperatorSecretKeyring,
 } from "@/src/server/secrets/operator-secret-keyring";
+import {
+  deriveFounderConnectionRecovery,
+  type FounderRecoveryDto,
+} from "@/src/server/operators/founder-recovery";
 
 type FounderMailTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -83,6 +87,7 @@ export type FounderMailConnectionDto = {
   evidenceState: FounderMailEvidenceState;
   workState: "available" | "paused";
   recoveryMessage: string | null;
+  recovery?: FounderRecoveryDto | null;
   suite: {
     status: "calendar_unavailable" | "matched" | "mismatch";
     grouped: boolean;
@@ -1642,6 +1647,16 @@ function toDto(bundle: {
     evidenceState: bundle.connection.evidenceState,
     workState: bundle.connection.status === "ready" ? "available" : "paused",
     recoveryMessage: bundle.connection.recoveryMessage,
+    recovery: deriveFounderConnectionRecovery({
+      capability: "mail",
+      status: bundle.connection.status,
+      evidenceState: bundle.connection.evidenceState,
+      failureCode: bundle.connection.failureCode,
+      recoveryMessage: bundle.connection.recoveryMessage,
+      createdAt: bundle.connection.createdAt,
+      updatedAt: bundle.connection.updatedAt,
+      ...(bundle.receipt?.generation ? { attemptCount: bundle.receipt.generation } : {}),
+    }),
     suite: {
       status: bundle.connection.suiteStatus,
       grouped: bundle.connection.suiteStatus === "matched" && bundle.suite?.status === "active",

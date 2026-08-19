@@ -15,6 +15,10 @@ import {
   operatorRelationshipRecords,
 } from "@/src/server/db/schema";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  deriveFounderRecovery,
+  type FounderRecoveryDto,
+} from "@/src/server/operators/founder-recovery";
 
 type MorningBriefTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -46,6 +50,7 @@ export type FounderMorningBriefProjection = {
   generation: number;
   status: "prepared" | "opened";
   evidenceState: "current" | "unavailable";
+  recovery?: FounderRecoveryDto | null;
   quiet: boolean;
   attentionCount: number;
   content: string;
@@ -289,6 +294,18 @@ export async function projectFounderMorningBrief(
     generation: brief.generation,
     status: brief.status,
     evidenceState: brief.evidenceState === "current" ? "current" : "unavailable",
+    recovery: deriveFounderRecovery({
+      capability: "brief",
+      now: brief.generatedAt,
+      startedAt: brief.createdAt,
+      attemptCount: 1,
+      durableFailure: brief.evidenceState !== "current",
+      waitingOnProvider: brief.evidenceState !== "current",
+      message:
+        brief.evidenceState === "current"
+          ? null
+          : "Bruno is waiting for current Calendar or Mail evidence before regenerating the brief.",
+    }),
     quiet: brief.quiet,
     attentionCount: brief.attentionCount,
     content: brief.content,

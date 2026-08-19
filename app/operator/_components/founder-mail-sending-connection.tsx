@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { FounderMailSendingConnectionDto } from "@/src/server/operators/founder-mail-sending-connection";
+import { FounderRecoveryStatus } from "./founder-recovery-status";
 import styles from "./founder-mail-connection.module.css";
 
 export function FounderMailSendingConnection() {
@@ -90,7 +91,8 @@ export function FounderMailSendingConnection() {
         <p className={styles.account}>{connection.accountLabel}</p>
       ) : null}
       {loading ? <p className={styles.notice}>Loading your Mail Sending Connection…</p> : null}
-      {!loading && connection?.recoveryMessage ? (
+      {connection?.recovery ? <FounderRecoveryStatus recovery={connection.recovery} /> : null}
+      {!connection?.recovery && !loading && connection?.recoveryMessage ? (
         <p className={styles.notice}>{connection.recoveryMessage}</p>
       ) : null}
       {!loading && !connection ? (

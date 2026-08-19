@@ -6,6 +6,7 @@ import { FounderActionPreviewCard } from "./founder-action-preview";
 import styles from "./founder-limited-operation.module.css";
 import { FounderMorningBriefSettings } from "./founder-morning-brief-settings";
 import { FounderProposedActionCard } from "./founder-proposed-action";
+import { FounderRecoveryStatus } from "./founder-recovery-status";
 
 export function FounderLimitedOperation() {
   const [operation, setOperation] = useState<FounderLimitedOperationDto | null>(null);
@@ -154,6 +155,7 @@ export function FounderLimitedOperation() {
             Calendar evidence:{" "}
             {operation.brief.evidenceState === "current" ? "Current" : "Unavailable"}.
           </p>
+          <FounderRecoveryStatus recovery={operation.brief.recovery ?? null} />
           {operation.brief.items && operation.brief.items.length > 0 ? (
             <ul className={styles.hint}>
               {operation.brief.items.map((item) => (

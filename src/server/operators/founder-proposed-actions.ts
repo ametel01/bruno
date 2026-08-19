@@ -8,6 +8,7 @@ import type * as schema from "@/src/server/db/schema";
 import {
   operatorActionAuthorizations,
   operatorActionDecisions,
+  operatorActionExecutionAttempts,
   operatorAuthorityPolicies,
   operatorCalendarConnections,
   operatorCalendarResources,
@@ -20,6 +21,10 @@ import {
 } from "@/src/server/db/schema";
 import { assertFounderExternalActionsNotPausedInTransaction } from "@/src/server/operators/founder-ai-work";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  deriveFounderRecovery,
+  type FounderRecoveryDto,
+} from "@/src/server/operators/founder-recovery";
 
 export type ProposedActionTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -142,6 +147,7 @@ export type FounderProposedActionDto = {
   state: FounderProposedActionState;
   decision: FounderProposedActionDecisionDto | null;
   authorization: { id: string; claimedAt: string | null } | null;
+  recovery?: FounderRecoveryDto | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -1357,6 +1363,33 @@ async function projectProposedAction(
     action.operatorId,
     action.productGuardrailsVersion,
   );
+  const attempts = await tx
+    .select({
+      attemptNumber: operatorActionExecutionAttempts.attemptNumber,
+      phase: operatorActionExecutionAttempts.phase,
+      createdAt: operatorActionExecutionAttempts.createdAt,
+    })
+    .from(operatorActionExecutionAttempts)
+    .where(eq(operatorActionExecutionAttempts.proposedActionId, action.id))
+    .orderBy(desc(operatorActionExecutionAttempts.createdAt));
+  const latestAttempt = attempts[0];
+  const recovery = deriveFounderRecovery({
+    capability: "external_effect",
+    now: action.updatedAt,
+    startedAt: latestAttempt?.createdAt ?? action.createdAt,
+    attemptCount: Math.max(attempts.length, latestAttempt?.attemptNumber ?? 0),
+    durableFailure: ["executing", "failed", "outcome_uncertain", "blocked"].includes(action.state),
+    waitingOnProvider: action.state === "executing",
+    outcomeUncertain: action.state === "outcome_uncertain" || latestAttempt?.phase === "ambiguous",
+    needsFounder: action.state === "failed" || action.state === "blocked",
+    safeToRetry: false,
+    message:
+      action.state === "outcome_uncertain"
+        ? "Bruno could not prove whether this external effect was accepted. Do not retry it."
+        : action.state === "executing"
+          ? "Bruno is waiting for the provider result. Do not retry this effect."
+          : null,
+  });
   return {
     id: action.id,
     version: action.version,
@@ -1400,6 +1433,7 @@ async function projectProposedAction(
     authorization: authorization
       ? { id: authorization.id, claimedAt: authorization.claimedAt?.toISOString() ?? null }
       : null,
+    recovery,
     createdAt: action.createdAt.toISOString(),
     updatedAt: action.updatedAt.toISOString(),
   };

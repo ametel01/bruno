@@ -5,6 +5,7 @@ import type {
   FounderProposedActionDto,
   FounderProposedActionDraft,
 } from "@/src/server/operators/founder-proposed-actions";
+import { FounderRecoveryStatus } from "./founder-recovery-status";
 import styles from "./founder-proposed-action.module.css";
 
 export function FounderProposedActionCard({
@@ -117,6 +118,7 @@ export function FounderProposedActionCard({
           boundary.
         </p>
       ) : null}
+      <FounderRecoveryStatus recovery={action.recovery ?? null} />
       {action.state === "authorized" ? (
         <p className={styles.hint} role="status">
           Authorized for this exact version once. Bruno has not executed an external effect here.

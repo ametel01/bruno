@@ -14,6 +14,10 @@ import {
 import type { FounderAiProvider } from "@/src/server/operators/founder-ai-routing";
 import { routeFounderAiProvider } from "@/src/server/operators/founder-ai-routing";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  deriveFounderConnectionRecovery,
+  type FounderRecoveryDto,
+} from "@/src/server/operators/founder-recovery";
 
 type FounderAiConnectionTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -40,6 +44,7 @@ export type FounderAiConnectionDto = {
   lastVerifiedAt: string | null;
   workState: "available" | "paused";
   recoveryMessage: string | null;
+  recovery?: FounderRecoveryDto | null;
   receipt: {
     provider: FounderAiProvider;
     accountLabel: string | null;
@@ -1407,6 +1412,15 @@ function toConnectionDto(
     lastVerifiedAt: connection.lastVerifiedAt?.toISOString() ?? null,
     workState: connection.status === "ready" ? "available" : "paused",
     recoveryMessage: connection.recoveryMessage,
+    recovery: deriveFounderConnectionRecovery({
+      capability: "ai",
+      status: connection.status,
+      failureCode: connection.failureCode,
+      recoveryMessage: connection.recoveryMessage,
+      createdAt: connection.createdAt,
+      updatedAt: connection.updatedAt,
+      ...(receipt?.generation ? { attemptCount: receipt.generation } : {}),
+    }),
     receipt: receipt
       ? {
           provider: receipt.provider as FounderAiProvider,

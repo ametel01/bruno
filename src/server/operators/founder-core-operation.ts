@@ -37,6 +37,7 @@ import {
   projectFounderProposedAction,
 } from "@/src/server/operators/founder-proposed-actions";
 import { selectFounderAiProvider } from "@/src/server/operators/founder-ai-routing";
+import type { FounderRecoveryDto } from "@/src/server/operators/founder-recovery";
 
 type CoreTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -81,6 +82,7 @@ export type FounderCoreOperationDto = {
     generation: number;
     status: "prepared" | "opened";
     evidenceState: "current" | "unavailable";
+    recovery?: FounderRecoveryDto | null;
     quiet: boolean;
     attentionCount: number;
     content: string;

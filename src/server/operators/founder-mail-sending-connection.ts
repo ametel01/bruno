@@ -21,6 +21,10 @@ import {
   type OperatorSecretKeyring,
   parseOperatorSecretKeyring,
 } from "@/src/server/secrets/operator-secret-keyring";
+import {
+  deriveFounderConnectionRecovery,
+  type FounderRecoveryDto,
+} from "@/src/server/operators/founder-recovery";
 
 type FounderMailSendingTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -58,6 +62,7 @@ export type FounderMailSendingConnectionDto = {
   lastVerifiedAt: string | null;
   workState: "available" | "paused";
   recoveryMessage: string | null;
+  recovery?: FounderRecoveryDto | null;
   release: {
     qualified: true;
     requiredScope: typeof REQUIRED_MAIL_SENDING_SCOPE;
@@ -931,6 +936,15 @@ function toDto(bundle: Awaited<ReturnType<typeof selectBundle>>): FounderMailSen
     lastVerifiedAt: s?.lastVerifiedAt?.toISOString() ?? null,
     workState: paused ? "paused" : "available",
     recoveryMessage: s?.recoveryMessage ?? null,
+    recovery: deriveFounderConnectionRecovery({
+      capability: "mail_sending",
+      status: s?.status ?? "disconnected",
+      failureCode: s?.failureCode ?? null,
+      recoveryMessage: s?.recoveryMessage ?? null,
+      createdAt: s?.createdAt ?? null,
+      updatedAt: s?.updatedAt ?? new Date(),
+      ...(bundle.receipt?.generation ? { attemptCount: bundle.receipt.generation } : {}),
+    }),
     release: {
       qualified: true,
       requiredScope: REQUIRED_MAIL_SENDING_SCOPE,

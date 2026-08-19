@@ -34,6 +34,10 @@ import {
 } from "@/src/server/operators/founder-ai-work";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
+  deriveFounderConversationRecovery,
+  type FounderRecoveryDto,
+} from "@/src/server/operators/founder-recovery";
+import {
   type FounderProposedActionDto,
   projectFounderProposedAction,
 } from "@/src/server/operators/founder-proposed-actions";
@@ -64,6 +68,7 @@ export type FounderConversationWorkDto = {
   state: "running" | "completed" | "paused" | "failed";
   recoveryMessage: string | null;
   recoveryChoices: FounderAiRecoveryChoice[];
+  recovery?: FounderRecoveryDto | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -409,6 +414,36 @@ export async function resumeFounderConversationWorkForUser(
         return { kind: "unchanged" as const, conversation };
       }
 
+      const recovery = deriveFounderConversationRecovery({
+        now: now(),
+        state: work.state,
+        startedAt: work.createdAt,
+        attemptCount: work.providerAttempts.length,
+        externalEffectStarted: work.externalEffectStarted,
+        recoveryMessage: work.recoveryMessage,
+      });
+      if (recovery?.state === "recovery_exhausted") {
+        await tx
+          .update(operatorConversationWorks)
+          .set({
+            state: "failed",
+            recoveryMessage:
+              "Bruno stopped recovery after the safe conversation budget was reached. Your checkpoint is preserved.",
+            recoveryChoices: [],
+            updatedAt: now(),
+          })
+          .where(eq(operatorConversationWorks.id, work.id));
+        const [pausedConversation] = await tx
+          .update(operatorConversations)
+          .set({ status: "paused", updatedAt: now() })
+          .where(eq(operatorConversations.id, conversation.id))
+          .returning();
+        return {
+          kind: "unchanged" as const,
+          conversation: pausedConversation ?? conversation,
+        };
+      }
+
       const attemptedProvider = work.providerAttempts.at(-1)?.provider as
         | FounderAiProvider
         | undefined;
@@ -586,6 +621,16 @@ async function projectConversation(
     .limit(1);
   const actionPreview = await projectFounderActionPreview(tx, conversation.operatorId);
   const proposedAction = await projectFounderProposedAction(tx, conversation.operatorId);
+  const recovery = work
+    ? deriveFounderConversationRecovery({
+        now: work.updatedAt,
+        state: work.state,
+        startedAt: work.createdAt,
+        attemptCount: work.providerAttempts.length,
+        externalEffectStarted: work.externalEffectStarted,
+        recoveryMessage: work.recoveryMessage,
+      })
+    : null;
   return {
     id: conversation.id,
     status: conversation.status,
@@ -609,6 +654,7 @@ async function projectConversation(
           state: work.state,
           recoveryMessage: work.recoveryMessage,
           recoveryChoices: readRecoveryChoices(work.recoveryChoices),
+          recovery,
           createdAt: work.createdAt.toISOString(),
           updatedAt: work.updatedAt.toISOString(),
         }
