@@ -210,6 +210,21 @@
   margin-top: 14px;
   color: #735845;
 }
+.exportLinks {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 0.86rem;
+}
+.exportLinks a {
+  color: #31534d;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.exportLinks small {
+  color: #6f6d68;
+}
 @media (max-width: 720px) {
   .content {
     gap: 40px;

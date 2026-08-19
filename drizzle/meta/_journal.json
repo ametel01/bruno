@@ -540,6 +540,13 @@
       "when": 1787117416640,
       "tag": "0076_futuristic_pyro",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1787127566039,
+      "tag": "0077_next_lady_bullseye",
+      "breakpoints": true
     }
   ]
 }

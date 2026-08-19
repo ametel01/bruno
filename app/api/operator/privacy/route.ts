@@ -1,6 +1,3 @@
-import { auth } from "@clerk/nextjs/server";
-import { evaluateOperatorAccess } from "@/src/auth/operator-access";
-import { resolveAuthMode } from "@/src/auth/auth-mode";
 import {
   disconnectFounderAnthropicForUser,
   disconnectFounderOpenAiForUser,
@@ -12,6 +9,7 @@ import {
   deleteFounderRetainedDataForUser,
   getFounderPrivacyCenterForUser,
 } from "@/src/server/operators/founder-privacy-center";
+import { requireRecentFounderAuthentication } from "@/src/server/operators/founder-recent-authentication";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 export const dynamic = "force-dynamic";
@@ -55,7 +53,11 @@ export async function POST(
     return validationResponse("Choose a privacy control.");
   }
 
-  const recentAuth = await (dependencies.requireRecentAuth ?? requireRecentAuthentication)(request);
+  const recentAuth = await (
+    dependencies.requireRecentAuth ??
+    ((currentRequest: Request) =>
+      requireRecentFounderAuthentication(currentRequest, "/api/operator/privacy"))
+  )(request);
   if (!recentAuth) {
     return Response.json(
       {
@@ -106,25 +108,6 @@ export async function POST(
   }
 
   return validationResponse("Choose a supported privacy control.");
-}
-
-async function requireRecentAuthentication(request: Request): Promise<boolean> {
-  const env = process.env;
-  const mode = resolveAuthMode(env);
-  if (mode.mode === "development") return true;
-  if (mode.mode === "operator") {
-    return evaluateOperatorAccess({
-      pathname: "/api/operator/privacy",
-      authorizationHeader: request.headers.get("authorization"),
-      env,
-    }).ok;
-  }
-  if (mode.mode !== "clerk") return false;
-
-  const { sessionClaims } = await auth();
-  const issuedAt = (sessionClaims as unknown as { iat?: unknown } | null)?.iat;
-  if (typeof issuedAt !== "number") return false;
-  return Date.now() - issuedAt * 1000 <= 15 * 60 * 1000;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

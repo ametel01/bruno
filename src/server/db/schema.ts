@@ -1739,6 +1739,59 @@ export const operatorFounderActivations = pgTable(
   ],
 );
 
+export const operatorFounderDataExports = pgTable(
+  "operator_founder_data_exports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    tokenHash: text("token_hash").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check(
+      "operator_founder_data_exports_token_hash_check",
+      sql`${table.tokenHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    uniqueIndex("operator_founder_data_exports_token_hash_idx").on(table.tokenHash),
+    index("operator_founder_data_exports_operator_expires_idx").on(
+      table.operatorId,
+      table.expiresAt,
+    ),
+  ],
+);
+
+export const operatorFounderDataExportAccesses = pgTable(
+  "operator_founder_data_export_accesses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    exportId: uuid("export_id")
+      .notNull()
+      .references(() => operatorFounderDataExports.id, { onDelete: "cascade" }),
+    actorUserId: uuid("actor_user_id"),
+    format: text("format").notNull(),
+    outcome: text("outcome").notNull(),
+    accessedAt: timestamp("accessed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_founder_data_export_accesses_format_check",
+      sql`${table.format} IN ('json', 'html')`,
+    ),
+    check(
+      "operator_founder_data_export_accesses_outcome_check",
+      sql`${table.outcome} IN ('downloaded', 'expired', 'owner_mismatch')`,
+    ),
+    index("operator_founder_data_export_accesses_export_accessed_idx").on(
+      table.exportId,
+      table.accessedAt,
+    ),
+  ],
+);
+
 export const operatorRelationshipRecords = pgTable(
   "operator_relationship_records",
   {

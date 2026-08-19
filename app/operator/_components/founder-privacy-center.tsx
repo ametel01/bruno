@@ -15,6 +15,11 @@ export function FounderPrivacyCenter({
   const [privacy, setPrivacy] = useState(initialPrivacy);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [exportLinks, setExportLinks] = useState<{
+    json: string;
+    html: string;
+    expiresAt: string;
+  } | null>(null);
 
   async function disconnect(connection: FounderPrivacyConnection) {
     if (
@@ -82,6 +87,38 @@ export function FounderPrivacyCenter({
       }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Retained data could not be deleted.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function createExport() {
+    setBusy("export");
+    setMessage(null);
+    setExportLinks(null);
+    try {
+      const response = await fetch("/api/operator/privacy/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const body = (await response.json()) as {
+        export?: { downloads?: { json?: string; html?: string }; expiresAt?: string };
+        error?: { message?: string };
+      };
+      if (!response.ok || !body.export?.downloads?.json || !body.export.downloads.html) {
+        throw new Error(body.error?.message ?? "Founder Data Export could not be created.");
+      }
+      setExportLinks({
+        json: body.export.downloads.json,
+        html: body.export.downloads.html,
+        expiresAt: body.export.expiresAt ?? "",
+      });
+      setMessage("Founder Data Export ready. Both downloads expire after 24 hours.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Founder Data Export could not be created.",
+      );
     } finally {
       setBusy(null);
     }
@@ -240,6 +277,50 @@ export function FounderPrivacyCenter({
             Detection is bounded by the scopes and evidence Bruno can actually observe; absence from
             this list is not a promise that a provider has no copy.
           </p>
+        </div>
+      </section>
+
+      <section className={styles.section} aria-labelledby="export-title">
+        <div className={styles.sectionHeading}>
+          <p className={styles.kicker}>Founder Data Export</p>
+          <h2 id="export-title">Take your retained Bruno records with you</h2>
+        </div>
+        <div className={styles.dataControls}>
+          <div>
+            <h3>Portable and bounded</h3>
+            <p>{privacy.exportPolicy.description}</p>
+            <ul>
+              {privacy.exportPolicy.exclusions.map((exclusion) => (
+                <li key={exclusion}>{exclusion}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h3>Request a fresh snapshot</h3>
+            <p>
+              Available as {privacy.exportPolicy.formats.join(" and ").toUpperCase()}. Creating an
+              export does not disconnect providers or delete local data.
+            </p>
+            <button
+              className={styles.secondary}
+              disabled={busy !== null}
+              onClick={() => void createExport()}
+              type="button"
+            >
+              {busy === "export" ? "Preparing…" : "Create Founder Data Export"}
+            </button>
+            {exportLinks ? (
+              <div className={styles.exportLinks}>
+                <a href={exportLinks.html} download>
+                  Download human-readable HTML
+                </a>
+                <a href={exportLinks.json} download>
+                  Download portable JSON
+                </a>
+                <small>Expires {formatDate(exportLinks.expiresAt)}</small>
+              </div>
+            ) : null}
+          </div>
         </div>
       </section>
     </div>

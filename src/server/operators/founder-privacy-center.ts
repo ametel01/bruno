@@ -60,6 +60,12 @@ export type FounderPrivacyCenterDto = {
     retention: string;
     deletableInBruno: boolean;
   }>;
+  exportPolicy: {
+    description: string;
+    expiresAfterHours: number;
+    formats: Array<"json" | "html">;
+    exclusions: string[];
+  };
   restrictedCategories: string[];
   deletionBoundary: string;
 };
@@ -285,6 +291,16 @@ export async function getFounderPrivacyCenterForUser(
         },
         connections,
         retainedData: [...RETAINED_DATA],
+        exportPolicy: {
+          description:
+            "A Founder-only snapshot of retained Bruno records, decisions, and receipts. Downloads require recent authentication and expire after 24 hours.",
+          expiresAfterHours: 24,
+          formats: ["json", "html"],
+          exclusions: [
+            "Credentials, provider source archives, and raw technical logs",
+            "Provider-held copies or data outside selected Connection Resources",
+          ],
+        },
         restrictedCategories: [...RESTRICTED_CATEGORIES],
         deletionBoundary:
           "Delete retained data removes Bruno-local conversation content and relationship evidence. It does not disconnect accounts, revoke provider grants, remove consent or safety receipts, or delete provider-held copies.",
