@@ -8,9 +8,11 @@ import {
   operatorProposedActions,
   users,
 } from "@/src/server/db/schema";
+import { setFounderExternalActionPauseForUser } from "@/src/server/operators/founder-ai-work";
 import {
-  createFounderProposedActionForUser,
   changeFounderAuthorityPolicyForUser,
+  claimFounderActionAuthorizationForUser,
+  createFounderProposedActionForUser,
   decideFounderProposedActionForUser,
   getFounderProposedActionForUser,
   getFounderProposedActionsForUser,
@@ -94,6 +96,78 @@ describe("Founder Proposed Actions application seam", () => {
     expect(await connection.db.select().from(operatorActionDecisions)).toHaveLength(1);
     expect(await connection.db.select().from(operatorActionAuthorizations)).toHaveLength(1);
     expect(await connection.db.select().from(operatorProposedActions)).toHaveLength(1);
+  });
+
+  it("blocks new external effect claims while preserving Founder approval work", async () => {
+    const action = await createFounderProposedActionForUser(
+      OWNER_ID,
+      draft({ actionFamily: "external_communication" }),
+      { createConnection: () => connection, now: () => NOW },
+    );
+    await setFounderExternalActionPauseForUser(OWNER_ID, true, {
+      createConnection: () => connection,
+      now: () => NOW,
+    });
+
+    const approved = await decideFounderProposedActionForUser(
+      OWNER_ID,
+      action.id,
+      "approve",
+      1,
+      null,
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+      },
+    );
+    expect(approved).toMatchObject({
+      action: { state: "authorized" },
+      decision: { kind: "approve" },
+    });
+
+    await expect(
+      claimFounderActionAuthorizationForUser(OWNER_ID, action.id, 1, {
+        createConnection: () => connection,
+        now: () => NOW,
+      }),
+    ).rejects.toMatchObject({ code: "external_action_paused", status: 409 });
+    const [authorization] = await connection.db.select().from(operatorActionAuthorizations);
+    expect(authorization?.claimedAt).toBeNull();
+  });
+
+  it("claims an authorization once and treats replay as an already-started effect", async () => {
+    const action = await createFounderProposedActionForUser(
+      OWNER_ID,
+      draft({ actionFamily: "external_communication" }),
+      { createConnection: () => connection, now: () => NOW },
+    );
+    await expect(
+      decideFounderProposedActionForUser(OWNER_ID, action.id, "approve", 1, null, {
+        createConnection: () => connection,
+        now: () => NOW,
+      }),
+    ).resolves.toMatchObject({ action: { state: "authorized" } });
+
+    const first = await claimFounderActionAuthorizationForUser(OWNER_ID, action.id, 1, {
+      createConnection: () => connection,
+      now: () => NOW,
+    });
+    const duplicate = await claimFounderActionAuthorizationForUser(OWNER_ID, action.id, 1, {
+      createConnection: () => connection,
+      now: () => new Date(NOW.getTime() + 1_000),
+    });
+
+    expect(first).toMatchObject({
+      action: { state: "executing" },
+      authorization: { claimedAt: NOW.toISOString() },
+      duplicate: false,
+    });
+    expect(duplicate).toMatchObject({
+      authorization: { id: first.authorization.id, claimedAt: first.authorization.claimedAt },
+      duplicate: true,
+    });
+    expect(await connection.db.select().from(operatorActionDecisions)).toHaveLength(1);
+    expect(await connection.db.select().from(operatorActionAuthorizations)).toHaveLength(1);
   });
 
   it("allows only one concurrent decision and rejects an incorrect duplicate version", async () => {

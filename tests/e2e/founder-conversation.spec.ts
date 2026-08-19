@@ -69,10 +69,12 @@ test("founder can converse with Bruno and see the same history after reload and 
           secondPage.getByText("A revised prepared note.", { exact: true }).first(),
         ).toBeVisible();
       } finally {
-        await secondContext.close();
+        await closeContextAfterNetworkIdle(secondContext);
       }
+      await page.waitForLoadState("networkidle");
     });
   } finally {
+    await page.close();
     await deleteFixture(fixture);
   }
 });
@@ -420,4 +422,11 @@ async function withDatabase<T>(run: (sql: postgres.Sql) => Promise<T>): Promise<
   } finally {
     await sql.end({ timeout: 5 });
   }
+}
+
+async function closeContextAfterNetworkIdle(context: BrowserContext): Promise<void> {
+  await Promise.all(
+    context.pages().map((page) => page.waitForLoadState("networkidle").catch(() => undefined)),
+  );
+  await context.close();
 }

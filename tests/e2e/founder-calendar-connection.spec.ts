@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, test } from "@playwright/test";
+import { type BrowserContext, expect, test } from "@playwright/test";
 import postgres from "postgres";
 
 const DEVELOPMENT_USER_E2E_LOCK_KEY = 125_341;
@@ -85,7 +85,7 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
         await expect(secondPage.getByText("Bruno is using 1 selected calendar.")).toBeVisible();
         await expect(secondPage.getByText("Founder Activation recorded.")).toBeVisible();
       } finally {
-        await secondContext.close();
+        await closeContextAfterNetworkIdle(secondContext);
       }
 
       const dismissContext = await browser.newContext();
@@ -111,10 +111,12 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
           dismissPage.getByRole("heading", { name: "Bring Mail evidence into your workspace?" }),
         ).not.toBeVisible();
       } finally {
-        await dismissContext.close();
+        await closeContextAfterNetworkIdle(dismissContext);
       }
+      await page.waitForLoadState("networkidle");
     });
   } finally {
+    await page.close();
     await deleteFixture(fixture);
   }
 });
@@ -148,7 +150,7 @@ test("founder resumes a persisted Core Operation on desktop and mobile", async (
             page.getByText("Founder Activation recorded. Conversation is your current workspace."),
           ).toBeVisible();
         } finally {
-          await context.close();
+          await closeContextAfterNetworkIdle(context);
         }
       }
     });
@@ -182,7 +184,7 @@ test("founder sees denied, partial, and stale onboarding facts on desktop and mo
             if (mode === "stale")
               await expect(page.getByText(/Mail: Needs a fresh check/)).toBeVisible();
           } finally {
-            await context.close();
+            await closeContextAfterNetworkIdle(context);
           }
         }
       }
@@ -693,4 +695,11 @@ async function withDatabase<T>(run: (sql: postgres.Sql) => Promise<T>): Promise<
   } finally {
     await sql.end({ timeout: 5 });
   }
+}
+
+async function closeContextAfterNetworkIdle(context: BrowserContext): Promise<void> {
+  await Promise.all(
+    context.pages().map((page) => page.waitForLoadState("networkidle").catch(() => undefined)),
+  );
+  await context.close();
 }

@@ -3,8 +3,8 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type * as schema from "@/src/server/db/schema";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import {
   operatorActionAuthorizations,
   operatorActionDecisions,
@@ -144,6 +144,12 @@ export type FounderProposedActionDto = {
   authorization: { id: string; claimedAt: string | null } | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type FounderActionExecutionClaimDto = {
+  action: FounderProposedActionDto;
+  authorization: { id: string; claimedAt: string };
+  duplicate: boolean;
 };
 
 export type FounderProposedActionDependencies = {
@@ -522,15 +528,6 @@ export async function decideFounderProposedActionForUser(
           duplicate: true,
         };
       }
-      if (
-        kind === "approve" &&
-        (action.actionFamily === "external_communication" ||
-          action.actionFamily === "meeting_management" ||
-          action.actionFamily === "commercial_commitment" ||
-          action.actionFamily === "data_control")
-      ) {
-        await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id);
-      }
       if (action.state !== "awaiting_approval" && action.state !== "proposed") {
         throw new FounderProposedActionError(
           "decision_conflict",
@@ -661,6 +658,135 @@ export async function decideFounderProposedActionForUser(
       return {
         action: await projectProposedAction(tx, updated),
         decision: toDecisionDto(decision),
+        duplicate: false,
+      };
+    }),
+  );
+}
+
+export async function claimFounderActionAuthorizationForUser(
+  userId: string,
+  actionId: string,
+  expectedVersion: number,
+  dependencies: FounderProposedActionDependencies = {},
+): Promise<FounderActionExecutionClaimDto> {
+  if (!isUuid(actionId) || !Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    throw new FounderProposedActionError(
+      "invalid_action",
+      "A valid Proposed Action and version are required.",
+    );
+  }
+  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  return withConnection(dependencies, (connection) =>
+    connection.db.transaction(async (tx) => {
+      const now = dependencies.now?.() ?? new Date();
+      await lockOperator(tx, operator.id);
+      const [action] = await tx
+        .select()
+        .from(operatorProposedActions)
+        .where(
+          and(
+            eq(operatorProposedActions.id, actionId),
+            eq(operatorProposedActions.operatorId, operator.id),
+          ),
+        )
+        .limit(1)
+        .for("update");
+      if (!action) {
+        throw new FounderProposedActionError("action_not_found", "Proposed Action not found.", 404);
+      }
+      if (action.version !== expectedVersion) {
+        throw new FounderProposedActionError(
+          "stale_proposal",
+          "This Proposed Action version is no longer current.",
+          409,
+        );
+      }
+      const [authorization] = await tx
+        .select()
+        .from(operatorActionAuthorizations)
+        .where(eq(operatorActionAuthorizations.proposedActionId, action.id))
+        .limit(1)
+        .for("update");
+      if (authorization?.claimedAt) {
+        return {
+          action: await projectProposedAction(tx, action),
+          authorization: { id: authorization.id, claimedAt: authorization.claimedAt.toISOString() },
+          duplicate: true,
+        };
+      }
+      if (!authorization || action.state !== "authorized") {
+        throw new FounderProposedActionError(
+          "decision_conflict",
+          "This Proposed Action is not authorized for execution.",
+          409,
+        );
+      }
+      if (action.validUntil <= now) {
+        await tx
+          .update(operatorProposedActions)
+          .set({ state: "expired", updatedAt: now })
+          .where(eq(operatorProposedActions.id, action.id));
+        await tx
+          .delete(operatorActionAuthorizations)
+          .where(eq(operatorActionAuthorizations.proposedActionId, action.id));
+        throw new FounderProposedActionError(
+          "proposal_expired",
+          "This Proposed Action expired and needs a fresh proposal.",
+          409,
+        );
+      }
+
+      const policy = await ensureAuthorityPolicy(tx, operator.id, now);
+      const guardrails = await ensureProductGuardrails(tx, operator.id, now);
+      const staleBindingReason = await validateStoredActionBindings(tx, operator.id, action);
+      const evaluation = evaluateStoredState(action, policy, guardrails);
+      const blockedReason =
+        staleBindingReason ??
+        (evaluation.blocked
+          ? (evaluation.reason ?? "Product Guardrails block this Proposed Action.")
+          : null);
+      if (blockedReason) {
+        await tx
+          .update(operatorProposedActions)
+          .set({ state: "blocked", updatedAt: now })
+          .where(eq(operatorProposedActions.id, action.id));
+        await tx
+          .delete(operatorActionAuthorizations)
+          .where(eq(operatorActionAuthorizations.proposedActionId, action.id));
+        throw new FounderProposedActionError("proposal_blocked", blockedReason, 409);
+      }
+      if (startsExternalEffect(action)) {
+        await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id);
+      }
+
+      const [claimed] = await tx
+        .update(operatorActionAuthorizations)
+        .set({ claimedAt: now })
+        .where(eq(operatorActionAuthorizations.id, authorization.id))
+        .returning();
+      if (!claimed) {
+        throw new FounderProposedActionError(
+          "action_unavailable",
+          "The Action Authorization could not be claimed.",
+          503,
+        );
+      }
+      const [updated] = await tx
+        .update(operatorProposedActions)
+        .set({ state: "executing", updatedAt: now })
+        .where(eq(operatorProposedActions.id, action.id))
+        .returning();
+      if (!updated) {
+        throw new FounderProposedActionError(
+          "action_unavailable",
+          "The Proposed Action could not be claimed.",
+          503,
+        );
+      }
+      return {
+        action: await projectProposedAction(tx, updated),
+        authorization: { id: claimed.id, claimedAt: now.toISOString() },
         duplicate: false,
       };
     }),
@@ -1057,8 +1183,7 @@ async function validateStoredActionBindings(
           .limit(1);
     const connection = calendar ?? mail;
     if (
-      !connection ||
-      connection.status !== "ready" ||
+      connection?.status !== "ready" ||
       connection.authorizationState !== "authorized" ||
       connection.revokedAt ||
       action.connectionAccessVersion !== connection.generation
@@ -1105,7 +1230,7 @@ async function validateStoredActionBindings(
           )
           .limit(1);
     const resource = calendar ?? mail;
-    if (!resource || !resource.selected || resource.status !== "available") {
+    if (!resource?.selected || resource.status !== "available") {
       return "The bound Connection Resource is no longer selected and available.";
     }
   }
@@ -1146,6 +1271,15 @@ function evaluateStoredState(
     };
   }
   return { blocked: false };
+}
+
+function startsExternalEffect(action: typeof operatorProposedActions.$inferSelect): boolean {
+  return (
+    action.actionFamily === "external_communication" ||
+    action.actionFamily === "meeting_management" ||
+    action.actionFamily === "commercial_commitment" ||
+    action.actionFamily === "data_control"
+  );
 }
 
 function effectiveAuthorityMode(

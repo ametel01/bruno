@@ -192,7 +192,7 @@ export async function prepareFounderMorningBrief(
     deliveryLocalTime,
   );
   const deliveryDue =
-    !preference || !preference.nextDeliveryAt || input.now >= preference.nextDeliveryAt;
+    !preference?.nextDeliveryAt || input.now >= preference.nextDeliveryAt;
   const [latest] = await tx
     .select()
     .from(operatorMorningBriefs)
@@ -240,13 +240,16 @@ export async function prepareFounderMorningBrief(
         .set({ nextDeliveryAt, updatedAt: input.now })
         .where(eq(operatorMorningBriefPreferences.id, preference.id));
     } else {
-      await tx.insert(operatorMorningBriefPreferences).values({
-        operatorId: input.operatorId,
-        deliveryLocalTime,
-        nextDeliveryAt,
-        createdAt: input.now,
-        updatedAt: input.now,
-      });
+      await tx
+        .insert(operatorMorningBriefPreferences)
+        .values({
+          operatorId: input.operatorId,
+          deliveryLocalTime,
+          nextDeliveryAt,
+          createdAt: input.now,
+          updatedAt: input.now,
+        })
+        .onConflictDoNothing({ target: operatorMorningBriefPreferences.operatorId });
     }
   }
   if (items.length > 0) {
@@ -352,13 +355,16 @@ export async function getFounderMorningBriefPreferencesForUser(
           .set({ nextDeliveryAt, updatedAt: now })
           .where(eq(operatorMorningBriefPreferences.id, preference.id));
       } else if (!preference) {
-        await tx.insert(operatorMorningBriefPreferences).values({
-          operatorId: operator.id,
-          deliveryLocalTime,
-          nextDeliveryAt,
-          createdAt: now,
-          updatedAt: now,
-        });
+        await tx
+          .insert(operatorMorningBriefPreferences)
+          .values({
+            operatorId: operator.id,
+            deliveryLocalTime,
+            nextDeliveryAt,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .onConflictDoNothing({ target: operatorMorningBriefPreferences.operatorId });
       }
       return {
         operatorId: operator.id,
