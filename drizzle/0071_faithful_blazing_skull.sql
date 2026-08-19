@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "operator_action_receipts_message_identity_idx" ON "operator_action_receipts" USING btree ("message_identity");

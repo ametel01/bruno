@@ -484,6 +484,27 @@
       "when": 1787098724849,
       "tag": "0068_high_carnage",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1787106579151,
+      "tag": "0069_sudden_pride",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1787106989562,
+      "tag": "0070_bouncy_nightmare",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1787107086869,
+      "tag": "0071_faithful_blazing_skull",
+      "breakpoints": true
     }
   ]
 }

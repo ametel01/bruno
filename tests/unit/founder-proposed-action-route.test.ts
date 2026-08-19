@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getActions: vi.fn(),
   createAction: vi.fn(),
   decideAction: vi.fn(),
+  executeAction: vi.fn(),
 }));
 
 vi.mock("@/src/server/users/configured-application-user", () => ({
@@ -36,6 +37,11 @@ describe("Founder Proposed Action routes", () => {
       action: { ...ACTION, state: "authorized" },
       decision: { kind: "approve" },
       duplicate: false,
+    });
+    mocks.executeAction.mockResolvedValue({
+      status: "succeeded",
+      duplicate: false,
+      receipt: { id: "receipt-351" },
     });
   });
 
@@ -99,5 +105,34 @@ describe("Founder Proposed Action routes", () => {
     );
     expect(response.status).toBe(400);
     expect(mocks.createAction).not.toHaveBeenCalled();
+  });
+
+  it("executes only the exact approved version through the dedicated route", async () => {
+    const { POST } = await import("@/app/api/operator/proposed-actions/[actionId]/execute/route");
+    const response = await POST(
+      new Request(`http://localhost/api/operator/proposed-actions/${ACTION_ID}/execute`, {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion: 1 }),
+      }),
+      { params: Promise.resolve({ actionId: ACTION_ID }) },
+      { executeAction: mocks.executeAction },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.executeAction).toHaveBeenCalledWith(USER_ID, ACTION_ID, 1);
+  });
+
+  it("rejects a non-integer execution version before reaching the executor", async () => {
+    const { POST } = await import("@/app/api/operator/proposed-actions/[actionId]/execute/route");
+    const response = await POST(
+      new Request(`http://localhost/api/operator/proposed-actions/${ACTION_ID}/execute`, {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion: 1.5 }),
+      }),
+      { params: Promise.resolve({ actionId: ACTION_ID }) },
+      { executeAction: mocks.executeAction },
+    );
+    expect(response.status).toBe(400);
+    expect(mocks.executeAction).not.toHaveBeenCalled();
   });
 });

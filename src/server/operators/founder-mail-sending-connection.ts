@@ -15,11 +15,11 @@ import {
 } from "@/src/server/db/schema";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
+  decryptOperatorSecret,
   digestOperatorSecret,
   encryptOperatorSecret,
-  parseOperatorSecretKeyring,
-  decryptOperatorSecret,
   type OperatorSecretKeyring,
+  parseOperatorSecretKeyring,
 } from "@/src/server/secrets/operator-secret-keyring";
 
 type FounderMailSendingTransaction = Parameters<
@@ -97,6 +97,13 @@ export type FounderGoogleMailSendingAdapter = {
     accessToken: string | null;
     refreshToken: string | null;
   }): Promise<{ providerRevoked: boolean }>;
+  sendMessage?: (input: {
+    accessToken: string;
+    rawMessage: string;
+  }) => Promise<
+    | { ok: true; providerMessageId: string; providerThreadId: string | null }
+    | { ok: false; kind: "rejected"; code: string; message: string }
+  >;
 };
 
 export type FounderMailSendingConnectionDependencies = {
@@ -696,7 +703,50 @@ export function createGoogleMailSendingAdapter(
       );
       return { providerRevoked: response.ok };
     },
+    async sendMessage({ accessToken, rawMessage }) {
+      const response = await request(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ raw: encodeBase64Url(rawMessage) }),
+        },
+      );
+      const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!response.ok) {
+        if (response.status >= 500 || response.status === 429)
+          throw new Error("Google did not prove whether the Gmail message was accepted.");
+        return {
+          ok: false,
+          kind: "rejected",
+          code:
+            typeof body.error === "object"
+              ? "gmail_send_rejected"
+              : `gmail_http_${response.status}`,
+          message: "Google rejected the Gmail message before it was accepted.",
+        };
+      }
+      const providerMessageId = typeof body.id === "string" ? body.id : null;
+      if (!providerMessageId)
+        throw new Error("Google accepted the request without returning a message identity.");
+      return {
+        ok: true,
+        providerMessageId,
+        providerThreadId: typeof body.threadId === "string" ? body.threadId : null,
+      };
+    },
   };
+}
+
+function encodeBase64Url(value: string): string {
+  return Buffer.from(value, "utf8")
+    .toString("base64")
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
 }
 
 async function fail(
@@ -820,6 +870,13 @@ async function lockOperator(tx: FounderMailSendingTransaction, operatorId: strin
 }
 function resolveKeyring(dependencies: FounderMailSendingConnectionDependencies) {
   return dependencies.keyring ?? parseOperatorSecretKeyring(dependencies.env);
+}
+
+export function decryptFounderGoogleMailSendingAccessToken(
+  row: typeof operatorMailSendingConnections.$inferSelect,
+  dependencies: FounderMailSendingConnectionDependencies,
+): string {
+  return decryptStoredSecret(row, "access", resolveKeyring(dependencies));
 }
 
 function decryptStoredSecret(

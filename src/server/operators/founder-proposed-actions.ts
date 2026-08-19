@@ -21,7 +21,7 @@ import {
 import { assertFounderExternalActionsNotPausedInTransaction } from "@/src/server/operators/founder-ai-work";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 
-type ProposedActionTransaction = Parameters<
+export type ProposedActionTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
 >[0];
 
@@ -756,7 +756,7 @@ export async function claimFounderActionAuthorizationForUser(
           .where(eq(operatorActionAuthorizations.proposedActionId, action.id));
         throw new FounderProposedActionError("proposal_blocked", blockedReason, 409);
       }
-      if (startsExternalEffect(action)) {
+      if (startsFounderExternalEffect(action)) {
         await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id);
       }
 
@@ -1273,13 +1273,41 @@ function evaluateStoredState(
   return { blocked: false };
 }
 
-function startsExternalEffect(action: typeof operatorProposedActions.$inferSelect): boolean {
+export function startsFounderExternalEffect(
+  action: typeof operatorProposedActions.$inferSelect,
+): boolean {
   return (
     action.actionFamily === "external_communication" ||
     action.actionFamily === "meeting_management" ||
     action.actionFamily === "commercial_commitment" ||
     action.actionFamily === "data_control"
   );
+}
+
+export async function recheckFounderProposedActionForExecution(
+  tx: ProposedActionTransaction,
+  operatorId: string,
+  action: typeof operatorProposedActions.$inferSelect,
+  now: Date,
+): Promise<{ reason: string | null }> {
+  if (action.state !== "authorized" && action.state !== "executing")
+    return { reason: "This Proposed Action is not authorized for execution." };
+  if (action.validUntil <= now)
+    return { reason: "This Proposed Action expired and needs a fresh approval." };
+  if (action.executionWindowStart && now < action.executionWindowStart)
+    return { reason: "This Proposed Action is not within its execution window yet." };
+  if (action.executionWindowEnd && now >= action.executionWindowEnd)
+    return { reason: "This Proposed Action's execution window has closed." };
+  const policy = await ensureAuthorityPolicy(tx, operatorId, now);
+  const guardrails = await ensureProductGuardrails(tx, operatorId, now);
+  if (action.authorityPolicyVersion !== policy?.version)
+    return { reason: "The Authority Policy changed; this action needs a fresh approval." };
+  const staleBindingReason = await validateStoredActionBindings(tx, operatorId, action);
+  if (staleBindingReason) return { reason: staleBindingReason };
+  const evaluation = evaluateStoredState(action, policy, guardrails);
+  return evaluation.blocked
+    ? { reason: evaluation.reason ?? "Product Guardrails block this action." }
+    : { reason: null };
 }
 
 function effectiveAuthorityMode(

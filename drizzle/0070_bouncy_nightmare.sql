@@ -1,0 +1,2 @@
+ALTER TABLE "operator_action_receipts" ADD COLUMN "processing_consent_version" integer;--> statement-breakpoint
+ALTER TABLE "operator_action_receipts" ADD CONSTRAINT "operator_action_receipts_processing_consent_version_check" CHECK ("operator_action_receipts"."processing_consent_version" IS NULL OR "operator_action_receipts"."processing_consent_version" >= 1);

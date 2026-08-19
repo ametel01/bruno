@@ -258,6 +258,17 @@ export const operatorActionDecisionKindEnum = pgEnum("operator_action_decision_k
   "decline",
 ]);
 
+export const operatorActionExecutionAttemptPhaseEnum = pgEnum(
+  "operator_action_execution_attempt_phase",
+  ["started", "acknowledged", "rejected", "ambiguous"],
+);
+
+export const operatorActionReceiptOutcomeEnum = pgEnum("operator_action_receipt_outcome", [
+  "succeeded",
+  "failed",
+  "outcome_uncertain",
+]);
+
 export const operatorMorningBriefStatusEnum = pgEnum("operator_morning_brief_status", [
   "prepared",
   "opened",
@@ -2250,6 +2261,143 @@ export const operatorActionAuthorizations = pgTable(
   (table) => [
     uniqueIndex("operator_action_authorizations_proposed_action_idx").on(table.proposedActionId),
     index("operator_action_authorizations_operator_idx").on(table.operatorId, table.createdAt),
+  ],
+);
+
+export const operatorActionExecutionAttempts = pgTable(
+  "operator_action_execution_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    proposedActionId: uuid("proposed_action_id")
+      .notNull()
+      .references(() => operatorProposedActions.id, { onDelete: "cascade" }),
+    authorizationId: uuid("authorization_id")
+      .notNull()
+      .references(() => operatorActionAuthorizations.id, { onDelete: "cascade" }),
+    attemptNumber: integer("attempt_number").notNull(),
+    phase: operatorActionExecutionAttemptPhaseEnum("phase").notNull(),
+    provider: text("provider").notNull().default("google_gmail_sending"),
+    messageIdentity: text("message_identity").notNull(),
+    providerMessageId: text("provider_message_id"),
+    providerThreadId: text("provider_thread_id"),
+    requestDigest: text("request_digest"),
+    responseDigest: text("response_digest"),
+    errorCode: text("error_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("operator_action_execution_attempts_attempt_check", sql`${table.attemptNumber} >= 1`),
+    check(
+      "operator_action_execution_attempts_provider_check",
+      sql`${table.provider} = 'google_gmail_sending'`,
+    ),
+    check(
+      "operator_action_execution_attempts_identity_check",
+      sql`length(trim(${table.messageIdentity})) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "operator_action_execution_attempts_request_digest_check",
+      sql`${table.requestDigest} IS NULL OR ${table.requestDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "operator_action_execution_attempts_response_digest_check",
+      sql`${table.responseDigest} IS NULL OR ${table.responseDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    uniqueIndex("operator_action_execution_attempts_phase_idx").on(
+      table.proposedActionId,
+      table.attemptNumber,
+      table.phase,
+    ),
+    index("operator_action_execution_attempts_action_idx").on(
+      table.proposedActionId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const operatorActionReceipts = pgTable(
+  "operator_action_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    proposedActionId: uuid("proposed_action_id")
+      .notNull()
+      .references(() => operatorProposedActions.id, { onDelete: "cascade" }),
+    proposedActionVersion: integer("proposed_action_version").notNull(),
+    authorityPolicyId: uuid("authority_policy_id").references(() => operatorAuthorityPolicies.id),
+    authorityPolicyVersion: integer("authority_policy_version").notNull(),
+    decisionId: uuid("decision_id").references(() => operatorActionDecisions.id),
+    authorizationId: uuid("authorization_id")
+      .notNull()
+      .references(() => operatorActionAuthorizations.id, { onDelete: "restrict" }),
+    provider: text("provider").notNull().default("google_gmail_sending"),
+    providerConnectionId: uuid("provider_connection_id")
+      .notNull()
+      .references(() => operatorMailSendingConnections.id, { onDelete: "restrict" }),
+    providerConnectionGeneration: integer("provider_connection_generation").notNull(),
+    connectionAccessVersion: integer("connection_access_version"),
+    connectionResourceId: uuid("connection_resource_id"),
+    processingConsentId: uuid("processing_consent_id"),
+    processingConsentVersion: integer("processing_consent_version"),
+    messageIdentity: text("message_identity").notNull(),
+    contentDigest: text("content_digest").notNull(),
+    destinationDigest: text("destination_digest").notNull(),
+    providerMessageId: text("provider_message_id"),
+    providerThreadId: text("provider_thread_id"),
+    attemptCount: integer("attempt_count").notNull(),
+    outcome: operatorActionReceiptOutcomeEnum("outcome").notNull(),
+    outcomeReason: text("outcome_reason"),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    evidenceDigest: text("evidence_digest").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("operator_action_receipts_version_check", sql`${table.proposedActionVersion} >= 1`),
+    check(
+      "operator_action_receipts_policy_version_check",
+      sql`${table.authorityPolicyVersion} >= 1`,
+    ),
+    check(
+      "operator_action_receipts_generation_check",
+      sql`${table.providerConnectionGeneration} >= 1`,
+    ),
+    check(
+      "operator_action_receipts_processing_consent_version_check",
+      sql`${table.processingConsentVersion} IS NULL OR ${table.processingConsentVersion} >= 1`,
+    ),
+    check("operator_action_receipts_attempt_count_check", sql`${table.attemptCount} >= 1`),
+    check(
+      "operator_action_receipts_provider_check",
+      sql`${table.provider} = 'google_gmail_sending'`,
+    ),
+    check(
+      "operator_action_receipts_identity_check",
+      sql`length(trim(${table.messageIdentity})) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "operator_action_receipts_content_digest_check",
+      sql`${table.contentDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "operator_action_receipts_destination_digest_check",
+      sql`${table.destinationDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "operator_action_receipts_evidence_digest_check",
+      sql`${table.evidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "operator_action_receipts_ack_pair_check",
+      sql`(${table.outcome} = 'succeeded' AND ${table.providerMessageId} IS NOT NULL AND ${table.acknowledgedAt} IS NOT NULL) OR (${table.outcome} <> 'succeeded' AND ${table.acknowledgedAt} IS NULL)`,
+    ),
+    uniqueIndex("operator_action_receipts_action_idx").on(table.proposedActionId),
+    uniqueIndex("operator_action_receipts_message_identity_idx").on(table.messageIdentity),
+    index("operator_action_receipts_operator_created_idx").on(table.operatorId, table.createdAt),
   ],
 );
 
