@@ -18,6 +18,7 @@ import {
   operatorRelationshipEvidence,
   operatorRelationshipCandidates,
   operatorRelationshipRecords,
+  operatorFounderDataExports,
   operators,
 } from "@/src/server/db/schema";
 import { routeFounderAiProvider } from "@/src/server/operators/founder-ai-routing";
@@ -411,6 +412,17 @@ async function finishDeletion(
     | "relationshipCorrections"
   >,
 ): Promise<FounderPrivacyDeletionResult> {
+  // A previously issued export is a retained copy of the same Founder data.
+  // Expire it in the same transaction as deletion so its bearer token cannot
+  // continue to disclose data after the Owner asks Bruno to delete it.
+  await tx
+    .update(operatorFounderDataExports)
+    .set({
+      expiresAt: new Date(0),
+      payload: { schemaVersion: 1, expired: true },
+    })
+    .where(eq(operatorFounderDataExports.operatorId, operatorId));
+
   const evidence = await tx
     .delete(operatorRelationshipEvidence)
     .where(eq(operatorRelationshipEvidence.operatorId, operatorId))

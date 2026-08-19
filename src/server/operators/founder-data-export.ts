@@ -719,7 +719,7 @@ async function buildFounderDataExportPayload(
         evidenceState: item.evidenceState,
         quiet: item.quiet,
         attentionCount: item.attentionCount,
-        content: redactSecretText(item.content),
+        content: safeText(item.content) ?? "",
         evidenceDigest: item.evidenceDigest,
         evidenceWatermark: item.evidenceWatermark,
         windowStartedAt: iso(item.windowStartedAt),
@@ -772,7 +772,7 @@ async function buildFounderDataExportPayload(
         supersedesActionId: item.supersedesActionId,
         actionFamily: item.actionFamily,
         actionSubtype: item.actionSubtype,
-        businessOutcome: redactSecretText(item.businessOutcome),
+        businessOutcome: safeText(item.businessOutcome) ?? "",
         destination: sanitizeExportValue(item.destination),
         materialContent: sanitizeExportValue(item.materialContent),
         sideEffects: safeTextArray(item.sideEffects),
@@ -1034,7 +1034,7 @@ function iso(value: unknown): string | null {
 }
 
 function safeText(value: unknown): string | null {
-  return typeof value === "string" ? redactSecretText(value) : null;
+  return typeof value === "string" ? redactExportText(value) : null;
 }
 
 function safeTextArray(value: unknown): string[] {
@@ -1054,7 +1054,7 @@ function sanitizeExportValue(value: unknown): unknown {
     typeof value === "number" ||
     typeof value === "boolean"
   ) {
-    return typeof value === "string" ? redactSecretText(value) : value;
+    return typeof value === "string" ? redactExportText(value) : value;
   }
   if (Array.isArray(value))
     return value.map(sanitizeExportValue).filter((item) => item !== undefined);
@@ -1070,9 +1070,22 @@ function sanitizeExportValue(value: unknown): unknown {
 }
 
 function isExcludedExportKey(key: string): boolean {
-  return /(token|secret|password|credential|ciphertext|auth.?tag|private.?key|authorization.?code|api.?key|cookie|raw.?log|provider.?response|source.?archive)/i.test(
+  return /(token|secret|password|credential|ciphertext|auth.?tag|private.?key|authorization.?code|api.?key|cookie|raw.?log|provider.?response|source.?archive|private.?material|request.?body|response.?body)/i.test(
     key,
   );
+}
+
+function redactExportText(value: string): string {
+  return redactSecretText(value)
+    .replace(
+      /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
+      "[redacted-private-key]",
+    )
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted-jwt]")
+    .replace(
+      /\b(password|passphrase|client[_-]?secret|secret|token|api[_-]?key)\s*[:=]\s*["']?[^\s,"']+/gi,
+      "$1=[redacted-export-secret]",
+    );
 }
 
 function escapeHtml(value: string): string {
