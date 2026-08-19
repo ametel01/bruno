@@ -1,6 +1,7 @@
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
 import { FounderTroubleshooting } from "@/app/operator/_components/founder-troubleshooting";
 import { getFounderTroubleshootingForUser } from "@/src/server/operators/founder-troubleshooting";
+import { getFounderSupportForUser } from "@/src/server/operators/founder-support";
 import { isFounderRecoveryCapability } from "@/src/server/operators/founder-recovery";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
@@ -29,9 +30,10 @@ export default async function FounderTroubleshootingPage({
     applicationUser.userId,
     capability,
   );
+  const support = await getFounderSupportForUser(applicationUser.userId);
   return (
     <FounderOperatorShell activePage="troubleshooting">
-      <FounderTroubleshooting initialTroubleshooting={troubleshooting} />
+      <FounderTroubleshooting initialTroubleshooting={troubleshooting} initialSupport={support} />
     </FounderOperatorShell>
   );
 }

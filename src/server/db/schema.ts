@@ -355,6 +355,50 @@ export const operatorTroubleshootingEvidenceKindEnum = pgEnum(
   ["recovery_summary", "capability_impact", "safe_action"],
 );
 
+export const operatorSupportAccessGrantStatusEnum = pgEnum("operator_support_access_grant_status", [
+  "active",
+  "revoked",
+  "expired",
+]);
+
+export const operatorSupportAccessScopeEnum = pgEnum("operator_support_access_scope", [
+  "troubleshooting_evidence",
+  "capability_status",
+  "recovery_checkpoint",
+]);
+
+export const operatorSupportReceiptKindEnum = pgEnum("operator_support_receipt_kind", [
+  "grant_created",
+  "grant_revoked",
+  "tool_invoked",
+  "proposal_created",
+  "decision_recorded",
+  "repair_executed",
+]);
+
+export const operatorSupportRepairKindEnum = pgEnum("operator_support_repair_kind", [
+  "rerun_verification",
+  "restart_from_checkpoint",
+  "replace_runtime_from_verified_release",
+  "rotate_bruno_transport_credential",
+]);
+
+export const operatorSupportRepairStateEnum = pgEnum("operator_support_repair_state", [
+  "proposed",
+  "approved",
+  "declined",
+  "executing",
+  "succeeded",
+  "failed",
+  "outcome_uncertain",
+  "closed_without_recovery",
+]);
+
+export const operatorSupportRepairDecisionKindEnum = pgEnum(
+  "operator_support_repair_decision_kind",
+  ["approve", "decline"],
+);
+
 export const operatorActionPreviewStateEnum = pgEnum("operator_action_preview_state", ["draft"]);
 
 export const operatorRelationshipStateEnum = pgEnum("operator_relationship_state", [
@@ -1939,6 +1983,185 @@ export const operatorTroubleshootingEvidence = pgTable(
       table.kind,
     ),
     index("operator_troubleshooting_evidence_expiry_idx").on(table.incidentId, table.expiresAt),
+  ],
+);
+
+/**
+ * Founder-granted, read-only support access. A grant is deliberately separate
+ * from a Troubleshooting Incident: opening a case never creates one.
+ */
+export const operatorSupportAccessGrants = pgTable(
+  "operator_support_access_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    incidentId: uuid("incident_id")
+      .notNull()
+      .references(() => operatorTroubleshootingIncidents.id, { onDelete: "cascade" }),
+    supportActorName: text("support_actor_name").notNull(),
+    supportActorIdentity: text("support_actor_identity").notNull(),
+    supportActorMfaVerifiedAt: timestamp("support_actor_mfa_verified_at", {
+      withTimezone: true,
+    }).notNull(),
+    accessTokenHash: text("access_token_hash").notNull(),
+    accessTokenPrefix: text("access_token_prefix").notNull(),
+    scope: operatorSupportAccessScopeEnum("scope").notNull(),
+    status: operatorSupportAccessGrantStatusEnum("status").notNull().default("active"),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_support_access_grants_actor_name_check",
+      sql`length(trim(${table.supportActorName})) BETWEEN 1 AND 160`,
+    ),
+    check(
+      "operator_support_access_grants_actor_identity_check",
+      sql`length(trim(${table.supportActorIdentity})) BETWEEN 1 AND 240`,
+    ),
+    check(
+      "operator_support_access_grants_token_check",
+      sql`${table.accessTokenHash} ~ '^sha256:[a-f0-9]{64}$' AND length(trim(${table.accessTokenPrefix})) BETWEEN 8 AND 24`,
+    ),
+    check(
+      "operator_support_access_grants_ttl_check",
+      sql`${table.expiresAt} > ${table.grantedAt} AND ${table.expiresAt} <= ${table.grantedAt} + interval '60 minutes'`,
+    ),
+    check(
+      "operator_support_access_grants_revocation_pair_check",
+      sql`(${table.status} = 'revoked' AND ${table.revokedAt} IS NOT NULL) OR (${table.status} <> 'revoked' AND ${table.revokedAt} IS NULL)`,
+    ),
+    uniqueIndex("operator_support_access_grants_active_incident_idx")
+      .on(table.incidentId)
+      .where(sql`${table.status} = 'active'`),
+    index("operator_support_access_grants_operator_status_idx").on(
+      table.operatorId,
+      table.status,
+      table.expiresAt,
+    ),
+  ],
+);
+
+export const operatorSupportReceipts = pgTable(
+  "operator_support_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    grantId: uuid("grant_id").references(() => operatorSupportAccessGrants.id, {
+      onDelete: "set null",
+    }),
+    repairProposalId: uuid("repair_proposal_id"),
+    kind: operatorSupportReceiptKindEnum("kind").notNull(),
+    digest: text("digest").notNull(),
+    summary: jsonb("summary").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check("operator_support_receipts_digest_check", sql`${table.digest} ~ '^sha256:[a-f0-9]{64}$'`),
+    index("operator_support_receipts_operator_created_idx").on(table.operatorId, table.createdAt),
+  ],
+);
+
+export const operatorSupportToolInvocations = pgTable(
+  "operator_support_tool_invocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    grantId: uuid("grant_id")
+      .notNull()
+      .references(() => operatorSupportAccessGrants.id, { onDelete: "cascade" }),
+    tool: text("tool").notNull(),
+    argumentDigest: text("argument_digest").notNull(),
+    outcome: text("outcome").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check(
+      "operator_support_tool_invocations_digest_check",
+      sql`${table.argumentDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "operator_support_tool_invocations_tool_check",
+      sql`${table.tool} IN ('read_troubleshooting_evidence', 'read_capability_status', 'read_recovery_checkpoint')`,
+    ),
+    index("operator_support_tool_invocations_grant_created_idx").on(table.grantId, table.createdAt),
+  ],
+);
+
+export const operatorSupportRepairProposals = pgTable(
+  "operator_support_repair_proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    incidentId: uuid("incident_id")
+      .notNull()
+      .references(() => operatorTroubleshootingIncidents.id, { onDelete: "cascade" }),
+    grantId: uuid("grant_id")
+      .notNull()
+      .references(() => operatorSupportAccessGrants.id, { onDelete: "cascade" }),
+    supportActorName: text("support_actor_name").notNull(),
+    kind: operatorSupportRepairKindEnum("kind").notNull(),
+    target: jsonb("target").$type<Record<string, unknown>>().notNull(),
+    proposalDigest: text("proposal_digest").notNull(),
+    state: operatorSupportRepairStateEnum("state").notNull().default("proposed"),
+    decisionKind: operatorSupportRepairDecisionKindEnum("decision_kind"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    verification: jsonb("verification").$type<Record<string, unknown> | null>(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check(
+      "operator_support_repair_proposals_digest_check",
+      sql`${table.proposalDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "operator_support_repair_proposals_decision_pair_check",
+      sql`(${table.state} = 'proposed' AND ${table.decisionKind} IS NULL AND ${table.decidedAt} IS NULL) OR (${table.state} <> 'proposed' AND ${table.decisionKind} IS NOT NULL AND ${table.decidedAt} IS NOT NULL)`,
+    ),
+    uniqueIndex("operator_support_repair_proposals_grant_digest_idx").on(
+      table.grantId,
+      table.proposalDigest,
+    ),
+    index("operator_support_repair_proposals_operator_state_idx").on(
+      table.operatorId,
+      table.state,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const operatorSupportRepairDecisions = pgTable(
+  "operator_support_repair_decisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    proposalId: uuid("proposal_id")
+      .notNull()
+      .references(() => operatorSupportRepairProposals.id, { onDelete: "cascade" }),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    kind: operatorSupportRepairDecisionKindEnum("kind").notNull(),
+    proposalDigest: text("proposal_digest").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check(
+      "operator_support_repair_decisions_digest_check",
+      sql`${table.proposalDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    uniqueIndex("operator_support_repair_decisions_proposal_idx").on(table.proposalId),
   ],
 );
 

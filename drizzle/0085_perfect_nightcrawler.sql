@@ -1,0 +1,3 @@
+ALTER TABLE "operator_support_receipts" DROP CONSTRAINT "operator_support_receipts_grant_id_operator_support_access_grants_id_fk";
+--> statement-breakpoint
+ALTER TABLE "operator_support_receipts" ADD CONSTRAINT "operator_support_receipts_grant_id_operator_support_access_grants_id_fk" FOREIGN KEY ("grant_id") REFERENCES "public"."operator_support_access_grants"("id") ON DELETE set null ON UPDATE no action;

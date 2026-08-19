@@ -37,6 +37,7 @@ import {
   operatorRelationshipRecords,
   operatorRetentionRuns,
   operatorRetentionTombstones,
+  operatorSupportReceipts,
   operatorTroubleshootingIncidents,
   operatorProposedActions,
   operators,
@@ -73,6 +74,7 @@ export type FounderRetentionCounts = {
   authorityPolicies: number;
   connectionReceipts: number;
   supportIncidents: number;
+  supportReceipts: number;
   deletionReceipts: number;
   deletionRequests: number;
   tombstones: number;
@@ -135,6 +137,7 @@ const EMPTY_COUNTS: FounderRetentionCounts = {
   authorityPolicies: 0,
   connectionReceipts: 0,
   supportIncidents: 0,
+  supportReceipts: 0,
   deletionReceipts: 0,
   deletionRequests: 0,
   tombstones: 0,
@@ -1174,6 +1177,34 @@ async function expireDecisionMetadata(
       .delete(operatorTroubleshootingIncidents)
       .where(eq(operatorTroubleshootingIncidents.id, row.id));
     counts.supportIncidents += 1;
+  }
+
+  const supportReceipts = await tx
+    .select({
+      id: operatorSupportReceipts.id,
+      createdAt: operatorSupportReceipts.createdAt,
+    })
+    .from(operatorSupportReceipts)
+    .where(
+      and(
+        eq(operatorSupportReceipts.operatorId, operatorId),
+        lte(operatorSupportReceipts.createdAt, cutoff),
+      ),
+    );
+  for (const row of supportReceipts) {
+    await tombstone(
+      tx,
+      operatorId,
+      "support",
+      "operator_support_receipts",
+      row.id,
+      row.createdAt,
+      now,
+      counts,
+      makeId,
+    );
+    await tx.delete(operatorSupportReceipts).where(eq(operatorSupportReceipts.id, row.id));
+    counts.supportReceipts += 1;
   }
 
   const corrections = await tx

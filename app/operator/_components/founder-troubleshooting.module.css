@@ -113,10 +113,77 @@
   color: #b42318;
 }
 
+.supportRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.supportRow > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.supportRow span,
+.supportRow small {
+  font-size: 0.84rem;
+  opacity: 0.72;
+}
+
+.supportRow button {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid currentColor;
+  border-radius: 0.55rem;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.grantForm {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.85rem 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.grantForm label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.86rem;
+}
+
+.grantForm input,
+.grantForm select {
+  min-width: 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-radius: 0.5rem;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}
+
+.grantForm button {
+  width: fit-content;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid currentColor;
+  border-radius: 0.55rem;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
 @media (max-width: 40rem) {
   .heading,
   .sectionHeading,
-  .actions {
+  .actions,
+  .supportRow {
     flex-direction: column;
   }
 

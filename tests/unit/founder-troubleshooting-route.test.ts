@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   approveCase: vi.fn(),
   closeCase: vi.fn(),
   requireRecentAuth: vi.fn(),
+  proposeRepair: vi.fn(),
+  invokeTool: vi.fn(),
 }));
 
 vi.mock("@/src/server/users/configured-application-user", () => ({
@@ -53,6 +55,8 @@ describe("Founder Troubleshooting route", () => {
     mocks.approveCase.mockResolvedValue(INCIDENT);
     mocks.closeCase.mockResolvedValue({ ...INCIDENT, status: "closed" });
     mocks.requireRecentAuth.mockResolvedValue(true);
+    mocks.proposeRepair.mockResolvedValue({ id: "proposal-1" });
+    mocks.invokeTool.mockResolvedValue({ incidentId: INCIDENT.id });
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -113,5 +117,46 @@ describe("Founder Troubleshooting route", () => {
     );
     expect(closed.status).toBe(200);
     expect(mocks.closeCase).toHaveBeenCalledWith(USER_ID, INCIDENT.id);
+  });
+
+  it("keeps support proposal and tool mutations behind recent Founder authentication on the owner route", async () => {
+    const { POST } = await import("@/app/api/operator/troubleshooting/route");
+    mocks.requireRecentAuth.mockResolvedValue(false);
+    const proposal = await POST(
+      new Request("http://localhost/api/operator/troubleshooting", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "propose_repair",
+          incidentId: INCIDENT.id,
+          grantId: "grant-1",
+          kind: "restart_from_checkpoint",
+          target: { checkpointId: "checkpoint-1" },
+          supportActorIdentity: "support-ada",
+          supportAccessToken: "token",
+        }),
+      }),
+      undefined,
+      { requireRecentAuth: mocks.requireRecentAuth, proposeRepair: mocks.proposeRepair },
+    );
+    expect(proposal.status).toBe(401);
+    expect(mocks.proposeRepair).not.toHaveBeenCalled();
+
+    const tool = await POST(
+      new Request("http://localhost/api/operator/troubleshooting", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "invoke_tool",
+          incidentId: INCIDENT.id,
+          grantId: "grant-1",
+          tool: "read_troubleshooting_evidence",
+          supportActorIdentity: "support-ada",
+          supportAccessToken: "token",
+        }),
+      }),
+      undefined,
+      { requireRecentAuth: mocks.requireRecentAuth, invokeTool: mocks.invokeTool },
+    );
+    expect(tool.status).toBe(401);
+    expect(mocks.invokeTool).not.toHaveBeenCalled();
   });
 });

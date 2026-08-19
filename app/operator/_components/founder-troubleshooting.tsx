@@ -5,15 +5,27 @@ import type {
   FounderTroubleshootingDto,
   FounderTroubleshootingIncidentDto,
 } from "@/src/server/operators/founder-troubleshooting";
+import type { FounderSupportDto } from "@/src/server/operators/founder-support";
 import styles from "./founder-troubleshooting.module.css";
 
 export function FounderTroubleshooting({
   initialTroubleshooting,
+  initialSupport,
 }: {
   initialTroubleshooting: FounderTroubleshootingDto;
+  initialSupport?: FounderSupportDto;
 }) {
   const [troubleshooting, setTroubleshooting] = useState(initialTroubleshooting);
+  const [support, setSupport] = useState(initialSupport);
   const [busyIncident, setBusyIncident] = useState<string | null>(null);
+  const [busyGrant, setBusyGrant] = useState(false);
+  const [supportActorName, setSupportActorName] = useState("");
+  const [supportActorIdentity, setSupportActorIdentity] = useState("");
+  const [mfaConfirmed, setMfaConfirmed] = useState(false);
+  const [supportScope, setSupportScope] = useState<
+    "troubleshooting_evidence" | "capability_status" | "recovery_checkpoint"
+  >("troubleshooting_evidence");
+  const [supportTtl, setSupportTtl] = useState(30);
   const [error, setError] = useState<string | null>(null);
 
   async function updateIncident(incidentId: string, action: "approve_case" | "close_case") {
@@ -51,6 +63,81 @@ export function FounderTroubleshooting({
   }
 
   const { help } = troubleshooting;
+  async function revokeGrant(grantId: string) {
+    setError(null);
+    try {
+      const response = await fetch("/api/operator/troubleshooting", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "revoke_access", grantId }),
+      });
+      const body = (await response.json()) as {
+        grant?: NonNullable<typeof support>["grants"][number];
+        error?: { message?: string };
+      };
+      if (!response.ok || !body.grant)
+        throw new Error(body.error?.message ?? "Support access could not be revoked.");
+      setSupport((current) =>
+        current
+          ? {
+              ...current,
+              grants: current.grants.map((grant) =>
+                grant.id === body.grant?.id ? body.grant : grant,
+              ),
+            }
+          : current,
+      );
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error ? actionError.message : "Support access could not be revoked.",
+      );
+    }
+  }
+
+  async function grantAccess(incidentId: string) {
+    setBusyGrant(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/operator/troubleshooting", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          action: "grant_access",
+          incidentId,
+          supportActorName,
+          supportActorIdentity,
+          mfaAuthenticated: mfaConfirmed,
+          scope: supportScope,
+          ttlMinutes: supportTtl,
+        }),
+      });
+      const body = (await response.json()) as {
+        grant?: NonNullable<typeof support>["grants"][number];
+        error?: { message?: string };
+      };
+      if (!response.ok || !body.grant)
+        throw new Error(body.error?.message ?? "Support access could not be granted.");
+      setSupport((current) =>
+        current
+          ? {
+              ...current,
+              grants: [
+                body.grant!,
+                ...current.grants.filter((grant) => grant.incidentId !== incidentId),
+              ],
+            }
+          : current,
+      );
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error ? actionError.message : "Support access could not be granted.",
+      );
+    } finally {
+      setBusyGrant(false);
+    }
+  }
   return (
     <div className={styles.content}>
       <section className={styles.hero} aria-labelledby="troubleshooting-title">
@@ -107,6 +194,150 @@ export function FounderTroubleshooting({
               onAction={updateIncident}
             />
           ))}
+        </section>
+      ) : null}
+
+      {support ? (
+        <section className={styles.incidents} aria-labelledby="support-access-title">
+          <div className={styles.sectionHeading}>
+            <p className={styles.kicker}>Support boundary</p>
+            <h3 id="support-access-title">Scoped support access</h3>
+          </div>
+          <div className={styles.card}>
+            <p>
+              Opening a Support Case grants no access. A named, MFA-authenticated support person can
+              receive one exact read-only scope for no more than 60 minutes.
+            </p>
+            {troubleshooting.incidents
+              .filter(
+                (incident) =>
+                  incident.status === "open" &&
+                  incident.supportCase === "open" &&
+                  !support.grants.some(
+                    (grant) => grant.incidentId === incident.id && grant.status === "active",
+                  ),
+              )
+              .map((incident) => (
+                <form
+                  className={styles.grantForm}
+                  key={incident.id}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void grantAccess(incident.id);
+                  }}
+                >
+                  <strong>Grant access to {incident.title}</strong>
+                  <label>
+                    Support name
+                    <input
+                      value={supportActorName}
+                      onChange={(event) => setSupportActorName(event.target.value)}
+                      required
+                      maxLength={160}
+                    />
+                  </label>
+                  <label>
+                    Support identity
+                    <input
+                      value={supportActorIdentity}
+                      onChange={(event) => setSupportActorIdentity(event.target.value)}
+                      required
+                      maxLength={240}
+                    />
+                  </label>
+                  <label>
+                    <span>
+                      <input
+                        type="checkbox"
+                        checked={mfaConfirmed}
+                        onChange={(event) => setMfaConfirmed(event.target.checked)}
+                        required
+                      />{" "}
+                      I confirmed this named support actor is MFA-authenticated.
+                    </span>
+                  </label>
+                  <label>
+                    Read-only scope
+                    <select
+                      value={supportScope}
+                      onChange={(event) =>
+                        setSupportScope(event.target.value as typeof supportScope)
+                      }
+                    >
+                      <option value="troubleshooting_evidence">Troubleshooting Evidence</option>
+                      <option value="capability_status">Capability status</option>
+                      <option value="recovery_checkpoint">Recovery checkpoint</option>
+                    </select>
+                  </label>
+                  <label>
+                    Minutes (1–60)
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={supportTtl}
+                      onChange={(event) => setSupportTtl(Number(event.target.value))}
+                    />
+                  </label>
+                  <button type="submit" disabled={busyGrant}>
+                    {busyGrant ? "Granting…" : "Grant scoped access"}
+                  </button>
+                </form>
+              ))}
+            {support.grants.length === 0 ? (
+              <p className={styles.hint}>No Support Access Grant exists.</p>
+            ) : (
+              support.grants.map((grant) => (
+                <div className={styles.supportRow} key={grant.id} data-grant-status={grant.status}>
+                  <div>
+                    <strong>{grant.supportActor.name}</strong>
+                    <span>
+                      {grant.scope.replaceAll("_", " ")} · expires {formatDate(grant.expiresAt)}
+                    </span>
+                    <small>Receipt {grant.receiptDigest}</small>
+                    {grant.supportAccessToken ? (
+                      <small>
+                        Share this Support Access Token with the named actor:{" "}
+                        {grant.supportAccessToken}
+                      </small>
+                    ) : null}
+                  </div>
+                  {grant.status === "active" ? (
+                    <button type="button" onClick={() => void revokeGrant(grant.id)}>
+                      Revoke access
+                    </button>
+                  ) : (
+                    <span className={styles.badge}>{grant.status}</span>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+          <div className={styles.card}>
+            <h4>Typed Repair Catalogue</h4>
+            <p className={styles.hint}>
+              Support may propose these repairs; only your separate Founder decision can approve
+              one.
+            </p>
+            <ul>
+              {support.repairs.map((repair) => (
+                <li key={repair}>{repair.replaceAll("_", " ")}</li>
+              ))}
+            </ul>
+            {support.proposals.map((proposal) => (
+              <div className={styles.supportRow} key={proposal.id}>
+                <div>
+                  <strong>{proposal.kind.replaceAll("_", " ")}</strong>
+                  <span>
+                    {proposal.state} · {proposal.proposalDigest}
+                  </span>
+                  {proposal.verification ? (
+                    <small>{String(proposal.verification.summary)}</small>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
       ) : null}
 

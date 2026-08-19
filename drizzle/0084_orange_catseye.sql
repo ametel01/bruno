@@ -1,0 +1,3 @@
+ALTER TABLE "operator_support_access_grants" ADD COLUMN "access_token_hash" text NOT NULL;--> statement-breakpoint
+ALTER TABLE "operator_support_access_grants" ADD COLUMN "access_token_prefix" text NOT NULL;--> statement-breakpoint
+ALTER TABLE "operator_support_access_grants" ADD CONSTRAINT "operator_support_access_grants_token_check" CHECK ("operator_support_access_grants"."access_token_hash" ~ '^sha256:[a-f0-9]{64}$' AND length(trim("operator_support_access_grants"."access_token_prefix")) BETWEEN 8 AND 24);
