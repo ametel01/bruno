@@ -16,6 +16,13 @@ export const FOUNDER_RECOVERY_CAPABILITIES = [
 
 export type FounderRecoveryCapability = (typeof FOUNDER_RECOVERY_CAPABILITIES)[number];
 
+export function isFounderRecoveryCapability(value: unknown): value is FounderRecoveryCapability {
+  return (
+    typeof value === "string" &&
+    (FOUNDER_RECOVERY_CAPABILITIES as readonly string[]).includes(value)
+  );
+}
+
 export const FOUNDER_INTERRUPTION_STATES = [
   "recovering",
   "waiting_on_provider",

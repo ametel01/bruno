@@ -7,7 +7,7 @@ export function FounderOperatorShell({
   activePage = "now",
 }: {
   children: React.ReactNode;
-  activePage?: "now" | "privacy";
+  activePage?: "now" | "privacy" | "troubleshooting";
 }) {
   return (
     <div className={styles.shell}>

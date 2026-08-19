@@ -331,6 +331,16 @@ export const operatorConversationWorkStateEnum = pgEnum("operator_conversation_w
   "failed",
 ]);
 
+export const operatorTroubleshootingIncidentStatusEnum = pgEnum(
+  "operator_troubleshooting_incident_status",
+  ["open", "closed"],
+);
+
+export const operatorTroubleshootingEvidenceKindEnum = pgEnum(
+  "operator_troubleshooting_evidence_kind",
+  ["recovery_summary", "capability_impact", "safe_action"],
+);
+
 export const operatorActionPreviewStateEnum = pgEnum("operator_action_preview_state", ["draft"]);
 
 export const operatorRelationshipStateEnum = pgEnum("operator_relationship_state", [
@@ -1819,6 +1829,102 @@ export const operatorFounderDataExportAccesses = pgTable(
       table.exportId,
       table.accessedAt,
     ),
+  ],
+);
+
+/**
+ * Founder-readable support incidents are opened only from a durable exhausted
+ * recovery projection. They intentionally retain impact and a deduplication
+ * fingerprint, never raw provider or runtime evidence.
+ */
+export const operatorTroubleshootingIncidents = pgTable(
+  "operator_troubleshooting_incidents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    recoveryCapability: text("recovery_capability").notNull(),
+    recoveryState: text("recovery_state").notNull().default("recovery_exhausted"),
+    attemptCount: integer("attempt_count").notNull(),
+    maxAttempts: integer("max_attempts").notNull(),
+    elapsedMs: integer("elapsed_ms").notNull(),
+    maxElapsedMs: integer("max_elapsed_ms").notNull(),
+    impactSummary: text("impact_summary").notNull(),
+    affectedCapabilities: jsonb("affected_capabilities")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    unaffectedCapabilities: jsonb("unaffected_capabilities")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    deduplicationKey: text("deduplication_key").notNull(),
+    status: operatorTroubleshootingIncidentStatusEnum("status").notNull().default("open"),
+    supportCaseApprovedAt: timestamp("support_case_approved_at", { withTimezone: true }),
+    supportCaseClosedAt: timestamp("support_case_closed_at", { withTimezone: true }),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_troubleshooting_incidents_capability_check",
+      sql`${table.recoveryCapability} IN ('ai', 'calendar', 'mail', 'mail_sending', 'brief', 'conversation', 'external_effect')`,
+    ),
+    check(
+      "operator_troubleshooting_incidents_state_check",
+      sql`${table.recoveryState} = 'recovery_exhausted'`,
+    ),
+    check(
+      "operator_troubleshooting_incidents_budget_check",
+      sql`${table.attemptCount} >= 0 AND ${table.maxAttempts} >= 1 AND ${table.elapsedMs} >= 0 AND ${table.maxElapsedMs} >= 1`,
+    ),
+    check(
+      "operator_troubleshooting_incidents_status_pair_check",
+      sql`(${table.status} = 'open' AND ${table.closedAt} IS NULL) OR (${table.status} = 'closed' AND ${table.closedAt} IS NOT NULL)`,
+    ),
+    check(
+      "operator_troubleshooting_incidents_case_pair_check",
+      sql`${table.supportCaseClosedAt} IS NULL OR (${table.supportCaseApprovedAt} IS NOT NULL AND ${table.supportCaseClosedAt} >= ${table.supportCaseApprovedAt})`,
+    ),
+    uniqueIndex("operator_troubleshooting_incidents_dedup_idx").on(
+      table.operatorId,
+      table.deduplicationKey,
+    ),
+    index("operator_troubleshooting_incidents_operator_status_idx").on(
+      table.operatorId,
+      table.status,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const operatorTroubleshootingEvidence = pgTable(
+  "operator_troubleshooting_evidence",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    incidentId: uuid("incident_id")
+      .notNull()
+      .references(() => operatorTroubleshootingIncidents.id, { onDelete: "cascade" }),
+    kind: operatorTroubleshootingEvidenceKindEnum("kind").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    evidenceDigest: text("evidence_digest").notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_troubleshooting_evidence_digest_check",
+      sql`${table.evidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    uniqueIndex("operator_troubleshooting_evidence_incident_kind_idx").on(
+      table.incidentId,
+      table.kind,
+    ),
+    index("operator_troubleshooting_evidence_expiry_idx").on(table.incidentId, table.expiresAt),
   ],
 );
 

@@ -568,6 +568,13 @@
       "when": 1787166527480,
       "tag": "0080_loud_miracleman",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1787172151792,
+      "tag": "0081_big_guardsmen",
+      "breakpoints": true
     }
   ]
 }

@@ -56,6 +56,11 @@ export function FounderRecoveryStatus({
           </button>
         )
       ) : null}
+      {recovery.state !== "needs_you" ? (
+        <a href={`/operator/troubleshooting?capability=${recovery.capability}`}>
+          {recovery.state === "recovery_exhausted" ? "Open Troubleshooting" : "Open Help"}
+        </a>
+      ) : null}
     </aside>
   );
 }
