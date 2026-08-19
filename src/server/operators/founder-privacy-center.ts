@@ -22,6 +22,7 @@ import {
   operators,
 } from "@/src/server/db/schema";
 import { routeFounderAiProvider } from "@/src/server/operators/founder-ai-routing";
+import { getFounderRetentionStatusForUser } from "@/src/server/operators/founder-retention";
 
 type PrivacyTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -61,6 +62,16 @@ export type FounderPrivacyCenterDto = {
     retention: string;
     deletableInBruno: boolean;
   }>;
+  retention: {
+    schedules: {
+      workingContextDays: 90;
+      closedRelationshipMonths: 12;
+      decisionMetadataMonths: 24;
+      relationshipWarningDays: 30;
+    };
+    warnings: Array<{ entityId: string; label: string; warningAt: string; expiresAt: string }>;
+    lastRun: { runKey: string; status: "completed" | "failed"; completedAt: string | null } | null;
+  };
   exportPolicy: {
     description: string;
     expiresAfterHours: number;
@@ -88,26 +99,28 @@ const RETAINED_DATA = [
   {
     category: "Founder conversations and generated responses",
     purpose: "Operate the private Founder workspace and preserve checkpoint state.",
-    retention:
-      "Kept in Bruno until you delete retained data; provider copies are governed by provider policy.",
+    retention: "Working Context and ordinary Conversation-derived context expire after 90 days.",
     deletableInBruno: true,
   },
   {
     category: "Relationship evidence excerpts",
     purpose: "Ground relationship context and bounded Founder preparation.",
-    retention: "Kept in Bruno until you delete retained data; source systems remain unchanged.",
+    retention:
+      "Relationship evidence is working context and expires after 90 days; source systems remain unchanged.",
     deletableInBruno: true,
   },
   {
     category: "Relationship records, candidates, and corrections",
     purpose: "Keep the Founder relationship graph and its reviewed changes coherent.",
-    retention: "Kept in Bruno until you delete retained data; source systems remain unchanged.",
+    retention:
+      "Closed or ignored Relationship Records expire after 12 months, with a 30-day warning.",
     deletableInBruno: true,
   },
   {
     category: "Connection identity, consent, and safety receipts",
     purpose: "Prove which account, scope, policy, and approval were used.",
-    retention: "Retained as safety and audit records; disconnect does not delete these records.",
+    retention:
+      "Governance, Connection, Action, Deletion, and Support decision metadata is retained for 24 months, then converted to content-free tombstones where allowed.",
     deletableInBruno: false,
   },
 ] as const;
@@ -126,6 +139,13 @@ export async function getFounderPrivacyCenterForUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
+    const retention = await getFounderRetentionStatusForUser(
+      userId,
+      dependencies.now
+        ? { createConnection: () => connection, now: dependencies.now }
+        : { createConnection: () => connection },
+    );
+    if (!retention) return null;
     return await connection.db.transaction(async (tx) => {
       const [operator] = await tx
         .select()
@@ -292,6 +312,17 @@ export async function getFounderPrivacyCenterForUser(
         },
         connections,
         retainedData: [...RETAINED_DATA],
+        retention: {
+          schedules: retention.schedules,
+          warnings: retention.warnings,
+          lastRun: retention.lastRun
+            ? {
+                runKey: retention.lastRun.runKey,
+                status: retention.lastRun.status,
+                completedAt: retention.lastRun.completedAt,
+              }
+            : null,
+        },
         exportPolicy: {
           description:
             "A Founder-only snapshot of retained Bruno records, decisions, and receipts. Downloads require recent authentication and expire after 24 hours.",

@@ -65,6 +65,20 @@ export const operatorDeletionBackupStatusEnum = pgEnum("operator_deletion_backup
   "expired",
   "failed",
 ]);
+export const operatorRetentionRunStatusEnum = pgEnum("operator_retention_run_status", [
+  "running",
+  "completed",
+  "failed",
+]);
+export const operatorRetentionTombstoneKindEnum = pgEnum("operator_retention_tombstone_kind", [
+  "working_context",
+  "relationship_record",
+  "governance",
+  "connection",
+  "action",
+  "deletion",
+  "support",
+]);
 export const operatorMailOfferDispositionEnum = pgEnum("operator_mail_offer_disposition", [
   "enabled",
   "dismissed",
@@ -2098,6 +2112,77 @@ export const operatorDeletionBackupExpiries = pgTable(
       table.operatorId,
       table.status,
       table.expiresAt,
+    ),
+  ],
+);
+
+/**
+ * A retention tombstone contains only the stable identity and non-sensitive
+ * accounting needed to explain why an expired row is no longer exportable.
+ * It intentionally has no foreign key to the erased entity because the
+ * source row is removed by the retention job.
+ */
+export const operatorRetentionTombstones = pgTable(
+  "operator_retention_tombstones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    kind: operatorRetentionTombstoneKindEnum("kind").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    identityDigest: text("identity_digest").notNull(),
+    sourceCreatedAt: timestamp("source_created_at", { withTimezone: true }),
+    expiredAt: timestamp("expired_at", { withTimezone: true }).notNull(),
+    reason: text("reason").notNull().default("retention_expired"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_retention_tombstones_digest_check",
+      sql`${table.identityDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    uniqueIndex("operator_retention_tombstones_identity_idx").on(
+      table.operatorId,
+      table.kind,
+      table.entityType,
+      table.entityId,
+    ),
+    index("operator_retention_tombstones_operator_expired_idx").on(
+      table.operatorId,
+      table.expiredAt,
+    ),
+  ],
+);
+
+/** One durable per-owner run record makes retries observable and idempotent. */
+export const operatorRetentionRuns = pgTable(
+  "operator_retention_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    runKey: text("run_key").notNull(),
+    status: operatorRetentionRunStatusEnum("status").notNull().default("running"),
+    counts: jsonb("counts").$type<Record<string, number>>().notNull().default(sql`'{}'::jsonb`),
+    failureCode: text("failure_code"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_retention_runs_completion_shape_check",
+      sql`(${table.status} = 'completed' AND ${table.completedAt} IS NOT NULL AND ${table.failureCode} IS NULL) OR (${table.status} = 'failed' AND ${table.completedAt} IS NOT NULL AND ${table.failureCode} IS NOT NULL) OR (${table.status} = 'running' AND ${table.completedAt} IS NULL)`,
+    ),
+    uniqueIndex("operator_retention_runs_operator_key_idx").on(table.operatorId, table.runKey),
+    index("operator_retention_runs_operator_status_idx").on(
+      table.operatorId,
+      table.status,
+      table.startedAt,
     ),
   ],
 );

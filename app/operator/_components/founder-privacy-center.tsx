@@ -237,6 +237,26 @@ export function FounderPrivacyCenter({
             </div>
           ))}
         </div>
+        <div className={styles.aiPanel}>
+          <strong>Retention schedule</strong>
+          <p>
+            Working Context expires after {privacy.retention.schedules.workingContextDays} days.
+            Closed or ignored Relationship Records expire after{" "}
+            {privacy.retention.schedules.closedRelationshipMonths} months. Decision metadata is
+            retained for {privacy.retention.schedules.decisionMetadataMonths} months.
+          </p>
+          {privacy.retention.warnings.length === 0 ? (
+            <p>No Relationship Records are currently within their 30-day removal warning window.</p>
+          ) : (
+            <ul>
+              {privacy.retention.warnings.map((warning) => (
+                <li key={warning.entityId}>
+                  {warning.label} expires on {formatDate(warning.expiresAt)}.
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </section>
 
       <section className={styles.section} aria-labelledby="ai-processing-title">

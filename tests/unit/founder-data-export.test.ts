@@ -91,6 +91,36 @@ describe("Founder Data Export payload", () => {
       }),
     );
   });
+
+  it("exports retention tombstones without restoring expired content", () => {
+    const payload = buildFounderDataExportPayloadForTest({
+      ownerId: OWNER_ID,
+      exportId: "00000000-0000-4000-8000-000000003360",
+      generatedAt: GENERATED_AT,
+      expiresAt: new Date(GENERATED_AT.getTime() + FOUNDER_DATA_EXPORT_TTL_MS),
+      retentionTombstones: [
+        {
+          id: "tombstone-1",
+          kind: "working_context",
+          entityType: "operator_conversations",
+          entityId: "conversation-1",
+          identityDigest: `sha256:${"a".repeat(64)}`,
+          sourceCreatedAt: GENERATED_AT,
+          expiredAt: GENERATED_AT,
+          reason: "retention_expired",
+          createdAt: GENERATED_AT,
+        },
+      ],
+    });
+
+    expect(payload.records.retentionTombstones).toEqual([
+      expect.objectContaining({
+        entityId: "conversation-1",
+        identityDigest: `sha256:${"a".repeat(64)}`,
+      }),
+    ]);
+    expect(JSON.stringify(payload)).not.toContain("private working context");
+  });
 });
 
 describe("Founder Data Export routes", () => {

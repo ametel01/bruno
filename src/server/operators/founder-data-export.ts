@@ -42,6 +42,7 @@ import {
   operatorRelationshipCorrections,
   operatorRelationshipEvidence,
   operatorRelationshipRecords,
+  operatorRetentionTombstones,
   operators,
 } from "@/src/server/db/schema";
 
@@ -84,6 +85,7 @@ export type FounderDataExportPayload = {
     founderActivations: ExportRecord[];
     actionPreviews: ExportRecord[];
     actionPreviewRevisions: ExportRecord[];
+    retentionTombstones: ExportRecord[];
   };
   decisions: {
     proposedActions: ExportRecord[];
@@ -332,6 +334,24 @@ export function buildFounderDataExportPayloadForTest(input: {
     observedAt: Date;
     sourceFingerprint: string;
   }>;
+  retentionTombstones?: Array<{
+    id: string;
+    kind:
+      | "working_context"
+      | "relationship_record"
+      | "governance"
+      | "connection"
+      | "action"
+      | "deletion"
+      | "support";
+    entityType: string;
+    entityId: string;
+    identityDigest: string;
+    sourceCreatedAt: Date | null;
+    expiredAt: Date;
+    reason: string;
+    createdAt: Date;
+  }>;
 }): FounderDataExportPayload {
   return {
     schemaVersion: 1,
@@ -359,6 +379,17 @@ export function buildFounderDataExportPayloadForTest(input: {
       founderActivations: [],
       actionPreviews: [],
       actionPreviewRevisions: [],
+      retentionTombstones: (input.retentionTombstones ?? []).map((item) => ({
+        id: item.id,
+        kind: item.kind,
+        entityType: item.entityType,
+        entityId: item.entityId,
+        identityDigest: item.identityDigest,
+        sourceCreatedAt: iso(item.sourceCreatedAt),
+        expiredAt: iso(item.expiredAt),
+        reason: item.reason,
+        createdAt: iso(item.createdAt),
+      })),
     },
     decisions: {
       proposedActions: [],
@@ -571,6 +602,10 @@ async function buildFounderDataExportPayload(
 
   const calendarStatus = new Map(calendarConnections.map((item) => [item.id, item.status]));
   const mailStatus = new Map(mailConnections.map((item) => [item.id, item.status]));
+  const retentionTombstones = await tx
+    .select()
+    .from(operatorRetentionTombstones)
+    .where(eq(operatorRetentionTombstones.operatorId, input.operatorId));
 
   return {
     schemaVersion: 1,
@@ -788,6 +823,17 @@ async function buildFounderDataExportPayload(
         supportingEvidence: sanitizeExportValue(item.supportingEvidence),
         expectedExternalEffect: safeText(item.expectedExternalEffect) ?? "",
         supersedesRevisionId: item.supersedesRevisionId,
+        createdAt: iso(item.createdAt),
+      })),
+      retentionTombstones: retentionTombstones.map((item) => ({
+        id: item.id,
+        kind: item.kind,
+        entityType: item.entityType,
+        entityId: item.entityId,
+        identityDigest: item.identityDigest,
+        sourceCreatedAt: iso(item.sourceCreatedAt),
+        expiredAt: iso(item.expiredAt),
+        reason: item.reason,
         createdAt: iso(item.createdAt),
       })),
     },
