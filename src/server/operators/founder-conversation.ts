@@ -17,8 +17,13 @@ import {
 } from "@/src/server/operators/founder-action-previews";
 import {
   type FounderAiConnectionDto,
-  requireReadyFounderOpenAiConnectionForUser,
+  requireReadyFounderAiConnectionForUser,
 } from "@/src/server/operators/founder-ai-connection";
+import {
+  routeFounderAiProvider,
+  type FounderAiCompatibilityPolicy,
+  type FounderAiProvider,
+} from "@/src/server/operators/founder-ai-routing";
 import {
   buildFounderAiCheckpointIdentity,
   buildFounderAiCompletionIdentity,
@@ -52,7 +57,7 @@ export type FounderConversationWorkDto = {
   id: string;
   requestId: string;
   checkpointId: string;
-  provider: "openai";
+  provider: FounderAiProvider;
   policyVersion: number;
   completionIdentity: string;
   externalEffectStarted: boolean;
@@ -80,6 +85,9 @@ export type FounderConversationAdapterInput = {
   conversationId: string;
   requestId: string;
   checkpointId: string;
+  provider?: FounderAiProvider;
+  providerConnectionId?: string;
+  approvedModelAssignment?: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
 };
 
@@ -101,6 +109,8 @@ export type FounderConversationDependencies = {
   randomUUID?: () => string;
   requestId?: string;
   adapter?: FounderConversationAdapter;
+  adapters?: Partial<Record<FounderAiProvider, FounderConversationAdapter>>;
+  routingPolicy?: FounderAiCompatibilityPolicy;
   requireReadyConnection?: (
     userId: string,
     dependencies?: { createConnection?: () => DatabaseConnection },
@@ -250,10 +260,10 @@ export async function sendFounderConversationMessageForUser(
       return connection.db.transaction((tx) => projectConversation(tx, started.conversation));
     }
 
+    let readyConnection: FounderAiConnectionDto;
     try {
-      const ready =
-        dependencies.requireReadyConnection ?? requireReadyFounderOpenAiConnectionForUser;
-      await ready(userId, { createConnection: () => connection });
+      const ready = dependencies.requireReadyConnection ?? requireReadyFounderAiConnectionForUser;
+      readyConnection = await ready(userId, { createConnection: () => connection });
     } catch (error) {
       const message =
         error instanceof Error && error.message.trim()
@@ -262,27 +272,50 @@ export async function sendFounderConversationMessageForUser(
       return finalizePausedConversation(connection, started, message, now());
     }
 
-    await connection.db.transaction(async (tx) => {
-      const [aiConnection] = await tx
-        .select({ id: operatorAiConnections.id })
-        .from(operatorAiConnections)
-        .where(
-          and(
-            eq(operatorAiConnections.operatorId, operator.id),
-            eq(operatorAiConnections.status, "ready"),
-          ),
-        )
-        .orderBy(desc(operatorAiConnections.updatedAt))
-        .limit(1);
-      if (aiConnection) {
-        await tx
-          .update(operatorConversationWorks)
-          .set({ providerConnectionId: aiConnection.id, updatedAt: now() })
-          .where(eq(operatorConversationWorks.id, started.workId));
-      }
+    const routed = await connection.db.transaction(async (tx) => {
+      const decision = await routeFounderAiProvider(tx, operator.id, {
+        now: now(),
+        ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
+      });
+      if (!decision) return null;
+      await tx
+        .update(operatorConversationWorks)
+        .set({
+          provider: decision.provider,
+          policyVersion: decision.policyVersion,
+          providerConnectionId: decision.connectionId,
+          providerSubjectId: decision.providerSubjectId,
+          providerAccountLabel: decision.accountLabel,
+          approvedModelAssignment: decision.approvedModelAssignment,
+          providerAttempts: [
+            {
+              provider: decision.provider,
+              policyVersion: decision.policyVersion,
+              connectionId: decision.connectionId,
+              providerSubjectId: decision.providerSubjectId,
+              accountLabel: decision.accountLabel,
+              approvedModelAssignment: decision.approvedModelAssignment,
+              state: "running",
+            },
+          ],
+          updatedAt: now(),
+        })
+        .where(eq(operatorConversationWorks.id, started.workId));
+      return decision;
     });
-
-    const adapter = dependencies.adapter ?? createHermesConversationAdapter();
+    if (!routed && !dependencies.requireReadyConnection) {
+      return finalizePausedConversation(
+        connection,
+        started,
+        "No connected compatible AI provider is ready. Bruno paused this message safely.",
+        now(),
+      );
+    }
+    const provider = routed?.provider ?? readyConnection.provider;
+    const adapter =
+      dependencies.adapters?.[provider] ??
+      dependencies.adapter ??
+      createHermesConversationAdapter();
     let result: FounderConversationAdapterResult;
     try {
       result = await adapter.send({
@@ -291,6 +324,13 @@ export async function sendFounderConversationMessageForUser(
         conversationId: started.conversation.id,
         requestId,
         checkpointId: started.checkpointId,
+        provider,
+        ...(routed
+          ? {
+              providerConnectionId: routed.connectionId,
+              approvedModelAssignment: routed.approvedModelAssignment,
+            }
+          : {}),
         messages: started.messages,
       });
     } catch {
@@ -303,6 +343,174 @@ export async function sendFounderConversationMessageForUser(
     }
     if (!result.ok) return finalizePausedConversation(connection, started, result.message, now());
 
+    const response = normalizeMessage(result.response, MAX_MESSAGE_LENGTH);
+    if (!response) {
+      return finalizePausedConversation(
+        connection,
+        started,
+        "Bruno received an empty response and kept your message checkpointed for safety.",
+        now(),
+      );
+    }
+    return finalizeCompletedConversation(connection, started, response, now());
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
+/**
+ * Resume a paused work unit at its durable checkpoint. This is the only path
+ * that may change providers for an existing work identity; it never runs while
+ * the original attempt is still marked running or has started an external
+ * effect.
+ */
+export async function resumeFounderConversationWorkForUser(
+  userId: string,
+  workId: string,
+  dependencies: FounderConversationDependencies = {},
+): Promise<FounderConversationDto> {
+  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now ?? (() => new Date());
+
+  try {
+    const started = await connection.db.transaction(async (tx) => {
+      await lockOperator(tx, operator.id);
+      const [work] = await tx
+        .select()
+        .from(operatorConversationWorks)
+        .where(eq(operatorConversationWorks.id, workId))
+        .limit(1);
+      if (!work)
+        throw new FounderConversationError(
+          "conversation_unavailable",
+          "Conversation work could not be reloaded.",
+          503,
+        );
+      const [conversation] = await tx
+        .select()
+        .from(operatorConversations)
+        .where(
+          and(
+            eq(operatorConversations.id, work.conversationId),
+            eq(operatorConversations.operatorId, operator.id),
+          ),
+        )
+        .limit(1)
+        .for("update");
+      if (!conversation)
+        throw new FounderConversationError(
+          "conversation_unavailable",
+          "Conversation could not be reloaded.",
+          503,
+        );
+      if (work.state !== "paused" || work.externalEffectStarted) {
+        return { kind: "unchanged" as const, conversation };
+      }
+
+      const attemptedProvider = work.providerAttempts.at(-1)?.provider as
+        | FounderAiProvider
+        | undefined;
+      const decision = await routeFounderAiProvider(tx, operator.id, {
+        now: now(),
+        ...(attemptedProvider ? { excludedProviders: [attemptedProvider] } : {}),
+        ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
+      });
+      if (!decision) return { kind: "unchanged" as const, conversation };
+      const history = await tx
+        .select()
+        .from(operatorConversationMessages)
+        .where(eq(operatorConversationMessages.conversationId, conversation.id))
+        .orderBy(asc(operatorConversationMessages.sequence));
+      const [updatedWork] = await tx
+        .update(operatorConversationWorks)
+        .set({
+          state: "running",
+          provider: decision.provider,
+          policyVersion: decision.policyVersion,
+          providerConnectionId: decision.connectionId,
+          providerSubjectId: decision.providerSubjectId,
+          providerAccountLabel: decision.accountLabel,
+          approvedModelAssignment: decision.approvedModelAssignment,
+          providerAttempts: [
+            ...work.providerAttempts.map((attempt) =>
+              attempt.state === "running" ? { ...attempt, state: "paused" as const } : attempt,
+            ),
+            {
+              provider: decision.provider,
+              policyVersion: decision.policyVersion,
+              connectionId: decision.connectionId,
+              providerSubjectId: decision.providerSubjectId,
+              accountLabel: decision.accountLabel,
+              approvedModelAssignment: decision.approvedModelAssignment,
+              state: "running",
+            },
+          ],
+          recoveryMessage: null,
+          recoveryChoices: [],
+          pausedAt: null,
+          updatedAt: now(),
+        })
+        .where(eq(operatorConversationWorks.id, work.id))
+        .returning();
+      if (!updatedWork)
+        throw new FounderConversationError(
+          "conversation_unavailable",
+          "Conversation work could not be resumed.",
+          503,
+        );
+      await tx
+        .update(operatorConversations)
+        .set({ status: "active", updatedAt: now() })
+        .where(eq(operatorConversations.id, conversation.id));
+      return {
+        kind: "started" as const,
+        conversation,
+        workId: work.id,
+        checkpointId: work.checkpointId,
+        provider: decision.provider,
+        providerConnectionId: decision.connectionId,
+        approvedModelAssignment: decision.approvedModelAssignment,
+        requestId: work.requestId,
+        messages: history
+          .filter((message) => message.id !== work.operatorMessageId)
+          .map((message) => ({
+            role: message.role === "founder" ? ("user" as const) : ("assistant" as const),
+            content: message.body,
+          })),
+      };
+    });
+
+    if (started.kind === "unchanged") {
+      return connection.db.transaction((tx) => projectConversation(tx, started.conversation));
+    }
+    const adapter =
+      dependencies.adapters?.[started.provider] ??
+      dependencies.adapter ??
+      createHermesConversationAdapter();
+    let result: FounderConversationAdapterResult;
+    try {
+      result = await adapter.send({
+        operatorId: operator.id,
+        userId,
+        conversationId: started.conversation.id,
+        requestId: started.requestId,
+        checkpointId: started.checkpointId,
+        provider: started.provider,
+        providerConnectionId: started.providerConnectionId,
+        approvedModelAssignment: started.approvedModelAssignment,
+        messages: started.messages,
+      });
+    } catch {
+      return finalizePausedConversation(
+        connection,
+        started,
+        "Bruno could not reach the recovered AI account. Your message remains checkpointed.",
+        now(),
+      );
+    }
+    if (!result.ok) return finalizePausedConversation(connection, started, result.message, now());
     const response = normalizeMessage(result.response, MAX_MESSAGE_LENGTH);
     if (!response) {
       return finalizePausedConversation(
@@ -394,7 +602,7 @@ async function projectConversation(
           id: work.id,
           requestId: work.requestId,
           checkpointId: work.checkpointId,
-          provider: work.provider as "openai",
+          provider: work.provider as FounderAiProvider,
           policyVersion: work.policyVersion,
           completionIdentity: work.completionIdentity,
           externalEffectStarted: work.externalEffectStarted,
@@ -447,18 +655,24 @@ async function finalizeCompletedConversation(
         503,
       );
     if (work.state !== "running") return projectConversation(tx, conversation);
-    const [operatorMessage] = await tx
-      .insert(operatorConversationMessages)
-      .values({
-        conversationId: work.conversationId,
-        workId: work.id,
-        sequence: work.responseSequence,
-        role: "operator",
-        status: "complete",
-        body: response,
-        createdAt: now,
-      })
-      .returning();
+    const [operatorMessage] = work.operatorMessageId
+      ? await tx
+          .update(operatorConversationMessages)
+          .set({ status: "complete", body: response, createdAt: now })
+          .where(eq(operatorConversationMessages.id, work.operatorMessageId))
+          .returning()
+      : await tx
+          .insert(operatorConversationMessages)
+          .values({
+            conversationId: work.conversationId,
+            workId: work.id,
+            sequence: work.responseSequence,
+            role: "operator",
+            status: "complete",
+            body: response,
+            createdAt: now,
+          })
+          .returning();
     if (!operatorMessage)
       throw new FounderConversationError(
         "conversation_unavailable",
@@ -470,6 +684,9 @@ async function finalizeCompletedConversation(
       .set({
         state: "completed",
         operatorMessageId: operatorMessage.id,
+        providerAttempts: work.providerAttempts.map((attempt) =>
+          attempt.state === "running" ? { ...attempt, state: "completed" as const } : attempt,
+        ),
         completedAt: now,
         updatedAt: now,
       })
@@ -527,18 +744,38 @@ async function finalizePausedConversation(
         503,
       );
     if (work.state !== "running") return projectConversation(tx, conversation);
-    const [operatorMessage] = await tx
-      .insert(operatorConversationMessages)
-      .values({
-        conversationId: work.conversationId,
-        workId: work.id,
-        sequence: work.responseSequence,
-        role: "operator",
-        status: "paused",
-        body: message,
-        createdAt: now,
-      })
-      .returning();
+    if (work.providerConnectionId) {
+      await tx
+        .update(operatorAiConnections)
+        .set({
+          status: "paused",
+          capacityState: "exhausted",
+          inferenceState: "failed",
+          failureCode: "provider_unavailable",
+          recoveryMessage: message,
+          workPausedReason: message,
+          updatedAt: now,
+        })
+        .where(eq(operatorAiConnections.id, work.providerConnectionId));
+    }
+    const [operatorMessage] = work.operatorMessageId
+      ? await tx
+          .update(operatorConversationMessages)
+          .set({ status: "paused", body: message, createdAt: now })
+          .where(eq(operatorConversationMessages.id, work.operatorMessageId))
+          .returning()
+      : await tx
+          .insert(operatorConversationMessages)
+          .values({
+            conversationId: work.conversationId,
+            workId: work.id,
+            sequence: work.responseSequence,
+            role: "operator",
+            status: "paused",
+            body: message,
+            createdAt: now,
+          })
+          .returning();
     if (!operatorMessage)
       throw new FounderConversationError(
         "conversation_unavailable",
@@ -550,6 +787,9 @@ async function finalizePausedConversation(
       .set({
         state: "paused",
         operatorMessageId: operatorMessage.id,
+        providerAttempts: work.providerAttempts.map((attempt) =>
+          attempt.state === "running" ? { ...attempt, state: "paused" as const } : attempt,
+        ),
         recoveryMessage: message,
         recoveryChoices: FOUNDER_AI_RECOVERY_CHOICES.map((choice) => choice.kind),
         pausedAt: now,
@@ -637,12 +877,17 @@ export function createHermesConversationAdapter(
         const body = await request("/v1/chat/completions", {
           method: "POST",
           body: JSON.stringify({
-            model: "configured-by-hermes",
+            provider: input.provider ?? "openai",
+            model: input.approvedModelAssignment ?? "configured-by-hermes",
             messages: input.messages,
             stream: false,
             metadata: {
               bruno_checkpoint_id: input.checkpointId,
               bruno_request_id: input.requestId,
+              bruno_provider: input.provider ?? "openai",
+              ...(input.providerConnectionId
+                ? { bruno_provider_connection_id: input.providerConnectionId }
+                : {}),
             },
           }),
         });

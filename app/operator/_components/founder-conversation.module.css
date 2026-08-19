@@ -141,6 +141,23 @@
   text-underline-offset: 0.16em;
 }
 
+.pauseChoices button {
+  border: 0;
+  background: transparent;
+  color: var(--operator-ink);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+
+.pauseChoices button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .composer {
   display: grid;
   gap: 9px;

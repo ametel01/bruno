@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   requireApplicationUser: vi.fn(),
   getConversation: vi.fn(),
   sendMessage: vi.fn(),
+  resumeWork: vi.fn(),
 }));
 
 vi.mock("@/src/server/users/configured-application-user", () => ({
@@ -17,6 +18,7 @@ vi.mock("@/src/server/operators/founder-conversation", async (importOriginal) =>
     ...actual,
     getFounderConversationForUser: mocks.getConversation,
     sendFounderConversationMessageForUser: mocks.sendMessage,
+    resumeFounderConversationWorkForUser: mocks.resumeWork,
   };
 });
 
@@ -44,6 +46,7 @@ describe("Founder Conversation route", () => {
     mocks.requireApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
     mocks.getConversation.mockResolvedValue(CONVERSATION);
     mocks.sendMessage.mockResolvedValue(CONVERSATION);
+    mocks.resumeWork.mockResolvedValue(CONVERSATION);
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -71,6 +74,19 @@ describe("Founder Conversation route", () => {
     expect(mocks.sendMessage).toHaveBeenCalledWith(USER_ID, "What needs my attention?", {
       requestId: "request-1",
     });
+  });
+
+  it("resumes a checkpoint through the application seam", async () => {
+    const { POST } = await import("@/app/api/operator/conversation/route");
+    const response = await POST(
+      new Request("http://localhost/api/operator/conversation", {
+        method: "POST",
+        body: JSON.stringify({ action: "resume", workId: "work-1" }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.resumeWork).toHaveBeenCalledWith(USER_ID, "work-1");
   });
 
   it.each([

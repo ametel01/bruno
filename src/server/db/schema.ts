@@ -830,7 +830,10 @@ export const operatorAiConnections = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    check("operator_ai_connections_provider_check", sql`${table.provider} = 'openai'`),
+    check(
+      "operator_ai_connections_provider_check",
+      sql`${table.provider} IN ('openai', 'anthropic')`,
+    ),
     check(
       "operator_ai_connections_subject_check",
       sql`${table.providerSubjectId} IS NULL OR length(trim(${table.providerSubjectId})) BETWEEN 1 AND 200`,
@@ -877,7 +880,10 @@ export const operatorAiConnectionReceipts = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    check("operator_ai_connection_receipts_provider_check", sql`${table.provider} = 'openai'`),
+    check(
+      "operator_ai_connection_receipts_provider_check",
+      sql`${table.provider} IN ('openai', 'anthropic')`,
+    ),
     check(
       "operator_ai_connection_receipts_subject_check",
       sql`${table.providerSubjectId} IS NULL OR length(trim(${table.providerSubjectId})) BETWEEN 1 AND 200`,
@@ -1965,6 +1971,23 @@ export const operatorConversationWorks = pgTable(
     founderMessageId: uuid("founder_message_id"),
     operatorMessageId: uuid("operator_message_id"),
     providerConnectionId: uuid("provider_connection_id"),
+    providerSubjectId: text("provider_subject_id"),
+    providerAccountLabel: text("provider_account_label"),
+    approvedModelAssignment: text("approved_model_assignment"),
+    providerAttempts: jsonb("provider_attempts")
+      .$type<
+        Array<{
+          provider: string;
+          policyVersion: number;
+          connectionId: string | null;
+          providerSubjectId: string | null;
+          accountLabel: string | null;
+          approvedModelAssignment: string;
+          state: "running" | "paused" | "completed";
+        }>
+      >()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     externalEffectStarted: boolean("external_effect_started").notNull().default(false),
     recoveryChoices: jsonb("recovery_choices")
       .$type<string[]>()
@@ -1985,7 +2008,22 @@ export const operatorConversationWorks = pgTable(
       "operator_conversation_works_checkpoint_id_check",
       sql`length(trim(${table.checkpointId})) BETWEEN 1 AND 240`,
     ),
-    check("operator_conversation_works_provider_check", sql`${table.provider} = 'openai'`),
+    check(
+      "operator_conversation_works_provider_check",
+      sql`${table.provider} IN ('openai', 'anthropic')`,
+    ),
+    check(
+      "operator_conversation_works_provider_subject_check",
+      sql`${table.providerSubjectId} IS NULL OR length(trim(${table.providerSubjectId})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "operator_conversation_works_provider_account_label_check",
+      sql`${table.providerAccountLabel} IS NULL OR length(trim(${table.providerAccountLabel})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "operator_conversation_works_approved_model_assignment_check",
+      sql`${table.approvedModelAssignment} IS NULL OR length(trim(${table.approvedModelAssignment})) BETWEEN 1 AND 200`,
+    ),
     check("operator_conversation_works_policy_version_check", sql`${table.policyVersion} >= 1`),
     check(
       "operator_conversation_works_completion_identity_check",

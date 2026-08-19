@@ -505,6 +505,27 @@
       "when": 1787107086869,
       "tag": "0071_faithful_blazing_skull",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1787110460056,
+      "tag": "0072_bent_mephisto",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1787110958570,
+      "tag": "0073_exotic_lord_tyger",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1787111211374,
+      "tag": "0074_steep_archangel",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,8 @@ import {
   operatorAiConnections,
   operators,
 } from "@/src/server/db/schema";
+import type { FounderAiProvider } from "@/src/server/operators/founder-ai-routing";
+import { routeFounderAiProvider } from "@/src/server/operators/founder-ai-routing";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 
 type FounderAiConnectionTransaction = Parameters<
@@ -28,7 +30,7 @@ export type FounderAiConnectionStatus =
   | "disconnected";
 
 export type FounderAiConnectionDto = {
-  provider: "openai";
+  provider: FounderAiProvider;
   status: FounderAiConnectionStatus;
   accountLabel: string | null;
   connectedAt: string | null;
@@ -36,7 +38,7 @@ export type FounderAiConnectionDto = {
   workState: "available" | "paused";
   recoveryMessage: string | null;
   receipt: {
-    provider: "openai";
+    provider: FounderAiProvider;
     accountLabel: string | null;
     outcome: "connected" | "reconnected" | "disconnected" | "needs_attention";
     issuedAt: string;
@@ -198,6 +200,53 @@ export async function requireReadyFounderOpenAiConnectionForUser(
   return connection;
 }
 
+/**
+ * General work must route through the active compatibility policy rather than
+ * assuming that the OpenAI OAuth connection is the only released account.
+ */
+export async function requireReadyFounderAiConnectionForUser(
+  userId: string,
+  dependencies: Pick<FounderAiConnectionDependencies, "createConnection" | "now"> = {},
+): Promise<FounderAiConnectionDto> {
+  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  try {
+    const routed = await connection.db.transaction(async (tx) => {
+      const decision = await routeFounderAiProvider(tx, operator.id, {
+        now: dependencies.now?.() ?? new Date(),
+      });
+      if (!decision) return null;
+      const [row] = await tx
+        .select()
+        .from(operatorAiConnections)
+        .where(eq(operatorAiConnections.id, decision.connectionId))
+        .limit(1);
+      if (!row) return null;
+      const [receipt] = await tx
+        .select()
+        .from(operatorAiConnectionReceipts)
+        .where(eq(operatorAiConnectionReceipts.connectionId, row.id))
+        .orderBy(
+          desc(operatorAiConnectionReceipts.createdAt),
+          desc(operatorAiConnectionReceipts.id),
+        )
+        .limit(1);
+      return { connection: row, receipt: receipt ?? null };
+    });
+    if (!routed) {
+      throw new FounderAiConnectionError(
+        "ai_connection_paused",
+        "No connected compatible AI provider is ready. Bruno paused work until one is available.",
+        409,
+      );
+    }
+    return toConnectionDto(routed.connection, routed.receipt);
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
 export async function startFounderOpenAiAuthorizationForUser(
   userId: string,
   dependencies: FounderAiConnectionDependencies = {},
@@ -219,7 +268,7 @@ export async function startFounderOpenAiAuthorizationForUser(
   try {
     const current = await connection.db.transaction(async (tx) => {
       await lockOperator(tx, operator.id);
-      return selectConnection(tx, operator.id, true);
+      return selectConnection(tx, operator.id, true, "openai");
     });
     if (current?.connection.status === "ready") {
       return {
@@ -254,7 +303,7 @@ export async function startFounderOpenAiAuthorizationForUser(
     const sessionHash = digestOpaqueValue(started.authorization.sessionId);
     const row = await connection.db.transaction(async (tx) => {
       await lockOperator(tx, operator.id);
-      const existing = await selectConnection(tx, operator.id, true);
+      const existing = await selectConnection(tx, operator.id, true, "openai");
       if (existing) {
         const [updated] = await tx
           .update(operatorAiConnections)
@@ -323,7 +372,7 @@ export async function pollFounderOpenAiAuthorizationForUser(
   try {
     const current = await connection.db.transaction(async (tx) => {
       await lockOperator(tx, operator.id);
-      return selectConnection(tx, operator.id, true);
+      return selectConnection(tx, operator.id, true, "openai");
     });
     if (!current?.connection.authorizationSessionHash) {
       throw new FounderAiConnectionError(
@@ -438,7 +487,7 @@ export async function pollFounderOpenAiAuthorizationForUser(
           503,
         );
       await insertReceipt(tx, saved, receiptKind, at);
-      const selected = await selectConnection(tx, operator.id);
+      const selected = await selectConnection(tx, operator.id, false, "openai");
       return selected;
     });
     if (!updated)
@@ -464,7 +513,7 @@ export async function recheckFounderOpenAiConnectionForUser(
   const adapter = dependencies.adapter ?? createHermesOpenAiAdapter();
   try {
     const current = await connection.db.transaction((tx) =>
-      selectConnection(tx, operator.id, true),
+      selectConnection(tx, operator.id, true, "openai"),
     );
     if (!current) return null;
     if (!current.connection.providerSubjectId) {
@@ -516,7 +565,7 @@ export async function recheckFounderOpenAiConnectionForUser(
         .returning();
       if (!saved) return null;
       if (!readiness.ok) await insertReceipt(tx, saved, "verification_failed", at);
-      return selectConnection(tx, operator.id);
+      return selectConnection(tx, operator.id, false, "openai");
     });
     return updated ? toConnectionDto(updated.connection, updated.receipt) : null;
   } finally {
@@ -535,7 +584,7 @@ export async function disconnectFounderOpenAiForUser(
   const adapter = dependencies.adapter ?? createHermesOpenAiAdapter();
   try {
     const current = await connection.db.transaction((tx) =>
-      selectConnection(tx, operator.id, true),
+      selectConnection(tx, operator.id, true, "openai"),
     );
     if (!current) return null;
     const revocation = await adapter.revokeAuthorization({
@@ -571,7 +620,7 @@ export async function disconnectFounderOpenAiForUser(
         .returning();
       if (!saved) return null;
       await insertReceipt(tx, saved, revocation.providerRevoked ? "revoked" : "disconnected", at);
-      return selectConnection(tx, operator.id);
+      return selectConnection(tx, operator.id, false, "openai");
     });
     return updated ? toConnectionDto(updated.connection, updated.receipt) : null;
   } finally {
@@ -591,7 +640,7 @@ async function updateConnectionFailure(input: {
 }): Promise<FounderAiConnectionDto> {
   const result = await input.connection.db.transaction(async (tx) => {
     await lockOperator(tx, input.operatorId);
-    const current = await selectConnection(tx, input.operatorId, true);
+    const current = await selectConnection(tx, input.operatorId, true, "openai");
     if (!current) {
       const [created] = await tx
         .insert(operatorAiConnections)
@@ -615,7 +664,7 @@ async function updateConnectionFailure(input: {
           503,
         );
       await insertReceipt(tx, created, "verification_failed", input.now);
-      return selectConnection(tx, input.operatorId);
+      return selectConnection(tx, input.operatorId, false, "openai");
     }
     const [saved] = await tx
       .update(operatorAiConnections)
@@ -640,7 +689,7 @@ async function updateConnectionFailure(input: {
         503,
       );
     await insertReceipt(tx, saved, "verification_failed", input.now);
-    return selectConnection(tx, input.operatorId);
+    return selectConnection(tx, input.operatorId, false, "openai");
   });
   if (!result)
     throw new FounderAiConnectionError(
@@ -710,6 +759,7 @@ async function selectConnection(
   tx: FounderAiConnectionTransaction,
   operatorId: string,
   forUpdate = false,
+  provider?: FounderAiProvider,
 ): Promise<{
   connection: typeof operatorAiConnections.$inferSelect;
   receipt: typeof operatorAiConnectionReceipts.$inferSelect | null;
@@ -717,7 +767,14 @@ async function selectConnection(
   let connectionQuery = tx
     .select()
     .from(operatorAiConnections)
-    .where(eq(operatorAiConnections.operatorId, operatorId))
+    .where(
+      provider
+        ? and(
+            eq(operatorAiConnections.operatorId, operatorId),
+            eq(operatorAiConnections.provider, provider),
+          )
+        : eq(operatorAiConnections.operatorId, operatorId),
+    )
     .orderBy(desc(operatorAiConnections.updatedAt))
     .limit(1);
   if (forUpdate) connectionQuery = connectionQuery.for("update") as typeof connectionQuery;
@@ -743,7 +800,7 @@ function toConnectionDto(
   receipt: typeof operatorAiConnectionReceipts.$inferSelect | null,
 ): FounderAiConnectionDto {
   return {
-    provider: "openai",
+    provider: connection.provider as FounderAiProvider,
     status: connection.status,
     accountLabel: connection.accountLabel,
     connectedAt: connection.authorizedAt?.toISOString() ?? null,
@@ -752,7 +809,7 @@ function toConnectionDto(
     recoveryMessage: connection.recoveryMessage,
     receipt: receipt
       ? {
-          provider: "openai",
+          provider: receipt.provider as FounderAiProvider,
           accountLabel: receipt.accountLabel,
           outcome:
             receipt.kind === "reauthorized"

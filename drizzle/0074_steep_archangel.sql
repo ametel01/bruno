@@ -1,0 +1,1 @@
+ALTER TABLE "operator_conversation_works" ADD COLUMN "provider_attempts" jsonb DEFAULT '[]'::jsonb NOT NULL;

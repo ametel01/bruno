@@ -6,12 +6,14 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import type * as schema from "@/src/server/db/schema";
 import { operators } from "@/src/server/db/schema";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import { ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY } from "@/src/server/operators/founder-ai-routing";
 
 export type FounderAiWorkTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
 >[0];
 
-export const FOUNDER_AI_COMPATIBILITY_POLICY_VERSION = 1;
+export const FOUNDER_AI_COMPATIBILITY_POLICY_VERSION =
+  ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.version;
 export const FOUNDER_AI_WORK_PROVIDER = "openai" as const;
 
 export type FounderAiRecoveryChoice = {

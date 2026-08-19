@@ -36,6 +36,7 @@ import {
   type FounderProposedActionDto,
   projectFounderProposedAction,
 } from "@/src/server/operators/founder-proposed-actions";
+import { selectFounderAiProvider } from "@/src/server/operators/founder-ai-routing";
 
 type CoreTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -139,7 +140,7 @@ export async function confirmFounderCoreProcessingConsentForUser(
     const at = dependencies.now?.() ?? new Date();
     return connection.db.transaction(async (tx) => {
       await lockOperator(tx, operator.id);
-      const pair = await readyCoreConnectionSet(tx, operator.id);
+      const pair = await readyCoreConnectionSet(tx, operator.id, at);
       if (!pair) {
         throw new FounderCoreOperationError(
           "core_connections_not_ready",
@@ -350,7 +351,7 @@ async function ensureCoreOperation(
   at: Date,
   pair?: Awaited<ReturnType<typeof readyCoreConnectionSet>>,
 ) {
-  const currentPair = pair ?? (await readyCoreConnectionSet(tx, operatorId));
+  const currentPair = pair ?? (await readyCoreConnectionSet(tx, operatorId, at));
   const [existing] = await tx
     .select()
     .from(operatorLimitedOperations)
@@ -422,8 +423,8 @@ async function ensureCoreOperation(
   );
 }
 
-async function readyCoreConnectionSet(tx: CoreTransaction, operatorId: string) {
-  const [ai] = await tx
+async function readyCoreConnectionSet(tx: CoreTransaction, operatorId: string, now = new Date()) {
+  const aiConnections = await tx
     .select()
     .from(operatorAiConnections)
     .where(
@@ -432,8 +433,11 @@ async function readyCoreConnectionSet(tx: CoreTransaction, operatorId: string) {
         eq(operatorAiConnections.status, "ready"),
       ),
     )
-    .orderBy(desc(operatorAiConnections.updatedAt))
-    .limit(1);
+    .orderBy(desc(operatorAiConnections.updatedAt));
+  const aiDecision = selectFounderAiProvider(aiConnections, { now });
+  const ai = aiDecision
+    ? aiConnections.find((connection) => connection.id === aiDecision.connectionId)
+    : undefined;
   const [calendar] = await tx
     .select()
     .from(operatorCalendarConnections)

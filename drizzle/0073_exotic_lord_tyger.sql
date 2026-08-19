@@ -1,0 +1,2 @@
+ALTER TABLE "operator_conversation_works" ADD COLUMN "approved_model_assignment" text;--> statement-breakpoint
+ALTER TABLE "operator_conversation_works" ADD CONSTRAINT "operator_conversation_works_approved_model_assignment_check" CHECK ("operator_conversation_works"."approved_model_assignment" IS NULL OR length(trim("operator_conversation_works"."approved_model_assignment")) BETWEEN 1 AND 200);

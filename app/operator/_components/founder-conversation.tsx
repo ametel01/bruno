@@ -75,6 +75,40 @@ export function FounderConversation() {
     }
   }
 
+  async function resumeCheckpoint() {
+    const workId = conversation?.activeWork?.id;
+    if (!workId || sending) return;
+    setSending(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/operator/conversation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "resume", workId }),
+      });
+      const body = (await response.json()) as
+        | { conversation: FounderConversationDto }
+        | { error?: { message?: string } };
+      if (!response.ok || !("conversation" in body)) {
+        throw new Error(
+          "error" in body
+            ? (body.error?.message ?? "Bruno could not resume that checkpoint.")
+            : "Bruno could not resume that checkpoint.",
+        );
+      }
+      setConversation(body.conversation);
+    } catch (resumeError) {
+      setError(
+        resumeError instanceof Error
+          ? resumeError.message
+          : "Bruno could not resume that checkpoint.",
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <section className={styles.card} id="conversation" aria-labelledby="conversation-title">
       <div className={styles.heading}>
@@ -110,6 +144,9 @@ export function FounderConversation() {
               "Bruno is waiting for your connected AI account."}
           </span>
           <div className={styles.pauseChoices}>
+            <button type="button" onClick={() => void resumeCheckpoint()} disabled={sending}>
+              {sending ? "Checking providers…" : "Resume from checkpoint"}
+            </button>
             {conversation.activeWork.recoveryChoices.map((choice) =>
               choice.href ? (
                 <a key={choice.kind} href={choice.href}>

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  operatorAiConnections,
   operatorConversationMessages,
   operatorConversationWorks,
   operatorPreparations,
@@ -15,14 +16,26 @@ import {
 import {
   type FounderConversationAdapter,
   getFounderConversationForUser,
+  resumeFounderConversationWorkForUser,
   sendFounderConversationMessageForUser,
 } from "@/src/server/operators/founder-conversation";
 import {
   confirmFounderTimezoneForUser,
   ensureFounderOperatorForUser,
 } from "@/src/server/operators/founder-operator";
+import { ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY } from "@/src/server/operators/founder-ai-routing";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003401";
+const MULTI_PROVIDER_POLICY = {
+  ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY,
+  providers: {
+    ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers,
+    anthropic: {
+      ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers.anthropic,
+      released: true,
+    },
+  },
+};
 
 describe("Founder Conversation application seam", () => {
   let connection: DatabaseConnection;
@@ -173,6 +186,175 @@ describe("Founder Conversation application seam", () => {
     await expect(connection.db.select().from(operatorConversationMessages)).resolves.toHaveLength(
       2,
     );
+  });
+
+  it("routes a work unit through the next Ready provider and records its account evidence", async () => {
+    const [anthropic] = await connection.db
+      .insert(operatorAiConnections)
+      .values({
+        operatorId: (
+          await ensureFounderOperatorForUser(OWNER_ID, {
+            createConnection: () => connection,
+            now: () => now,
+          })
+        ).id,
+        provider: "anthropic",
+        providerSubjectId: "anthropic-account-1",
+        accountLabel: "founder@anthropic.example",
+        status: "ready",
+        authorizationState: "authorized",
+        capacityState: "available",
+        inferenceState: "passed",
+        eligibleAccount: true,
+        authorizationPersisted: true,
+        approvedModelAssignment: "anthropic-claude",
+        authorizedAt: now,
+        lastVerifiedAt: now,
+      })
+      .returning();
+    const operator = await ensureFounderOperatorForUser(OWNER_ID, {
+      createConnection: () => connection,
+      now: () => now,
+    });
+    const sent = await sendFounderConversationMessageForUser(OWNER_ID, "Use the connected backup", {
+      createConnection: () => connection,
+      adapters: {
+        anthropic: {
+          async send(input) {
+            expect(input.provider).toBe("anthropic");
+            expect(input.approvedModelAssignment).toBe("anthropic-claude");
+            return { ok: true, response: "Handled by the connected backup." };
+          },
+        },
+      },
+      routingPolicy: MULTI_PROVIDER_POLICY,
+      requestId: "request-anthropic",
+      now: () => now,
+      requireReadyConnection: async () => ({
+        provider: "anthropic" as const,
+        status: "ready" as const,
+        accountLabel: "founder@anthropic.example",
+        connectedAt: now.toISOString(),
+        lastVerifiedAt: now.toISOString(),
+        workState: "available" as const,
+        recoveryMessage: null,
+        receipt: null,
+      }),
+    });
+    expect(sent.activeWork).toMatchObject({
+      provider: "anthropic",
+      policyVersion: 1,
+      state: "completed",
+    });
+    const [work] = await connection.db.select().from(operatorConversationWorks);
+    expect(work).toMatchObject({
+      provider: "anthropic",
+      providerConnectionId: anthropic?.id,
+      providerSubjectId: "anthropic-account-1",
+      providerAccountLabel: "founder@anthropic.example",
+      policyVersion: 1,
+    });
+    expect(operator.id).toBeTruthy();
+  });
+
+  it("changes providers only when explicitly resuming the same paused checkpoint", async () => {
+    const operator = await ensureFounderOperatorForUser(OWNER_ID, {
+      createConnection: () => connection,
+      now: () => now,
+    });
+    await connection.db.insert(operatorAiConnections).values([
+      {
+        operatorId: operator.id,
+        provider: "openai",
+        providerSubjectId: "openai-account-1",
+        accountLabel: "founder@openai.example",
+        status: "ready",
+        authorizationState: "authorized",
+        capacityState: "available",
+        inferenceState: "passed",
+        eligibleAccount: true,
+        authorizationPersisted: true,
+        approvedModelAssignment: "openai-codex",
+        authorizedAt: now,
+        lastVerifiedAt: now,
+      },
+      {
+        operatorId: operator.id,
+        provider: "anthropic",
+        providerSubjectId: "anthropic-account-2",
+        accountLabel: "founder@anthropic.example",
+        status: "ready",
+        authorizationState: "authorized",
+        capacityState: "available",
+        inferenceState: "passed",
+        eligibleAccount: true,
+        authorizationPersisted: true,
+        approvedModelAssignment: "anthropic-claude",
+        authorizedAt: now,
+        lastVerifiedAt: now,
+      },
+    ]);
+    const calls: string[] = [];
+    const paused = await sendFounderConversationMessageForUser(
+      OWNER_ID,
+      "Try the primary account",
+      {
+        createConnection: () => connection,
+        adapters: {
+          openai: {
+            async send(input) {
+              calls.push(`${input.provider}:first`);
+              return { ok: false, code: "capacity_unavailable", message: "OpenAI capacity ended." };
+            },
+          },
+          anthropic: {
+            async send(input) {
+              calls.push(`${input.provider}:resume`);
+              return { ok: true, response: "Recovered without duplicating the request." };
+            },
+          },
+        },
+        requestId: "request-failover",
+        now: () => now,
+        requireReadyConnection: async () => ({
+          provider: "openai" as const,
+          status: "ready" as const,
+          accountLabel: "founder@openai.example",
+          connectedAt: now.toISOString(),
+          lastVerifiedAt: now.toISOString(),
+          workState: "available" as const,
+          recoveryMessage: null,
+          receipt: null,
+        }),
+        routingPolicy: MULTI_PROVIDER_POLICY,
+      },
+    );
+    expect(paused.activeWork).toMatchObject({ provider: "openai", state: "paused" });
+    const resumed = await resumeFounderConversationWorkForUser(
+      OWNER_ID,
+      paused.activeWork?.id ?? "",
+      {
+        createConnection: () => connection,
+        adapters: {
+          anthropic: {
+            async send(input) {
+              calls.push(`${input.provider}:resume`);
+              return { ok: true, response: "Recovered without duplicating the request." };
+            },
+          },
+        },
+        routingPolicy: MULTI_PROVIDER_POLICY,
+        now: () => now,
+      },
+    );
+    expect(resumed.activeWork).toMatchObject({ provider: "anthropic", state: "completed" });
+    expect(resumed.messages.filter((message) => message.role === "operator")).toHaveLength(1);
+    expect(calls).toEqual(["openai:first", "anthropic:resume"]);
+    const [persisted] = await connection.db.select().from(operatorConversationWorks);
+    expect(persisted?.providerAttempts).toMatchObject([
+      { provider: "openai", accountLabel: "founder@openai.example", state: "paused" },
+      { provider: "anthropic", accountLabel: "founder@anthropic.example", state: "completed" },
+    ]);
   });
 
   it("pauses external effects durably while leaving Conversation available", async () => {

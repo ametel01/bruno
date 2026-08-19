@@ -1,6 +1,7 @@
 import {
   FounderConversationError,
   getFounderConversationForUser,
+  resumeFounderConversationWorkForUser,
   sendFounderConversationMessageForUser,
 } from "@/src/server/operators/founder-conversation";
 import type { getFounderConversationForUser as getConversation } from "@/src/server/operators/founder-conversation";
@@ -11,6 +12,7 @@ type ConversationRouteDependencies = {
   requireApplicationUser?: typeof requireConfiguredApplicationUser;
   getConversation?: typeof getConversation;
   sendMessage?: typeof sendMessage;
+  resumeWork?: typeof resumeFounderConversationWorkForUser;
 };
 
 export const dynamic = "force-dynamic";
@@ -48,6 +50,26 @@ export async function POST(
     return validationResponse("Request body must be valid JSON.");
   }
   const message = readString(payload, "message");
+  const action = readString(payload, "action");
+  if (action === "resume") {
+    const workId = readString(payload, "workId");
+    if (!workId) return validationResponse("workId is required to resume a checkpoint.");
+    try {
+      const conversation = await (dependencies.resumeWork ?? resumeFounderConversationWorkForUser)(
+        applicationUser.userId,
+        workId,
+      );
+      return Response.json({ conversation }, { headers: noStoreHeaders() });
+    } catch (error) {
+      if (error instanceof FounderConversationError) {
+        return Response.json(
+          { error: { code: error.code, message: error.message } },
+          { status: error.status, headers: noStoreHeaders() },
+        );
+      }
+      throw error;
+    }
+  }
   if (!message) return validationResponse("Message is required.");
   const requestId = readString(payload, "requestId");
 
