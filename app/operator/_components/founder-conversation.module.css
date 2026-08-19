@@ -126,6 +126,21 @@
   color: var(--operator-muted);
 }
 
+.pauseChoices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.8rem;
+  color: var(--operator-muted);
+  font-size: 0.86rem;
+}
+
+.pauseChoices a {
+  color: var(--operator-ink);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+
 .composer {
   display: grid;
   gap: 9px;

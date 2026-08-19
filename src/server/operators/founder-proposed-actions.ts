@@ -18,6 +18,7 @@ import {
   operatorProductGuardrails,
   operatorProposedActions,
 } from "@/src/server/db/schema";
+import { assertFounderExternalActionsNotPausedInTransaction } from "@/src/server/operators/founder-ai-work";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 
 type ProposedActionTransaction = Parameters<
@@ -520,6 +521,15 @@ export async function decideFounderProposedActionForUser(
           decision: toDecisionDto(recorded),
           duplicate: true,
         };
+      }
+      if (
+        kind === "approve" &&
+        (action.actionFamily === "external_communication" ||
+          action.actionFamily === "meeting_management" ||
+          action.actionFamily === "commercial_commitment" ||
+          action.actionFamily === "data_control")
+      ) {
+        await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id);
       }
       if (action.state !== "awaiting_approval" && action.state !== "proposed") {
         throw new FounderProposedActionError(

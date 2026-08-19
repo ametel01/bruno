@@ -683,6 +683,9 @@ export const operators = pgTable(
       .references(() => users.id),
     status: operatorStatusEnum("status").notNull().default("active"),
     mailOfferDisposition: operatorMailOfferDispositionEnum("mail_offer_disposition"),
+    externalActionPause: boolean("external_action_pause").notNull().default(false),
+    externalActionPauseReason: text("external_action_pause_reason"),
+    externalActionPausedAt: timestamp("external_action_paused_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -691,6 +694,10 @@ export const operators = pgTable(
     check(
       "operators_archived_status_check",
       sql`(${table.status} = 'archived' AND ${table.archivedAt} IS NOT NULL) OR (${table.status} = 'active' AND ${table.archivedAt} IS NULL)`,
+    ),
+    check(
+      "operators_external_action_pause_pair_check",
+      sql`(${table.externalActionPause} = false AND ${table.externalActionPauseReason} IS NULL AND ${table.externalActionPausedAt} IS NULL) OR (${table.externalActionPause} = true AND ${table.externalActionPauseReason} IS NOT NULL AND ${table.externalActionPausedAt} IS NOT NULL)`,
     ),
     uniqueIndex("operators_user_id_idx").on(table.userId),
     index("operators_status_idx").on(table.status),
@@ -1939,11 +1946,21 @@ export const operatorConversationWorks = pgTable(
       .references(() => operatorConversations.id),
     requestId: text("request_id").notNull(),
     checkpointId: text("checkpoint_id").notNull(),
+    provider: text("provider").notNull().default("openai"),
+    policyVersion: integer("policy_version").notNull().default(1),
+    completionIdentity: text("completion_identity").notNull().default("legacy"),
     responseSequence: integer("response_sequence").notNull(),
     state: operatorConversationWorkStateEnum("state").notNull().default("running"),
     founderMessageId: uuid("founder_message_id"),
     operatorMessageId: uuid("operator_message_id"),
     providerConnectionId: uuid("provider_connection_id"),
+    externalEffectStarted: boolean("external_effect_started").notNull().default(false),
+    recoveryChoices: jsonb("recovery_choices")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    pausedAt: timestamp("paused_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
     recoveryMessage: text("recovery_message"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1957,6 +1974,12 @@ export const operatorConversationWorks = pgTable(
       "operator_conversation_works_checkpoint_id_check",
       sql`length(trim(${table.checkpointId})) BETWEEN 1 AND 240`,
     ),
+    check("operator_conversation_works_provider_check", sql`${table.provider} = 'openai'`),
+    check("operator_conversation_works_policy_version_check", sql`${table.policyVersion} >= 1`),
+    check(
+      "operator_conversation_works_completion_identity_check",
+      sql`length(trim(${table.completionIdentity})) BETWEEN 1 AND 240`,
+    ),
     check(
       "operator_conversation_works_response_sequence_check",
       sql`${table.responseSequence} >= 1`,
@@ -1964,6 +1987,14 @@ export const operatorConversationWorks = pgTable(
     check(
       "operator_conversation_works_recovery_message_check",
       sql`${table.state} IN ('paused', 'failed') OR ${table.recoveryMessage} IS NULL`,
+    ),
+    check(
+      "operator_conversation_works_pause_pair_check",
+      sql`(${table.state} = 'paused' AND ${table.pausedAt} IS NOT NULL) OR (${table.state} <> 'paused' AND ${table.pausedAt} IS NULL)`,
+    ),
+    check(
+      "operator_conversation_works_completed_pair_check",
+      sql`(${table.state} = 'completed' AND ${table.completedAt} IS NOT NULL) OR (${table.state} <> 'completed' AND ${table.completedAt} IS NULL)`,
     ),
     uniqueIndex("operator_conversation_works_request_id_idx").on(
       table.conversationId,
@@ -1974,6 +2005,9 @@ export const operatorConversationWorks = pgTable(
       table.checkpointId,
     ),
     index("operator_conversation_works_state_idx").on(table.conversationId, table.state),
+    uniqueIndex("operator_conversation_works_completion_identity_idx")
+      .on(table.completionIdentity)
+      .where(sql`${table.completionIdentity} <> 'legacy'`),
   ],
 );
 

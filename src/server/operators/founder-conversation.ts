@@ -3,26 +3,35 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type * as schema from "@/src/server/db/schema";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import {
+  operatorAiConnections,
   operatorConversationMessages,
-  operatorConversationWorks,
   operatorConversations,
+  operatorConversationWorks,
 } from "@/src/server/db/schema";
 import {
-  projectFounderActionPreview,
   type FounderActionPreviewDto,
+  projectFounderActionPreview,
 } from "@/src/server/operators/founder-action-previews";
 import {
-  projectFounderProposedAction,
-  type FounderProposedActionDto,
-} from "@/src/server/operators/founder-proposed-actions";
+  type FounderAiConnectionDto,
+  requireReadyFounderOpenAiConnectionForUser,
+} from "@/src/server/operators/founder-ai-connection";
+import {
+  buildFounderAiCheckpointIdentity,
+  buildFounderAiCompletionIdentity,
+  FOUNDER_AI_COMPATIBILITY_POLICY_VERSION,
+  FOUNDER_AI_RECOVERY_CHOICES,
+  FOUNDER_AI_WORK_PROVIDER,
+  type FounderAiRecoveryChoice,
+} from "@/src/server/operators/founder-ai-work";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
-  requireReadyFounderOpenAiConnectionForUser,
-  type FounderAiConnectionDto,
-} from "@/src/server/operators/founder-ai-connection";
+  type FounderProposedActionDto,
+  projectFounderProposedAction,
+} from "@/src/server/operators/founder-proposed-actions";
 
 type FounderConversationTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -43,8 +52,13 @@ export type FounderConversationWorkDto = {
   id: string;
   requestId: string;
   checkpointId: string;
+  provider: "openai";
+  policyVersion: number;
+  completionIdentity: string;
+  externalEffectStarted: boolean;
   state: "running" | "completed" | "paused" | "failed";
   recoveryMessage: string | null;
+  recoveryChoices: FounderAiRecoveryChoice[];
   createdAt: string;
   updatedAt: string;
 };
@@ -177,16 +191,23 @@ export async function sendFounderConversationMessageForUser(
 
       const founderMessageId = makeId();
       const workId = makeId();
-      const checkpointId = `bruno-conversation-${conversation.id}-${conversation.nextSequence}`;
+      const checkpointId = buildFounderAiCheckpointIdentity(
+        conversation.id,
+        conversation.nextSequence,
+      );
       const createdAt = now();
       await tx.insert(operatorConversationWorks).values({
         id: workId,
         conversationId: conversation.id,
         requestId,
         checkpointId,
+        provider: FOUNDER_AI_WORK_PROVIDER,
+        policyVersion: FOUNDER_AI_COMPATIBILITY_POLICY_VERSION,
+        completionIdentity: buildFounderAiCompletionIdentity(workId),
         responseSequence: conversation.nextSequence + 1,
         state: "running",
         founderMessageId,
+        recoveryChoices: [],
         createdAt,
         updatedAt: createdAt,
       });
@@ -240,6 +261,26 @@ export async function sendFounderConversationMessageForUser(
           : "Your connected AI account is not available. Bruno paused this message safely.";
       return finalizePausedConversation(connection, started, message, now());
     }
+
+    await connection.db.transaction(async (tx) => {
+      const [aiConnection] = await tx
+        .select({ id: operatorAiConnections.id })
+        .from(operatorAiConnections)
+        .where(
+          and(
+            eq(operatorAiConnections.operatorId, operator.id),
+            eq(operatorAiConnections.status, "ready"),
+          ),
+        )
+        .orderBy(desc(operatorAiConnections.updatedAt))
+        .limit(1);
+      if (aiConnection) {
+        await tx
+          .update(operatorConversationWorks)
+          .set({ providerConnectionId: aiConnection.id, updatedAt: now() })
+          .where(eq(operatorConversationWorks.id, started.workId));
+      }
+    });
 
     const adapter = dependencies.adapter ?? createHermesConversationAdapter();
     let result: FounderConversationAdapterResult;
@@ -353,8 +394,13 @@ async function projectConversation(
           id: work.id,
           requestId: work.requestId,
           checkpointId: work.checkpointId,
+          provider: work.provider as "openai",
+          policyVersion: work.policyVersion,
+          completionIdentity: work.completionIdentity,
+          externalEffectStarted: work.externalEffectStarted,
           state: work.state,
           recoveryMessage: work.recoveryMessage,
+          recoveryChoices: readRecoveryChoices(work.recoveryChoices),
           createdAt: work.createdAt.toISOString(),
           updatedAt: work.updatedAt.toISOString(),
         }
@@ -421,7 +467,12 @@ async function finalizeCompletedConversation(
       );
     await tx
       .update(operatorConversationWorks)
-      .set({ state: "completed", operatorMessageId: operatorMessage.id, updatedAt: now })
+      .set({
+        state: "completed",
+        operatorMessageId: operatorMessage.id,
+        completedAt: now,
+        updatedAt: now,
+      })
       .where(eq(operatorConversationWorks.id, work.id));
     const [updatedConversation] = await tx
       .update(operatorConversations)
@@ -500,6 +551,8 @@ async function finalizePausedConversation(
         state: "paused",
         operatorMessageId: operatorMessage.id,
         recoveryMessage: message,
+        recoveryChoices: FOUNDER_AI_RECOVERY_CHOICES.map((choice) => choice.kind),
+        pausedAt: now,
         updatedAt: now,
       })
       .where(eq(operatorConversationWorks.id, work.id));
@@ -518,6 +571,14 @@ async function finalizePausedConversation(
         503,
       );
     return projectConversation(tx, updatedConversation);
+  });
+}
+
+function readRecoveryChoices(value: string[]): FounderAiRecoveryChoice[] {
+  const available = new Map(FOUNDER_AI_RECOVERY_CHOICES.map((choice) => [choice.kind, choice]));
+  return value.flatMap((kind) => {
+    const choice = available.get(kind as FounderAiRecoveryChoice["kind"]);
+    return choice ? [choice] : [];
   });
 }
 

@@ -1,9 +1,10 @@
+import { readDraft } from "@/app/api/operator/proposed-actions/route";
+import { FounderExternalActionPauseError } from "@/src/server/operators/founder-ai-work";
 import {
   decideFounderProposedActionForUser,
-  FounderProposedActionError,
   type FounderActionDecisionKind,
+  FounderProposedActionError,
 } from "@/src/server/operators/founder-proposed-actions";
-import { readDraft } from "@/app/api/operator/proposed-actions/route";
 import type { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import { requireConfiguredApplicationUser as defaultRequireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
@@ -58,6 +59,12 @@ export async function POST(
     return Response.json(result, { headers: noStoreHeaders() });
   } catch (error) {
     if (error instanceof FounderProposedActionError) {
+      return Response.json(
+        { error: { code: error.code, message: error.message } },
+        { status: error.status, headers: noStoreHeaders() },
+      );
+    }
+    if (error instanceof FounderExternalActionPauseError) {
       return Response.json(
         { error: { code: error.code, message: error.message } },
         { status: error.status, headers: noStoreHeaders() },

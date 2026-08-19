@@ -1,9 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  getFounderConversationForUser,
-  sendFounderConversationMessageForUser,
-  type FounderConversationAdapter,
-} from "@/src/server/operators/founder-conversation";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   operatorConversationMessages,
@@ -12,6 +7,16 @@ import {
   operatorRuntimes,
   users,
 } from "@/src/server/db/schema";
+import {
+  assertFounderExternalActionsNotPaused,
+  getFounderExternalActionPauseForUser,
+  setFounderExternalActionPauseForUser,
+} from "@/src/server/operators/founder-ai-work";
+import {
+  type FounderConversationAdapter,
+  getFounderConversationForUser,
+  sendFounderConversationMessageForUser,
+} from "@/src/server/operators/founder-conversation";
 import {
   confirmFounderTimezoneForUser,
   ensureFounderOperatorForUser,
@@ -82,7 +87,15 @@ describe("Founder Conversation application seam", () => {
           status: "complete",
         },
       ],
-      activeWork: { state: "completed", checkpointId: expect.stringContaining("conversation") },
+      activeWork: {
+        state: "completed",
+        checkpointId: expect.stringMatching(/^bruno-ai-checkpoint-/),
+        provider: "openai",
+        policyVersion: 1,
+        completionIdentity: expect.stringMatching(/^bruno-ai-completion-/),
+        externalEffectStarted: false,
+        recoveryChoices: [],
+      },
     });
     expect(calls).toEqual(["request-1"]);
 
@@ -144,12 +157,121 @@ describe("Founder Conversation application seam", () => {
       activeWork: {
         state: "paused",
         recoveryMessage: "Your connected AI account has no available capacity right now.",
+        provider: "openai",
+        policyVersion: 1,
+        completionIdentity: expect.stringMatching(/^bruno-ai-completion-/),
+        externalEffectStarted: false,
+        recoveryChoices: [
+          { kind: "reconnect" },
+          { kind: "connect_provider" },
+          { kind: "wait" },
+          { kind: "upgrade" },
+        ],
       },
     });
     await expect(connection.db.select().from(operatorConversationWorks)).resolves.toHaveLength(1);
     await expect(connection.db.select().from(operatorConversationMessages)).resolves.toHaveLength(
       2,
     );
+  });
+
+  it("pauses external effects durably while leaving Conversation available", async () => {
+    await expect(
+      setFounderExternalActionPauseForUser(OWNER_ID, true, {
+        createConnection: () => connection,
+        now: () => now,
+        reason: "Review the proposed action first.",
+      }),
+    ).resolves.toEqual({
+      paused: true,
+      reason: "Review the proposed action first.",
+      pausedAt: now.toISOString(),
+    });
+    await expect(
+      getFounderExternalActionPauseForUser(OWNER_ID, { createConnection: () => connection }),
+    ).resolves.toEqual({
+      paused: true,
+      reason: "Review the proposed action first.",
+      pausedAt: now.toISOString(),
+    });
+    await expect(
+      assertFounderExternalActionsNotPaused(OWNER_ID, { createConnection: () => connection }),
+    ).rejects.toMatchObject({ code: "external_action_paused", status: 409 });
+
+    const sent = await sendFounderConversationMessageForUser(OWNER_ID, "Keep observing", {
+      createConnection: () => connection,
+      adapter: {
+        async send() {
+          return { ok: true, response: "Conversation remains available." };
+        },
+      },
+      requestId: "request-during-external-pause",
+      now: () => now,
+      requireReadyConnection: async () => ({
+        provider: "openai",
+        status: "ready",
+        accountLabel: "founder@example.com",
+        connectedAt: now.toISOString(),
+        lastVerifiedAt: now.toISOString(),
+        workState: "available",
+        recoveryMessage: null,
+        receipt: null,
+      }),
+    });
+    expect(sent.activeWork).toMatchObject({ state: "completed" });
+
+    await expect(
+      setFounderExternalActionPauseForUser(OWNER_ID, false, {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ paused: false, reason: null, pausedAt: null });
+    await expect(
+      assertFounderExternalActionsNotPaused(OWNER_ID, { createConnection: () => connection }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not resubmit checkpointed work after an ambiguous provider failure", async () => {
+    let calls = 0;
+    const adapter: FounderConversationAdapter = {
+      async send() {
+        calls += 1;
+        throw new Error("provider connection lost after submission");
+      },
+    };
+    const dependencies = {
+      createConnection: () => connection,
+      adapter,
+      requestId: "request-ambiguous",
+      now: () => now,
+      requireReadyConnection: async () => ({
+        provider: "openai" as const,
+        status: "ready" as const,
+        accountLabel: "founder@example.com",
+        connectedAt: now.toISOString(),
+        lastVerifiedAt: now.toISOString(),
+        workState: "available" as const,
+        recoveryMessage: null,
+        receipt: null,
+      }),
+    };
+
+    const paused = await sendFounderConversationMessageForUser(
+      OWNER_ID,
+      "Submit this once",
+      dependencies,
+    );
+    expect(paused.activeWork).toMatchObject({ state: "paused" });
+    expect(calls).toBe(1);
+
+    const replay = await sendFounderConversationMessageForUser(OWNER_ID, "Do not submit twice", {
+      ...dependencies,
+      requireReadyConnection: async () => {
+        throw new Error("replay should not recheck or send");
+      },
+    });
+    expect(replay).toEqual(paused);
+    expect(calls).toBe(1);
   });
 
   it("reserves checkpoint response identity across concurrent messages", async () => {

@@ -6,8 +6,8 @@ import type {
   FounderConversationMessageDto,
 } from "@/src/server/operators/founder-conversation";
 import { FounderActionPreviewCard } from "./founder-action-preview";
-import { FounderProposedActionCard } from "./founder-proposed-action";
 import styles from "./founder-conversation.module.css";
+import { FounderProposedActionCard } from "./founder-proposed-action";
 
 export function FounderConversation() {
   const [conversation, setConversation] = useState<FounderConversationDto | null>(null);
@@ -109,6 +109,17 @@ export function FounderConversation() {
             {conversation.activeWork.recoveryMessage ??
               "Bruno is waiting for your connected AI account."}
           </span>
+          <div className={styles.pauseChoices}>
+            {conversation.activeWork.recoveryChoices.map((choice) =>
+              choice.href ? (
+                <a key={choice.kind} href={choice.href}>
+                  {choice.label}
+                </a>
+              ) : (
+                <span key={choice.kind}>{choice.label}</span>
+              ),
+            )}
+          </div>
         </div>
       ) : null}
 
