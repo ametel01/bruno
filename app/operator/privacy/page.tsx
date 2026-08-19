@@ -9,7 +9,7 @@ export default async function FounderPrivacyPage() {
   const applicationUser = await requireConfiguredApplicationUser();
   if (!applicationUser.ok) {
     return (
-      <FounderOperatorShell>
+      <FounderOperatorShell activePage="privacy">
         <section aria-labelledby="privacy-auth-title">
           <h2 id="privacy-auth-title">Sign in to continue</h2>
           <p>Authentication is required to open your private Privacy Center.</p>
@@ -21,7 +21,7 @@ export default async function FounderPrivacyPage() {
   const privacy = await getFounderPrivacyCenterForUser(applicationUser.userId);
   if (!privacy) {
     return (
-      <FounderOperatorShell>
+      <FounderOperatorShell activePage="privacy">
         <section aria-labelledby="privacy-empty-title">
           <h2 id="privacy-empty-title">Your Privacy Center is not ready yet</h2>
           <p>
@@ -34,7 +34,7 @@ export default async function FounderPrivacyPage() {
   }
 
   return (
-    <FounderOperatorShell>
+    <FounderOperatorShell activePage="privacy">
       <FounderPrivacyCenter initialPrivacy={privacy} />
     </FounderOperatorShell>
   );

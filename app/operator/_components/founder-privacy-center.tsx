@@ -70,9 +70,16 @@ export function FounderPrivacyCenter({
         throw new Error(body.error?.message ?? "Retained data could not be deleted.");
       const deleted = body.result?.deleted;
       setMessage(
-        `Deleted ${deleted?.conversationMessages ?? 0} conversation messages, ${deleted?.conversationWorks ?? 0} work records, and ${deleted?.relationshipEvidence ?? 0} relationship evidence records.`,
+        `Deleted ${deleted?.conversationMessages ?? 0} conversation messages, ${deleted?.conversationWorks ?? 0} work records, ${deleted?.relationshipEvidence ?? 0} relationship evidence records, ${deleted?.relationshipRecords ?? 0} relationship records, and ${deleted?.relationshipCandidates ?? 0} relationship candidates.`,
       );
-      setPrivacy((current) => ({ ...current }));
+      setPrivacy((current) => ({
+        ...current,
+        retainedData: current.retainedData.map((item) =>
+          item.deletableInBruno
+            ? { ...item, retention: "No Bruno-local rows remain from this deletion request." }
+            : item,
+        ),
+      }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Retained data could not be deleted.");
     } finally {
@@ -114,7 +121,7 @@ export function FounderPrivacyCenter({
                     <h3>{connection.provider}</h3>
                   </div>
                   <span className={connection.isActiveRoute ? styles.active : styles.status}>
-                    {connection.isActiveRoute ? "Active route" : connection.status}
+                    {connection.isActiveRoute ? "Active route" : connection.availability}
                   </span>
                 </div>
                 <dl className={styles.details}>
@@ -133,7 +140,7 @@ export function FounderPrivacyCenter({
                   />
                   <Detail label="Bruno's narrower use" value={connection.narrowerUse} />
                   <Detail label="Capabilities" value={connection.capabilities.join(", ")} />
-                  <Detail label="Freshness" value={formatDate(connection.freshness)} />
+                  <Detail label="Evidence freshness" value={formatDate(connection.freshness)} />
                   <Detail label="Last recorded use" value={formatDate(connection.lastUse)} />
                 </dl>
                 <button

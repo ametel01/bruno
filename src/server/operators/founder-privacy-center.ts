@@ -16,6 +16,8 @@ import {
   operatorMailResources,
   operatorMailSendingConnections,
   operatorRelationshipEvidence,
+  operatorRelationshipCandidates,
+  operatorRelationshipRecords,
   operators,
 } from "@/src/server/db/schema";
 import { routeFounderAiProvider } from "@/src/server/operators/founder-ai-routing";
@@ -30,7 +32,7 @@ export type FounderPrivacyConnection = {
   provider: string;
   providerIdentity: string | null;
   accountLabel: string | null;
-  status: string;
+  availability: string;
   selectedResources: string[];
   grantedAccess: string[];
   narrowerUse: string;
@@ -68,6 +70,9 @@ export type FounderPrivacyDeletionResult = {
     conversationWorks: number;
     conversations: number;
     relationshipEvidence: number;
+    relationshipRecords: number;
+    relationshipCandidates: number;
+    relationshipCorrections: number;
   };
   retained: string[];
 };
@@ -83,6 +88,12 @@ const RETAINED_DATA = [
   {
     category: "Relationship evidence excerpts",
     purpose: "Ground relationship context and bounded Founder preparation.",
+    retention: "Kept in Bruno until you delete retained data; source systems remain unchanged.",
+    deletableInBruno: true,
+  },
+  {
+    category: "Relationship records, candidates, and corrections",
+    purpose: "Keep the Founder relationship graph and its reviewed changes coherent.",
     retention: "Kept in Bruno until you delete retained data; source systems remain unchanged.",
     deletableInBruno: true,
   },
@@ -154,7 +165,7 @@ export async function getFounderPrivacyCenterForUser(
         provider: item.provider,
         providerIdentity: item.providerSubjectId,
         accountLabel: item.accountLabel,
-        status: item.status,
+        availability: item.status,
         selectedResources: ["No provider resources; account-level inference grant only"],
         grantedAccess: [
           item.authorizationState === "authorized"
@@ -186,7 +197,7 @@ export async function getFounderPrivacyCenterForUser(
           provider: item.provider,
           providerIdentity: item.providerSubjectId,
           accountLabel: item.accountLabel,
-          status: item.status,
+          availability: item.status,
           selectedResources: resources
             .filter((resource) => resource.selected)
             .map((resource) => resource.summary),
@@ -214,7 +225,7 @@ export async function getFounderPrivacyCenterForUser(
           provider: item.provider,
           providerIdentity: item.providerSubjectId,
           accountLabel: item.accountLabel,
-          status: item.status,
+          availability: item.status,
           selectedResources: resources
             .filter((resource) => resource.selected)
             .map((resource) => resource.name),
@@ -243,7 +254,7 @@ export async function getFounderPrivacyCenterForUser(
           provider: item.provider,
           providerIdentity: item.providerSubjectId,
           accountLabel: item.accountLabel,
-          status: item.status,
+          availability: item.status,
           selectedResources: ["No reading resources; send-only grant"],
           grantedAccess: item.grantedScopes,
           narrowerUse:
@@ -304,6 +315,9 @@ export async function deleteFounderRetainedDataForUser(
             conversationWorks: 0,
             conversations: 0,
             relationshipEvidence: 0,
+            relationshipRecords: 0,
+            relationshipCandidates: 0,
+            relationshipCorrections: 0,
           },
           retained: ["No active Founder Operator was found."],
         };
@@ -373,14 +387,34 @@ export async function deleteFounderRetainedDataForUser(
 async function finishDeletion(
   tx: PrivacyTransaction,
   operatorId: string,
-  deleted: Omit<FounderPrivacyDeletionResult["deleted"], "relationshipEvidence">,
+  deleted: Omit<
+    FounderPrivacyDeletionResult["deleted"],
+    | "relationshipEvidence"
+    | "relationshipRecords"
+    | "relationshipCandidates"
+    | "relationshipCorrections"
+  >,
 ): Promise<FounderPrivacyDeletionResult> {
   const evidence = await tx
     .delete(operatorRelationshipEvidence)
     .where(eq(operatorRelationshipEvidence.operatorId, operatorId))
     .returning({ id: operatorRelationshipEvidence.id });
+  const candidates = await tx
+    .delete(operatorRelationshipCandidates)
+    .where(eq(operatorRelationshipCandidates.operatorId, operatorId))
+    .returning({ id: operatorRelationshipCandidates.id });
+  const records = await tx
+    .delete(operatorRelationshipRecords)
+    .where(eq(operatorRelationshipRecords.operatorId, operatorId))
+    .returning({ id: operatorRelationshipRecords.id });
   return {
-    deleted: { ...deleted, relationshipEvidence: evidence.length },
+    deleted: {
+      ...deleted,
+      relationshipEvidence: evidence.length,
+      relationshipRecords: records.length,
+      relationshipCandidates: candidates.length,
+      relationshipCorrections: 0,
+    },
     retained: [
       "Connection identities, granted scopes, processing consent, provider receipts, and safety audit records remain.",
       "Provider-held copies remain subject to each provider's policy and controls.",

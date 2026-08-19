@@ -2,7 +2,13 @@ import Link from "next/link";
 import { BrunoLogo } from "@/app/_components/bruno-logo";
 import styles from "./founder-operator-shell.module.css";
 
-export function FounderOperatorShell({ children }: { children: React.ReactNode }) {
+export function FounderOperatorShell({
+  children,
+  activePage = "now",
+}: {
+  children: React.ReactNode;
+  activePage?: "now" | "privacy";
+}) {
   return (
     <div className={styles.shell}>
       <aside className={styles.sidebar} aria-label="Founder navigation">
@@ -11,7 +17,11 @@ export function FounderOperatorShell({ children }: { children: React.ReactNode }
           <span>Bruno.Ai</span>
         </Link>
         <nav className={styles.nav} aria-label="Founder workspace">
-          <Link className={styles.navLink} href="/operator" aria-current="page">
+          <Link
+            className={styles.navLink}
+            href="/operator"
+            aria-current={activePage === "now" ? "page" : undefined}
+          >
             <span>Now</span>
           </Link>
           <Link className={styles.navLink} href="/operator#needs-you">
@@ -20,7 +30,11 @@ export function FounderOperatorShell({ children }: { children: React.ReactNode }
           <Link className={styles.navLink} href="/operator#connections">
             <span>Connections</span>
           </Link>
-          <Link className={styles.navLink} href="/operator/privacy" aria-current="page">
+          <Link
+            className={styles.navLink}
+            href="/operator/privacy"
+            aria-current={activePage === "privacy" ? "page" : undefined}
+          >
             <span>Privacy Center</span>
           </Link>
         </nav>
