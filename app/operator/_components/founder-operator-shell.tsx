@@ -20,6 +20,9 @@ export function FounderOperatorShell({ children }: { children: React.ReactNode }
           <Link className={styles.navLink} href="/operator#connections">
             <span>Connections</span>
           </Link>
+          <Link className={styles.navLink} href="/operator/privacy" aria-current="page">
+            <span>Privacy Center</span>
+          </Link>
         </nav>
         <div className={styles.sidebarNote}>
           <span className={styles.statusDot} aria-hidden="true" />
