@@ -63,25 +63,10 @@ export async function POST(
     return validationResponse("Choose a privacy control.");
   }
 
-  const recentAuth = await (
-    dependencies.requireRecentAuth ??
-    ((currentRequest: Request) =>
-      requireRecentFounderAuthentication(currentRequest, "/api/operator/privacy"))
-  )(request);
-  if (!recentAuth) {
-    return Response.json(
-      {
-        error: {
-          code: "recent_authentication_required",
-          message: "Sign in again before deleting retained Bruno data.",
-        },
-      },
-      { status: 401, headers: noStoreHeaders() },
-    );
-  }
-
   const requestDeletion = dependencies.requestDeletion ?? requestFounderDeletionForUser;
   if (payload.action === "request_deletion" || payload.action === "close_account") {
+    const recentAuth = await requireRecentAuth(request, dependencies);
+    if (!recentAuth) return recentAuthenticationResponse();
     const kind: FounderDeletionKind =
       payload.action === "close_account" ? "account_closure" : "retained_data";
     if (kind === "account_closure" && payload.confirmation !== "CLOSE_ACCOUNT") {
@@ -95,6 +80,8 @@ export async function POST(
   }
 
   if (payload.action === "retry_revocations") {
+    const recentAuth = await requireRecentAuth(request, dependencies);
+    if (!recentAuth) return recentAuthenticationResponse();
     const deletion = await (
       dependencies.retryRevocations ?? retryFounderDeletionRevocationsForUser
     )(user.userId);
@@ -102,6 +89,8 @@ export async function POST(
   }
 
   if (payload.action === "delete_retained_data") {
+    const recentAuth = await requireRecentAuth(request, dependencies);
+    if (!recentAuth) return recentAuthenticationResponse();
     if (dependencies.deleteRetainedData && !dependencies.requestDeletion) {
       const result = await dependencies.deleteRetainedData(user.userId);
       return Response.json({ result }, { headers: noStoreHeaders() });
@@ -192,6 +181,29 @@ function authenticationResponse(status: 401 | 503): Response {
 
 function validationResponse(message: string): Response {
   return Response.json({ error: { code: "validation_failed", message } }, { status: 400 });
+}
+
+async function requireRecentAuth(
+  request: Request,
+  dependencies: PrivacyRouteDependencies,
+): Promise<boolean> {
+  return (
+    dependencies.requireRecentAuth ??
+    ((currentRequest: Request) =>
+      requireRecentFounderAuthentication(currentRequest, "/api/operator/privacy"))
+  )(request);
+}
+
+function recentAuthenticationResponse(): Response {
+  return Response.json(
+    {
+      error: {
+        code: "recent_authentication_required",
+        message: "Sign in again before deleting retained Bruno data.",
+      },
+    },
+    { status: 401, headers: noStoreHeaders() },
+  );
 }
 
 function noStoreHeaders(): HeadersInit {

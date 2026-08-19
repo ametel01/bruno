@@ -112,6 +112,7 @@ describe("Founder Privacy Center route", () => {
 
   it("keeps disconnect separate from retained-data deletion", async () => {
     const { POST } = await import("@/app/api/operator/privacy/route");
+    const requireRecentAuth = vi.fn();
     const response = await POST(
       new Request("http://localhost/api/operator/privacy", {
         method: "POST",
@@ -122,9 +123,10 @@ describe("Founder Privacy Center route", () => {
         }),
       }),
       undefined,
-      { requireRecentAuth: async () => true },
+      { requireRecentAuth },
     );
     expect(response.status).toBe(200);
+    expect(requireRecentAuth).not.toHaveBeenCalled();
     expect(mocks.disconnectMailSending).toHaveBeenCalledWith(USER_ID);
     expect(mocks.deleteRetainedData).not.toHaveBeenCalled();
   });
@@ -156,6 +158,32 @@ describe("Founder Privacy Center route", () => {
     expect(allowed.status).toBe(200);
     expect(requestDeletion).toHaveBeenCalledWith(USER_ID, "account_closure", {
       reason: "founder_requested",
+    });
+  });
+
+  it("accepts structured deletion exception disclosure scope", async () => {
+    const { POST } = await import("@/app/api/operator/privacy/route");
+    const requestDeletion = vi.fn().mockResolvedValue({ request: { status: "access_stopped" } });
+    const response = await POST(
+      new Request("http://localhost/api/operator/privacy", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "request_deletion",
+          scope: {
+            legalException: "invoice retention",
+            securityException: "abuse investigation",
+            categories: ["conversation content", "relationship evidence"],
+          },
+        }),
+      }),
+      undefined,
+      { requireRecentAuth: async () => true, requestDeletion },
+    );
+    expect(response.status).toBe(200);
+    expect(requestDeletion).toHaveBeenCalledWith(USER_ID, "retained_data", {
+      legalException: "invoice retention",
+      securityException: "abuse investigation",
+      categories: ["conversation content", "relationship evidence"],
     });
   });
 

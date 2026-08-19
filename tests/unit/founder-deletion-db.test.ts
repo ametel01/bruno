@@ -1,13 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { operatorConversations, operators, users } from "@/src/server/db/schema";
+import {
+  operatorConversations,
+  operatorMailConnections,
+  operators,
+  users,
+} from "@/src/server/db/schema";
 import {
   FOUNDER_ACTIVE_PURGE_WINDOW_MS,
   FOUNDER_BACKUP_EXPIRY_WINDOW_MS,
   getFounderDeletionReceiptForUser,
   processFounderDeletionRequests,
   requestFounderDeletionForUser,
+  retryFounderDeletionRevocationsForUser,
 } from "@/src/server/operators/founder-deletion";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003701";
@@ -107,5 +113,70 @@ describe("Founder deletion lifecycle", () => {
     });
     expect(completed?.request.status).toBe("completed");
     expect(completed?.stages.map((stage) => stage.stage)).toContain("backup_expiry");
+  });
+
+  it("keeps revocation failures visible and retryable after local credential removal", async () => {
+    await connection.db.insert(operatorMailConnections).values({
+      id: "00000000-0000-4000-8000-000000003707",
+      operatorId: OPERATOR_ID,
+      providerSubjectId: "gmail-founder",
+      accountLabel: "founder@example.com",
+      status: "ready",
+      authorizationState: "authorized",
+      accessTokenCiphertext: "access",
+      accessTokenIv: "access-iv",
+      accessTokenAuthTag: "access-tag",
+      refreshTokenCiphertext: "refresh",
+      refreshTokenIv: "refresh-iv",
+      refreshTokenAuthTag: "refresh-tag",
+      secretKeyVersion: "test-v1",
+      authorizedAt: NOW,
+      lastVerifiedAt: NOW,
+      lastEvidenceAt: NOW,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    const failed = await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        revokeConnections: async () => [
+          { connectionKind: "mail", ok: false, errorCode: "provider_503" },
+        ],
+      },
+    );
+    expect(failed?.revocations).toEqual([
+      expect.objectContaining({
+        connectionKind: "mail",
+        status: "failed",
+        attemptCount: 1,
+        errorCode: "provider_503",
+      }),
+    ]);
+    const [locallyRemoved] = await connection.db
+      .select()
+      .from(operatorMailConnections)
+      .where(eq(operatorMailConnections.id, "00000000-0000-4000-8000-000000003707"));
+    expect(locallyRemoved).toEqual(
+      expect.objectContaining({
+        status: "disconnected",
+        authorizationState: "revocation_unconfirmed",
+        accessTokenCiphertext: null,
+        refreshTokenCiphertext: null,
+      }),
+    );
+
+    const retried = await retryFounderDeletionRevocationsForUser(OWNER_ID, {
+      createConnection: () => connection,
+      now: () => new Date(NOW.getTime() + 60 * 60 * 1000),
+      revokeConnections: async () => [{ connectionKind: "mail", ok: true }],
+    });
+    expect(retried?.revocations).toEqual([
+      expect.objectContaining({ connectionKind: "mail", status: "succeeded", attemptCount: 2 }),
+    ]);
+    expect(retried?.stages.map((stage) => stage.stage)).toContain("revocation");
   });
 });
