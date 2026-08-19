@@ -1,0 +1,2 @@
+ALTER TABLE "operator_deletion_requests" DROP CONSTRAINT "operator_deletion_requests_purge_stage_check";--> statement-breakpoint
+ALTER TABLE "operator_deletion_requests" ADD CONSTRAINT "operator_deletion_requests_purge_stage_check" CHECK ("operator_deletion_requests"."status" IN ('requested', 'access_stopped', 'purge_pending', 'failed') OR "operator_deletion_requests"."active_purge_completed_at" IS NOT NULL);

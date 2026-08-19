@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   requireApplicationUser: vi.fn(),
   getPrivacyCenter: vi.fn(),
+  getDeletionReceipt: vi.fn(),
   deleteRetainedData: vi.fn(),
   disconnectAi: vi.fn(),
   disconnectAnthropic: vi.fn(),
@@ -59,6 +60,7 @@ describe("Founder Privacy Center route", () => {
       restrictedCategories: [],
       deletionBoundary: "local only",
     });
+    mocks.getDeletionReceipt.mockResolvedValue(null);
     mocks.deleteRetainedData.mockResolvedValue({
       deleted: {
         conversationMessages: 2,
@@ -79,7 +81,9 @@ describe("Founder Privacy Center route", () => {
 
   it("returns owner-isolated privacy data without secrets", async () => {
     const { GET } = await import("@/app/api/operator/privacy/route");
-    const response = await GET(new Request("http://localhost/api/operator/privacy"));
+    const response = await GET(new Request("http://localhost/api/operator/privacy"), undefined, {
+      getDeletionReceipt: mocks.getDeletionReceipt,
+    });
     const body = await response.json();
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -89,6 +93,7 @@ describe("Founder Privacy Center route", () => {
 
   it("requires recent authentication before deleting retained data", async () => {
     const { POST } = await import("@/app/api/operator/privacy/route");
+    const requestDeletion = vi.fn().mockResolvedValue({ request: { status: "access_stopped" } });
     const request = () =>
       new Request("http://localhost/api/operator/privacy", {
         method: "POST",
@@ -97,9 +102,12 @@ describe("Founder Privacy Center route", () => {
     const denied = await POST(request(), undefined, { requireRecentAuth: async () => false });
     expect(denied.status).toBe(401);
     expect(mocks.deleteRetainedData).not.toHaveBeenCalled();
-    const allowed = await POST(request(), undefined, { requireRecentAuth: async () => true });
+    const allowed = await POST(request(), undefined, {
+      requireRecentAuth: async () => true,
+      requestDeletion,
+    });
     expect(allowed.status).toBe(200);
-    expect(mocks.deleteRetainedData).toHaveBeenCalledWith(USER_ID);
+    expect(requestDeletion).toHaveBeenCalledWith(USER_ID, "retained_data", {});
   });
 
   it("keeps disconnect separate from retained-data deletion", async () => {
@@ -119,5 +127,50 @@ describe("Founder Privacy Center route", () => {
     expect(response.status).toBe(200);
     expect(mocks.disconnectMailSending).toHaveBeenCalledWith(USER_ID);
     expect(mocks.deleteRetainedData).not.toHaveBeenCalled();
+  });
+
+  it("requires explicit closure confirmation and creates a structured deletion request", async () => {
+    const { POST } = await import("@/app/api/operator/privacy/route");
+    const requestDeletion = vi.fn().mockResolvedValue({ request: { status: "access_stopped" } });
+    const denied = await POST(
+      new Request("http://localhost/api/operator/privacy", {
+        method: "POST",
+        body: JSON.stringify({ action: "close_account" }),
+      }),
+      undefined,
+      { requireRecentAuth: async () => true, requestDeletion },
+    );
+    expect(denied.status).toBe(400);
+    const allowed = await POST(
+      new Request("http://localhost/api/operator/privacy", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "close_account",
+          confirmation: "CLOSE_ACCOUNT",
+          scope: { reason: "founder_requested" },
+        }),
+      }),
+      undefined,
+      { requireRecentAuth: async () => true, requestDeletion },
+    );
+    expect(allowed.status).toBe(200);
+    expect(requestDeletion).toHaveBeenCalledWith(USER_ID, "account_closure", {
+      reason: "founder_requested",
+    });
+  });
+
+  it("requires recent authentication for structured deletion requests", async () => {
+    const { POST } = await import("@/app/api/operator/privacy/route");
+    const requestDeletion = vi.fn();
+    const response = await POST(
+      new Request("http://localhost/api/operator/privacy", {
+        method: "POST",
+        body: JSON.stringify({ action: "request_deletion" }),
+      }),
+      undefined,
+      { requireRecentAuth: async () => false, requestDeletion },
+    );
+    expect(response.status).toBe(401);
+    expect(requestDeletion).not.toHaveBeenCalled();
   });
 });

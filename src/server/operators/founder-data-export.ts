@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { AnyPgColumn, AnyPgTable } from "drizzle-orm/pg-core";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
@@ -23,6 +23,7 @@ import {
   operatorConversationMessages,
   operatorConversationWorks,
   operatorConversations,
+  operatorDeletionRequests,
   operatorFounderActivations,
   operatorFounderDataExportAccesses,
   operatorFounderDataExports,
@@ -122,7 +123,7 @@ export type FounderDataExportDownload =
     }
   | {
       ok: false;
-      code: "export_not_found" | "export_expired" | "owner_mismatch";
+      code: "export_not_found" | "export_expired" | "owner_mismatch" | "deletion_access_stopped";
       status: 404 | 410;
     };
 
@@ -164,6 +165,17 @@ export async function createFounderDataExportForUser(
         .where(and(eq(operators.userId, userId), eq(operators.status, "active")))
         .limit(1);
       if (!operator) return null;
+      const [deletion] = await tx
+        .select({ id: operatorDeletionRequests.id })
+        .from(operatorDeletionRequests)
+        .where(
+          and(
+            eq(operatorDeletionRequests.operatorId, operator.id),
+            sql`${operatorDeletionRequests.status} <> 'completed'`,
+          ),
+        )
+        .limit(1);
+      if (deletion) return null;
 
       await tx
         .update(operatorFounderDataExports)
@@ -231,6 +243,20 @@ export async function downloadFounderDataExport(
       if (!owner || owner.userId !== userId) {
         await recordExportAccess(tx, artifact.id, userId, format, "owner_mismatch", now);
         return { ok: false, code: "owner_mismatch", status: 404 } as const;
+      }
+      const [deletion] = await tx
+        .select({ id: operatorDeletionRequests.id })
+        .from(operatorDeletionRequests)
+        .where(
+          and(
+            eq(operatorDeletionRequests.operatorId, artifact.operatorId),
+            sql`${operatorDeletionRequests.status} <> 'completed'`,
+          ),
+        )
+        .limit(1);
+      if (deletion) {
+        await recordExportAccess(tx, artifact.id, userId, format, "deletion_stopped", now);
+        return { ok: false, code: "deletion_access_stopped", status: 410 } as const;
       }
 
       if (now >= artifact.expiresAt) {
@@ -945,7 +971,7 @@ async function recordExportAccess(
   exportId: string,
   actorUserId: string,
   format: FounderDataExportFormat,
-  outcome: "downloaded" | "expired" | "owner_mismatch",
+  outcome: "downloaded" | "expired" | "owner_mismatch" | "deletion_stopped",
   accessedAt: Date,
 ): Promise<void> {
   await tx.insert(operatorFounderDataExportAccesses).values({

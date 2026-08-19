@@ -44,7 +44,8 @@ export async function POST(
       {
         error: {
           code: "founder_operator_not_found",
-          message: "Your Founder workspace is not ready for export.",
+          message:
+            "Your Founder workspace is not ready for export or a deletion request has stopped access.",
         },
       },
       { status: 404, headers: noStoreHeaders() },

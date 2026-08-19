@@ -5,14 +5,18 @@ import type {
   FounderPrivacyCenterDto,
   FounderPrivacyConnection,
 } from "@/src/server/operators/founder-privacy-center";
+import type { FounderDeletionReceipt } from "@/src/server/operators/founder-deletion";
 import styles from "./founder-privacy-center.module.css";
 
 export function FounderPrivacyCenter({
   initialPrivacy,
+  initialDeletion = null,
 }: {
   initialPrivacy: FounderPrivacyCenterDto;
+  initialDeletion?: FounderDeletionReceipt | null;
 }) {
-  const [privacy, setPrivacy] = useState(initialPrivacy);
+  const [privacy] = useState(initialPrivacy);
+  const [deletion, setDeletion] = useState<FounderDeletionReceipt | null>(initialDeletion);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [exportLinks, setExportLinks] = useState<{
@@ -52,41 +56,64 @@ export function FounderPrivacyCenter({
     }
   }
 
-  async function deleteRetainedData() {
+  async function requestDeletion(kind: "request_deletion" | "close_account") {
+    const isClosure = kind === "close_account";
     if (
       !window.confirm(
-        "Delete the Bruno-local conversation content and relationship evidence retained for this Founder workspace?",
+        isClosure
+          ? "Close this Bruno account? Connections will be revoked, unstarted effects cancelled, and deletion will begin."
+          : "Request staged deletion of Bruno-local retained data? Access stops now; purge and backup expiry are tracked separately.",
       )
     )
       return;
-    setBusy("delete");
+    setBusy(isClosure ? "close" : "delete");
     setMessage(null);
     try {
       const response = await fetch("/api/operator/privacy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "delete_retained_data" }),
+        body: JSON.stringify({
+          action: kind,
+          ...(isClosure ? { confirmation: "CLOSE_ACCOUNT" } : {}),
+        }),
       });
       const body = (await response.json()) as {
-        result?: { deleted?: Record<string, number> };
+        deletion?: FounderDeletionReceipt | null;
         error?: { message?: string };
       };
       if (!response.ok)
-        throw new Error(body.error?.message ?? "Retained data could not be deleted.");
-      const deleted = body.result?.deleted;
+        throw new Error(body.error?.message ?? "Deletion request could not be created.");
+      setDeletion(body.deletion ?? null);
       setMessage(
-        `Deleted ${deleted?.conversationMessages ?? 0} conversation messages, ${deleted?.conversationWorks ?? 0} work records, ${deleted?.relationshipEvidence ?? 0} relationship evidence records, ${deleted?.relationshipRecords ?? 0} relationship records, and ${deleted?.relationshipCandidates ?? 0} relationship candidates.`,
+        isClosure
+          ? "Account closure requested. Access is stopped and provider revocation results are tracked below."
+          : "Deletion requested. Access is stopped; purge and backup expiry remain staged below.",
       );
-      setPrivacy((current) => ({
-        ...current,
-        retainedData: current.retainedData.map((item) =>
-          item.deletableInBruno
-            ? { ...item, retention: "No Bruno-local rows remain from this deletion request." }
-            : item,
-        ),
-      }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Retained data could not be deleted.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function retryRevocations() {
+    setBusy("retry-revocations");
+    setMessage(null);
+    try {
+      const response = await fetch("/api/operator/privacy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "retry_revocations" }),
+      });
+      const body = (await response.json()) as {
+        deletion?: FounderDeletionReceipt | null;
+        error?: { message?: string };
+      };
+      if (!response.ok) throw new Error(body.error?.message ?? "Revocation retry failed.");
+      setDeletion(body.deletion ?? null);
+      setMessage("Provider revocation was retried. Review each connection result below.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Revocation retry failed.");
     } finally {
       setBusy(null);
     }
@@ -259,13 +286,31 @@ export function FounderPrivacyCenter({
             <button
               className={styles.danger}
               disabled={busy !== null}
-              onClick={() => void deleteRetainedData()}
+              onClick={() => void requestDeletion("request_deletion")}
               type="button"
             >
-              {busy === "delete" ? "Deleting…" : "Delete retained data"}
+              {busy === "delete" ? "Requesting…" : "Request staged deletion"}
+            </button>
+          </div>
+          <div>
+            <h3>Close account</h3>
+            <p>
+              Revokes every connected account, cancels unstarted effects, and starts staged
+              deletion.
+            </p>
+            <button
+              className={styles.danger}
+              disabled={busy !== null}
+              onClick={() => void requestDeletion("close_account")}
+              type="button"
+            >
+              {busy === "close" ? "Closing…" : "Close account"}
             </button>
           </div>
         </div>
+        {deletion ? (
+          <DeletionReceipt receipt={deletion} onRetry={retryRevocations} busy={busy !== null} />
+        ) : null}
         <div className={styles.restricted}>
           <h3>Restricted launch categories</h3>
           <ul>
@@ -323,6 +368,49 @@ export function FounderPrivacyCenter({
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function DeletionReceipt({
+  receipt,
+  onRetry,
+  busy,
+}: {
+  receipt: FounderDeletionReceipt;
+  onRetry: () => void;
+  busy: boolean;
+}) {
+  const hasFailedRevocation = receipt.revocations.some((item) => item.status === "failed");
+  return (
+    <div className={styles.aiPanel} aria-live="polite">
+      <h3>Deletion Receipt · {receipt.request.status}</h3>
+      <p>Requested {formatDate(receipt.request.requestedAt)}.</p>
+      <ul>
+        <li>Access stopped: {formatDate(receipt.request.accessStoppedAt)}</li>
+        <li>Active purge due: {formatDate(receipt.request.activePurgeDueAt)}</li>
+        <li>Backup expiry due: {formatDate(receipt.request.backupExpiryDueAt)}</li>
+        <li>Active purge complete: {formatDate(receipt.request.activePurgeCompletedAt)}</li>
+        <li>Backup expiry complete: {formatDate(receipt.request.backupExpiredAt)}</li>
+      </ul>
+      {receipt.revocations.length > 0 ? (
+        <>
+          <strong>Provider revocation</strong>
+          <ul>
+            {receipt.revocations.map((item) => (
+              <li key={item.connectionKind}>
+                {item.connectionKind}: {item.status}
+                {item.errorCode ? ` (${item.errorCode})` : ""}
+              </li>
+            ))}
+          </ul>
+          {hasFailedRevocation ? (
+            <button className={styles.secondary} disabled={busy} onClick={onRetry} type="button">
+              Retry provider revocation
+            </button>
+          ) : null}
+        </>
+      ) : null}
     </div>
   );
 }

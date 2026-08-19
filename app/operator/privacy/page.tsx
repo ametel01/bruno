@@ -1,6 +1,7 @@
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
 import { FounderPrivacyCenter } from "@/app/operator/_components/founder-privacy-center";
 import { getFounderPrivacyCenterForUser } from "@/src/server/operators/founder-privacy-center";
+import { getFounderDeletionReceiptForUser } from "@/src/server/operators/founder-deletion";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 export const dynamic = "force-dynamic";
@@ -32,10 +33,11 @@ export default async function FounderPrivacyPage() {
       </FounderOperatorShell>
     );
   }
+  const deletion = await getFounderDeletionReceiptForUser(applicationUser.userId);
 
   return (
     <FounderOperatorShell activePage="privacy">
-      <FounderPrivacyCenter initialPrivacy={privacy} />
+      <FounderPrivacyCenter initialPrivacy={privacy} initialDeletion={deletion} />
     </FounderOperatorShell>
   );
 }

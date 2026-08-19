@@ -547,6 +547,27 @@
       "when": 1787127566039,
       "tag": "0077_next_lady_bullseye",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1787165791426,
+      "tag": "0078_pale_sersi",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1787166456264,
+      "tag": "0079_chilly_ironclad",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1787166527480,
+      "tag": "0080_loud_miracleman",
+      "breakpoints": true
     }
   ]
 }

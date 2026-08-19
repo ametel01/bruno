@@ -304,7 +304,7 @@ export async function getFounderPrivacyCenterForUser(
         },
         restrictedCategories: [...RESTRICTED_CATEGORIES],
         deletionBoundary:
-          "Delete retained data removes Bruno-local conversation content and relationship evidence. It does not disconnect accounts, revoke provider grants, remove consent or safety receipts, or delete provider-held copies.",
+          "A Deletion Request stops Bruno access immediately, purges active retained content within seven days, and expires Bruno-held backup copies within 30 days. It does not claim to delete provider-held copies.",
       };
     });
   } finally {

@@ -1,0 +1,2 @@
+ALTER TABLE "operator_founder_data_export_accesses" DROP CONSTRAINT "operator_founder_data_export_accesses_outcome_check";--> statement-breakpoint
+ALTER TABLE "operator_founder_data_export_accesses" ADD CONSTRAINT "operator_founder_data_export_accesses_outcome_check" CHECK ("operator_founder_data_export_accesses"."outcome" IN ('downloaded', 'expired', 'owner_mismatch', 'deletion_stopped'));

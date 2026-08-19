@@ -35,6 +35,36 @@ export const agentStatusEnum = pgEnum("agent_status", [
 ]);
 
 export const operatorStatusEnum = pgEnum("operator_status", ["active", "archived"]);
+export const operatorDeletionRequestKindEnum = pgEnum("operator_deletion_request_kind", [
+  "retained_data",
+  "account_closure",
+]);
+export const operatorDeletionRequestStatusEnum = pgEnum("operator_deletion_request_status", [
+  "requested",
+  "access_stopped",
+  "purge_pending",
+  "active_purge_complete",
+  "backup_expiry_pending",
+  "completed",
+  "failed",
+]);
+export const operatorDeletionStageEnum = pgEnum("operator_deletion_stage", [
+  "requested",
+  "access_stopped",
+  "active_purge_complete",
+  "backup_expiry",
+  "revocation",
+]);
+export const operatorDeletionRevocationStatusEnum = pgEnum("operator_deletion_revocation_status", [
+  "pending",
+  "succeeded",
+  "failed",
+]);
+export const operatorDeletionBackupStatusEnum = pgEnum("operator_deletion_backup_status", [
+  "pending",
+  "expired",
+  "failed",
+]);
 export const operatorMailOfferDispositionEnum = pgEnum("operator_mail_offer_disposition", [
   "enabled",
   "dismissed",
@@ -1783,11 +1813,185 @@ export const operatorFounderDataExportAccesses = pgTable(
     ),
     check(
       "operator_founder_data_export_accesses_outcome_check",
-      sql`${table.outcome} IN ('downloaded', 'expired', 'owner_mismatch')`,
+      sql`${table.outcome} IN ('downloaded', 'expired', 'owner_mismatch', 'deletion_stopped')`,
     ),
     index("operator_founder_data_export_accesses_export_accessed_idx").on(
       table.exportId,
       table.accessedAt,
+    ),
+  ],
+);
+
+export const operatorDeletionRequests = pgTable(
+  "operator_deletion_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    kind: operatorDeletionRequestKindEnum("kind").notNull(),
+    status: operatorDeletionRequestStatusEnum("status").notNull().default("requested"),
+    scope: jsonb("scope").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    summary: jsonb("summary").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    activePurgeDueAt: timestamp("active_purge_due_at", { withTimezone: true }).notNull(),
+    backupExpiryDueAt: timestamp("backup_expiry_due_at", { withTimezone: true }).notNull(),
+    accessStoppedAt: timestamp("access_stopped_at", { withTimezone: true }),
+    activePurgeCompletedAt: timestamp("active_purge_completed_at", { withTimezone: true }),
+    backupExpiredAt: timestamp("backup_expired_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    failureCode: text("failure_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "operator_deletion_requests_due_order_check",
+      sql`${table.backupExpiryDueAt} >= ${table.activePurgeDueAt} AND ${table.activePurgeDueAt} >= ${table.requestedAt}`,
+    ),
+    check(
+      "operator_deletion_requests_access_stage_check",
+      sql`${table.status} = 'requested' OR ${table.accessStoppedAt} IS NOT NULL`,
+    ),
+    check(
+      "operator_deletion_requests_purge_stage_check",
+      sql`${table.status} IN ('requested', 'access_stopped', 'purge_pending', 'failed') OR ${table.activePurgeCompletedAt} IS NOT NULL`,
+    ),
+    check(
+      "operator_deletion_requests_backup_stage_check",
+      sql`${table.status} NOT IN ('completed') OR (${table.backupExpiredAt} IS NOT NULL AND ${table.completedAt} IS NOT NULL)`,
+    ),
+    uniqueIndex("operator_deletion_requests_active_idx")
+      .on(table.operatorId)
+      .where(sql`${table.status} NOT IN ('completed', 'failed')`),
+    index("operator_deletion_requests_operator_status_idx").on(
+      table.operatorId,
+      table.status,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const operatorDeletionReceipts = pgTable(
+  "operator_deletion_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => operatorDeletionRequests.id, { onDelete: "restrict" }),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    stage: operatorDeletionStageEnum("stage").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    details: jsonb("details").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("operator_deletion_receipts_request_stage_idx").on(table.requestId, table.stage),
+    index("operator_deletion_receipts_operator_occurred_idx").on(
+      table.operatorId,
+      table.occurredAt,
+    ),
+  ],
+);
+
+export const operatorDeletionRevocations = pgTable(
+  "operator_deletion_revocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => operatorDeletionRequests.id, { onDelete: "cascade" }),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    connectionKind: text("connection_kind").notNull(),
+    connectionId: uuid("connection_id").notNull(),
+    provider: text("provider").notNull(),
+    providerIdentity: text("provider_identity"),
+    status: operatorDeletionRevocationStatusEnum("status").notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    errorCode: text("error_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("operator_deletion_revocations_attempt_count_check", sql`${table.attemptCount} >= 0`),
+    uniqueIndex("operator_deletion_revocations_identity_idx").on(
+      table.requestId,
+      table.connectionKind,
+      table.connectionId,
+    ),
+    index("operator_deletion_revocations_retry_idx").on(
+      table.operatorId,
+      table.status,
+      table.nextAttemptAt,
+    ),
+  ],
+);
+
+export const operatorDeletionTombstones = pgTable(
+  "operator_deletion_tombstones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => operatorDeletionRequests.id, { onDelete: "restrict" }),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    erasedAt: timestamp("erased_at", { withTimezone: true }).notNull(),
+    reason: text("reason").notNull(),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("operator_deletion_tombstones_identity_idx").on(
+      table.operatorId,
+      table.entityType,
+      table.entityId,
+    ),
+    index("operator_deletion_tombstones_request_idx").on(table.requestId, table.erasedAt),
+  ],
+);
+
+export const operatorDeletionBackupExpiries = pgTable(
+  "operator_deletion_backup_expiries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => operatorDeletionRequests.id, { onDelete: "cascade" }),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    backupKind: text("backup_kind").notNull(),
+    backupId: text("backup_id").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    status: operatorDeletionBackupStatusEnum("status").notNull().default("pending"),
+    expiredAt: timestamp("expired_at", { withTimezone: true }),
+    errorCode: text("error_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("operator_deletion_backup_expiries_identity_idx").on(
+      table.requestId,
+      table.backupKind,
+      table.backupId,
+    ),
+    index("operator_deletion_backup_expiries_due_idx").on(
+      table.operatorId,
+      table.status,
+      table.expiresAt,
     ),
   ],
 );

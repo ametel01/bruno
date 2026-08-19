@@ -26,6 +26,10 @@
     {
       "path": "/api/internal/cold-deployment-slo/evaluate",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/internal/operator/deletion",
+      "schedule": "0 * * * *"
     }
   ]
 }
