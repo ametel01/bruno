@@ -191,8 +191,7 @@ export async function prepareFounderMorningBrief(
     preparation?.timezone ?? "UTC",
     deliveryLocalTime,
   );
-  const deliveryDue =
-    !preference?.nextDeliveryAt || input.now >= preference.nextDeliveryAt;
+  const deliveryDue = !preference?.nextDeliveryAt || input.now >= preference.nextDeliveryAt;
   const [latest] = await tx
     .select()
     .from(operatorMorningBriefs)
