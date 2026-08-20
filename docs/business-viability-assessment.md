@@ -2,6 +2,11 @@
 
 Assessment date: 2026-08-05
 
+> **Superseded release-stage recommendation:** The paid private-beta recommendation below describes
+> the earlier Telegram, agent-fleet, and Stripe-cost thesis. The Founder Operator uses a free, closed
+> External Beta with directly invited testers and Lemon Squeezy commerce at General Release under
+> [Founder Operator Release Stages](./acceptance/RELEASE_STAGES.md).
+
 ## Executive recommendation
 
 **Proceed to a constrained paid private beta. Do not proceed to a broad launch or expand the

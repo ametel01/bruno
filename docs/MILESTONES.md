@@ -813,6 +813,11 @@ Goal: Show users the infrastructure cost of running agents.
 
 ## Milestone 17: Billing Gate
 
+> **Historical milestone:** This Stripe-based fleet-plan milestone is not the Founder Operator
+> commerce contract. Clerk identity, Lemon Squeezy commerce, Bruno-owned Product Entitlement, and
+> entitlement-driven Infrastructure Retirement are defined in
+> [Founder Operator Release Stages](./acceptance/RELEASE_STAGES.md).
+
 Goal: Charge for the product and enforce plan limits.
 
 ### Technical implementation
@@ -914,6 +919,11 @@ deferred; the implemented first-release path is direct OpenAI/Anthropic API-key 
 - Log redaction tests for API keys and tokens.
 
 ## Milestone 19: Public Beta Version
+
+> **Historical milestone:** This milestone belongs to the earlier Telegram and agent-fleet product
+> and is not the current External Beta or commerce contract. Its Stripe plan is superseded by Clerk
+> identity and Lemon Squeezy commerce. The canonical Founder Operator stages and gates are defined in
+> [Founder Operator Release Stages](./acceptance/RELEASE_STAGES.md).
 
 Goal: Make Bruno.Ai usable by 5 to 10 real users without founder-assisted setup.
 
@@ -1017,6 +1027,9 @@ Build the agent dashboard.
 ```
 
 ## Definition of Done for MVP
+
+> **Historical definition:** The public-beta checklist below remains a record of the earlier product
+> plan. It does not satisfy or replace the current Release Decision or Founder Acceptance Evidence.
 
 The MVP is ready for public beta when:
 

@@ -1,5 +1,10 @@
 # Bruno.Ai Hermes Fleet Control Plane PRD
 
+> **Historical product thesis:** This PRD records the earlier Telegram and Hermes fleet-control
+> product. Its private-beta and Stripe-billing terminology do not define the Founder Operator. The
+> current release model uses Clerk for identity and Lemon Squeezy for commerce; use
+> [Founder Operator Release Stages](./acceptance/RELEASE_STAGES.md) for its contract.
+
 ## Problem Statement
 
 Solo founders, agencies, developers, and small operators want persistent AI agents that can run useful jobs without forcing them to manage VPS setup, process supervision, cloud provisioning, logs, backups, permissions, or recovery. Existing Hermes hosting products already make one-click deployment cheap, so the unsolved user problem is not simply "host Hermes for me." The stronger problem is that users do not have a reliable control plane for creating, supervising, limiting, auditing, recovering, and eventually scaling a small fleet of persistent Hermes agents.
