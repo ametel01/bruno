@@ -5,7 +5,10 @@ import {
   parseFounderProviderDecisionSummary,
 } from "@/scripts/create-founder-general-release-decision";
 import { buildFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
-import { FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS } from "@/src/shared/founder-product-contract";
+import {
+  FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS,
+  FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
+} from "@/src/shared/founder-product-contract";
 
 const REVISION = "a".repeat(40);
 const DIGEST = `sha256:${"b".repeat(64)}`;
@@ -133,17 +136,19 @@ function productContract(mode: "ci" | "release") {
     observedAt: "2026-08-20T12:00:00.000Z",
     ...(mode === "release"
       ? {
-          scenarioResults: [
-            "release_stage_admission",
-            "product_entitlement_lifecycle",
-            "recovery_archive_lifecycle",
-            "infrastructure_retirement",
-          ].map((id) => ({
+          scenarioResults: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS.map((id) => ({
             id,
             status: "passed" as const,
             attempts: 1,
             sourceRevision: REVISION,
             observedAt: "2026-08-20T12:00:00.000Z",
+            cleanup: {
+              status: "passed" as const,
+              verified: true,
+              resourcesBefore: id === "infrastructure_retirement" ? 2 : 0,
+              resourcesAfter: 0,
+              observedAt: "2026-08-20T12:00:00.000Z",
+            },
           })),
           voiceOverDigest: DIGEST,
           voiceOverOsVersion: "macOS 15.6",

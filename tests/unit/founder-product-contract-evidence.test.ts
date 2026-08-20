@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
-import { FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS } from "@/src/shared/founder-product-contract";
+import {
+  FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS,
+  FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
+} from "@/src/shared/founder-product-contract";
 
 const REVISION = "a".repeat(40);
 const DIGEST = `sha256:${"b".repeat(64)}`;
@@ -107,6 +110,41 @@ describe("Founder Product Contract evidence", () => {
     );
   });
 
+  it("refuses release mode with an empty lifecycle ledger", () => {
+    expect(() =>
+      buildFounderProductContractEvidence({
+        ...validInput(),
+        mode: "release",
+        scenarioResults: [],
+        voiceOverDigest: DIGEST,
+        voiceOverOsVersion: "macOS 15.6",
+        voiceOverBrowserVersion: "Safari 26.0",
+        talkBackDigest: DIGEST,
+        talkBackOsVersion: "Android 16",
+        talkBackBrowserVersion: "Chrome 140",
+      }),
+    ).toThrow("Release evidence requires every lifecycle scenario result.");
+  });
+
+  it("includes cleanup evidence and rejects an unverified cleanup", () => {
+    const scenarioResults = lifecycleScenarioResults();
+    const failedCleanup = scenarioResults.map((scenario) =>
+      scenario.id === "recovery_archive_lifecycle"
+        ? {
+            ...scenario,
+            cleanup: { ...scenario.cleanup, status: "failed" as const, verified: false },
+          }
+        : scenario,
+    );
+
+    expect(() =>
+      buildFounderProductContractEvidence({
+        ...validInput(),
+        scenarioResults: failedCleanup,
+      }),
+    ).toThrow("cleanup was not verified");
+  });
+
   it("refuses attended evidence whose environment metadata is incomplete", () => {
     expect(() =>
       buildFounderProductContractEvidence({
@@ -117,17 +155,19 @@ describe("Founder Product Contract evidence", () => {
   });
 
   it("accepts an exact lifecycle ledger and rejects a missing required scenario", () => {
-    const scenarioResults = [
-      "release_stage_admission",
-      "product_entitlement_lifecycle",
-      "recovery_archive_lifecycle",
-      "infrastructure_retirement",
-    ].map((id) => ({
+    const scenarioResults = FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS.map((id) => ({
       id,
       status: "passed" as const,
       attempts: 1,
       sourceRevision: REVISION,
       observedAt: "2026-08-20T00:00:00.000Z",
+      cleanup: {
+        status: "passed" as const,
+        verified: true,
+        resourcesBefore: id === "infrastructure_retirement" ? 2 : 0,
+        resourcesAfter: 0,
+        observedAt: "2026-08-20T00:00:00.000Z",
+      },
     }));
     const evidence = buildFounderProductContractEvidence({
       ...validInput(),
@@ -135,8 +175,14 @@ describe("Founder Product Contract evidence", () => {
     });
 
     expect(evidence.scenarios).toEqual(
-      scenarioResults.map(({ id, status, attempts }) => ({ id, status, attempts })),
+      scenarioResults.map(({ id, status, attempts, cleanup }) => ({
+        id,
+        status,
+        attempts,
+        cleanup,
+      })),
     );
+    expect(evidence.cleanup).toMatchObject({ status: "passed", verified: true });
     expect(() =>
       buildFounderProductContractEvidence({
         ...validInput(),
@@ -164,16 +210,18 @@ function validInput() {
 }
 
 function lifecycleScenarioResults() {
-  return [
-    "release_stage_admission",
-    "product_entitlement_lifecycle",
-    "recovery_archive_lifecycle",
-    "infrastructure_retirement",
-  ].map((id) => ({
+  return FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS.map((id) => ({
     id,
     status: "passed" as const,
     attempts: 1,
     sourceRevision: REVISION,
     observedAt: "2026-08-20T00:00:00.000Z",
+    cleanup: {
+      status: "passed" as const,
+      verified: true,
+      resourcesBefore: id === "infrastructure_retirement" ? 2 : 0,
+      resourcesAfter: 0,
+      observedAt: "2026-08-20T00:00:00.000Z",
+    },
   }));
 }

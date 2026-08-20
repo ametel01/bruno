@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   createFounderProductContractClock,
   createFounderProductContractHarness,
+  createFounderProductContractLifecycleApplication,
   createFounderProductContractProviderDoubles,
   providerFailure,
-  runRecordedFounderProductContractScenario,
   runFounderProductContractScenario,
+  runFounderProductContractLifecycleScenarios,
   validateFounderProductContractScenarios,
 } from "@/src/testing/founder-product-contract";
+import { FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS } from "@/src/shared/founder-product-contract";
 
 describe("Founder Product Contract deterministic seam", () => {
   it("advances an injected clock without waiting on wall time", () => {
@@ -78,10 +80,12 @@ describe("Founder Product Contract deterministic seam", () => {
 
   it("runs scenarios through the public application boundary", async () => {
     const requests: Array<{ method: string; path: string }> = [];
+    let receivedClock: ReturnType<typeof createFounderProductContractClock> | undefined;
     const harness = createFounderProductContractHarness({
       application: {
-        request: async ({ method, path }) => {
+        request: async ({ method, path }, context) => {
           requests.push({ method, path });
+          receivedClock = context?.clock;
           return {
             status: 200,
             headers: { "cache-control": "no-store" },
@@ -99,38 +103,46 @@ describe("Founder Product Contract deterministic seam", () => {
     });
 
     expect(requests).toEqual([{ method: "GET", path: "/api/operator" }]);
+    expect(receivedClock).toBe(harness.clock);
     expect(harness.clock.now().toISOString()).toBe("2026-01-01T00:01:00.000Z");
+  });
+
+  it("makes configured provider failures observable through the lifecycle application", async () => {
+    const clock = createFounderProductContractClock();
+    const providers = createFounderProductContractProviderDoubles({ clock });
+    const application = createFounderProductContractLifecycleApplication({ clock, providers });
+    providers.clerk.setFailure("authenticate", providerFailure("provider_unavailable", true));
+
+    const response = await application.request({
+      method: "POST",
+      path: "/api/founder-contract/release/admit",
+    });
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      ok: false,
+      code: "provider_unavailable",
+      retryable: true,
+    });
   });
 
   it("records exact-once scenarios and fails closed on missing, retry, stale, and mismatched results", async () => {
     const sourceRevision = "a".repeat(40);
+    const clock = createFounderProductContractClock();
+    const providers = createFounderProductContractProviderDoubles({ clock });
     const harness = createFounderProductContractHarness({
       sourceRevision,
-      application: { request: async () => ({ status: 204, headers: {}, json: async () => null }) },
+      clock,
+      providers,
+      application: createFounderProductContractLifecycleApplication({ clock, providers }),
     });
 
-    await runFounderProductContractScenario(harness, "release_stage_admission", () => {});
-    await runRecordedFounderProductContractScenario(
-      harness,
-      "product_entitlement_lifecycle",
-      () => {},
-    );
-    await runRecordedFounderProductContractScenario(
-      harness,
-      "recovery_archive_lifecycle",
-      () => {},
-    );
-    await runRecordedFounderProductContractScenario(harness, "infrastructure_retirement", () => {});
+    await runFounderProductContractLifecycleScenarios(harness);
     const firstResult = harness.scenarioResults[0];
     if (!firstResult) throw new Error("Expected a recorded scenario result.");
 
     validateFounderProductContractScenarios({
-      required: [
-        "release_stage_admission",
-        "product_entitlement_lifecycle",
-        "recovery_archive_lifecycle",
-        "infrastructure_retirement",
-      ],
+      required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
       results: harness.scenarioResults,
       sourceRevision,
       observedAt: "2026-01-01T00:00:00.000Z",
@@ -138,20 +150,23 @@ describe("Founder Product Contract deterministic seam", () => {
 
     expect(() =>
       validateFounderProductContractScenarios({
-        required: ["missing"],
-        results: harness.scenarioResults,
+        required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
+        results: harness.scenarioResults.slice(1),
         sourceRevision,
         observedAt: "2026-01-01T00:00:00.000Z",
       }),
-    ).toThrow("Required Founder Product Contract scenario missing was not present.");
+    ).toThrow(
+      "Required Founder Product Contract scenario release_stage_admission was not present.",
+    );
     expect(() =>
       validateFounderProductContractScenarios({
-        required: ["release_stage_admission"],
+        required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
         results: [
           {
             ...firstResult,
             attempts: 2,
           },
+          ...harness.scenarioResults.slice(1),
         ],
         sourceRevision,
         observedAt: "2026-01-01T00:00:00.000Z",
@@ -159,12 +174,13 @@ describe("Founder Product Contract deterministic seam", () => {
     ).toThrow("was retried");
     expect(() =>
       validateFounderProductContractScenarios({
-        required: ["release_stage_admission"],
+        required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
         results: [
           {
             ...firstResult,
             observedAt: "2025-12-31T23:59:59.000Z",
           },
+          ...harness.scenarioResults.slice(1),
         ],
         sourceRevision,
         observedAt: "2026-01-01T00:00:00.000Z",
@@ -172,12 +188,13 @@ describe("Founder Product Contract deterministic seam", () => {
     ).toThrow("is stale");
     expect(() =>
       validateFounderProductContractScenarios({
-        required: ["release_stage_admission"],
+        required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
         results: [
           {
             ...firstResult,
             sourceRevision: "b".repeat(40),
           },
+          ...harness.scenarioResults.slice(1),
         ],
         sourceRevision,
         observedAt: "2026-01-01T00:00:00.000Z",

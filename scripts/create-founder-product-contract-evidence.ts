@@ -50,7 +50,6 @@ export async function createFounderProductContractEvidence(input: {
   talkBackOsVersion?: string;
   talkBackBrowserVersion?: string;
   scenarioResults?: readonly FounderProductContractScenarioResult[];
-  requiredScenarioIds?: readonly string[];
   scenarioMaxAgeMilliseconds?: number;
 }): Promise<FounderProductContractEvidence> {
   const browser = JSON.parse(await readFile(input.browserResultPath, "utf8")) as PlaywrightResult;
@@ -72,7 +71,6 @@ export function buildFounderProductContractEvidence(input: {
   talkBackOsVersion?: string;
   talkBackBrowserVersion?: string;
   scenarioResults?: readonly FounderProductContractScenarioResult[];
-  requiredScenarioIds?: readonly string[];
   scenarioMaxAgeMilliseconds?: number;
 }) {
   requirePattern(input.sourceRevision, /^[a-f0-9]{40}$/, "source revision");
@@ -129,15 +127,18 @@ export function buildFounderProductContractEvidence(input: {
   if (input.mode === "release" && (!voiceOverEvidence || !talkBackEvidence)) {
     throw new Error("Release evidence requires bound VoiceOver and TalkBack evidence digests.");
   }
-  if (input.mode === "release" && !input.scenarioResults) {
-    throw new Error("Release evidence requires lifecycle scenario results.");
+  if (
+    input.mode === "release" &&
+    (!input.scenarioResults ||
+      input.scenarioResults.length !== FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS.length)
+  ) {
+    throw new Error("Release evidence requires every lifecycle scenario result.");
   }
 
   const scenarioEvidence = input.scenarioResults
     ? (() => {
-        const required = input.requiredScenarioIds ?? FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS;
         validateFounderProductContractScenarios({
-          required,
+          required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
           results: input.scenarioResults,
           sourceRevision: input.sourceRevision,
           observedAt: input.observedAt,
@@ -145,10 +146,11 @@ export function buildFounderProductContractEvidence(input: {
             ? {}
             : { maxAgeMilliseconds: input.scenarioMaxAgeMilliseconds }),
         });
-        return input.scenarioResults.map(({ id, status, attempts }) => ({
+        return input.scenarioResults.map(({ id, status, attempts, cleanup }) => ({
           id,
           status,
           attempts,
+          cleanup,
         }));
       })()
     : undefined;
@@ -182,7 +184,9 @@ export function buildFounderProductContractEvidence(input: {
     schemaVersion: FOUNDER_PRODUCT_CONTRACT_SCHEMA_VERSION,
     mode: input.mode,
     result: "passed",
-    releaseEligible: Boolean(input.mode === "release" && voiceOverEvidence && talkBackEvidence),
+    releaseEligible: Boolean(
+      input.mode === "release" && voiceOverEvidence && talkBackEvidence && scenarioEvidence,
+    ),
     releaseIdentity: {
       sourceRevision: input.sourceRevision,
       runId: input.runId,
@@ -201,6 +205,17 @@ export function buildFounderProductContractEvidence(input: {
     },
     invariants: invariantResults,
     ...(scenarioEvidence ? { scenarios: scenarioEvidence } : {}),
+    ...(scenarioEvidence
+      ? {
+          cleanup: {
+            status: scenarioEvidence.every(({ cleanup }) => cleanup.status === "passed")
+              ? "passed"
+              : "failed",
+            verified: scenarioEvidence.every(({ cleanup }) => cleanup.verified),
+            scenarios: scenarioEvidence.map(({ id, cleanup }) => ({ id, ...cleanup })),
+          },
+        }
+      : {}),
     sanitization: {
       allowlisted: true,
       excluded: [

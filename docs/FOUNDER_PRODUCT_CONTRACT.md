@@ -60,11 +60,11 @@ Lifecycle scenarios use the public seam in `src/testing/founder-product-contract
 provides a controllable clock, deterministic doubles for Clerk, Lemon Squeezy, DigitalOcean,
 OpenAI, Anthropic, and Google, and a small public application request boundary. Scenarios advance
 time explicitly and drive persisted state through HTTP requests; they do not sleep, call domain
-helpers directly, or depend on provider credentials. The initial contract registers release-stage,
-entitlement, recovery-archive, and infrastructure-retirement scenario identifiers so later slices
-can add coverage without changing the evidence schema. When a lifecycle ledger is supplied, the
-evidence builder requires every listed scenario to pass exactly once against the same revision and
-observation instant; missing, failed, skipped, retried, stale, or mismatched results fail closed.
-The runner accepts these allowlisted results through
-`BRUNO_FOUNDER_CONTRACT_SCENARIO_RESULTS_JSON` and an optional required-ID list through
-`BRUNO_FOUNDER_CONTRACT_REQUIRED_SCENARIOS_JSON`.
+helpers directly, or depend on provider credentials. The contract runs release-stage admission,
+product entitlement activation, recovery archiving, and infrastructure retirement through the
+public application request seam. Each transition uses the injected clock and provider doubles,
+then records an allowlisted cleanup outcome without resource identifiers. Every canonical scenario
+must pass exactly once against the same revision and observation instant; missing, failed, skipped,
+retried, stale, mismatched, or unverified-cleanup results fail closed. The runner creates this
+ledger itself for both CI and release evidence, so a caller cannot replace the required scenario
+set or make an empty ledger eligible.

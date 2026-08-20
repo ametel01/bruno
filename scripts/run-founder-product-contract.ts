@@ -8,7 +8,13 @@ import {
 } from "@/scripts/create-founder-general-release-decision";
 import { createFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
 import { FOUNDER_PRODUCT_CONTRACT_UNIT_FILES } from "@/src/shared/founder-product-contract";
-import type { FounderProductContractScenarioResult } from "@/src/testing/founder-product-contract";
+import {
+  createFounderProductContractClock,
+  createFounderProductContractHarness,
+  createFounderProductContractLifecycleApplication,
+  createFounderProductContractProviderDoubles,
+  runFounderProductContractLifecycleScenarios,
+} from "@/src/testing/founder-product-contract";
 import { buildTestGoogleMailSendingAcceptanceRelease } from "./founder-google-mail-sending-test-release";
 import { buildTestGoogleConnectedAcceptanceRelease } from "./founder-google-test-release";
 import { buildTestOpenAiConnectedAcceptanceRelease } from "./founder-openai-test-release";
@@ -28,6 +34,7 @@ await mkdir(artifactDirectory, { recursive: true });
 await rm(evidencePath, { force: true });
 await rm(generalReleaseDecisionPath, { force: true });
 const sourceRevision = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION");
+const observedAt = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_OBSERVED_AT");
 const deterministicProviderEnvironment = {
   BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
     "calendar_reading",
@@ -76,33 +83,39 @@ await run(
   },
 );
 
+const lifecycleClock = createFounderProductContractClock(observedAt);
+const lifecycleProviders = createFounderProductContractProviderDoubles({ clock: lifecycleClock });
+const lifecycleHarness = createFounderProductContractHarness({
+  sourceRevision,
+  clock: lifecycleClock,
+  providers: lifecycleProviders,
+  application: createFounderProductContractLifecycleApplication({
+    clock: lifecycleClock,
+    providers: lifecycleProviders,
+  }),
+});
+const scenarioResults = await runFounderProductContractLifecycleScenarios(lifecycleHarness);
+
 const voiceOverDigest = process.env.BRUNO_FOUNDER_CONTRACT_VOICEOVER_DIGEST;
 const voiceOverOsVersion = process.env.BRUNO_FOUNDER_CONTRACT_VOICEOVER_OS_VERSION;
 const voiceOverBrowserVersion = process.env.BRUNO_FOUNDER_CONTRACT_VOICEOVER_BROWSER_VERSION;
 const talkBackDigest = process.env.BRUNO_FOUNDER_CONTRACT_TALKBACK_DIGEST;
 const talkBackOsVersion = process.env.BRUNO_FOUNDER_CONTRACT_TALKBACK_OS_VERSION;
 const talkBackBrowserVersion = process.env.BRUNO_FOUNDER_CONTRACT_TALKBACK_BROWSER_VERSION;
-const scenarioResults = parseScenarioResults(
-  process.env.BRUNO_FOUNDER_CONTRACT_SCENARIO_RESULTS_JSON,
-);
-const requiredScenarioIds = parseScenarioIds(
-  process.env.BRUNO_FOUNDER_CONTRACT_REQUIRED_SCENARIOS_JSON,
-);
 const evidence = await createFounderProductContractEvidence({
   browserResultPath,
   unitResultPath,
   sourceRevision,
   runId: requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID"),
   mode,
-  observedAt: requiredEnvironment("BRUNO_FOUNDER_CONTRACT_OBSERVED_AT"),
+  observedAt,
   ...(voiceOverDigest ? { voiceOverDigest } : {}),
   ...(voiceOverOsVersion ? { voiceOverOsVersion } : {}),
   ...(voiceOverBrowserVersion ? { voiceOverBrowserVersion } : {}),
   ...(talkBackDigest ? { talkBackDigest } : {}),
   ...(talkBackOsVersion ? { talkBackOsVersion } : {}),
   ...(talkBackBrowserVersion ? { talkBackBrowserVersion } : {}),
-  ...(scenarioResults ? { scenarioResults } : {}),
-  ...(requiredScenarioIds ? { requiredScenarioIds } : {}),
+  scenarioResults,
 });
 
 await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
@@ -144,52 +157,4 @@ function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required.`);
   return value;
-}
-
-function parseScenarioResults(
-  value: string | undefined,
-): FounderProductContractScenarioResult[] | undefined {
-  if (!value?.trim()) return undefined;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) throw new Error();
-    return parsed.map((entry) => {
-      if (!isRecord(entry)) throw new Error();
-      if (
-        typeof entry.id !== "string" ||
-        !["passed", "failed", "skipped"].includes(String(entry.status)) ||
-        !Number.isSafeInteger(entry.attempts) ||
-        (typeof entry.sourceRevision !== "string" && entry.sourceRevision !== null) ||
-        typeof entry.observedAt !== "string"
-      ) {
-        throw new Error();
-      }
-      return {
-        id: entry.id,
-        status: entry.status as FounderProductContractScenarioResult["status"],
-        attempts: entry.attempts as number,
-        sourceRevision: entry.sourceRevision,
-        observedAt: entry.observedAt,
-      };
-    });
-  } catch {
-    throw new Error("BRUNO_FOUNDER_CONTRACT_SCENARIO_RESULTS_JSON is invalid.");
-  }
-}
-
-function parseScenarioIds(value: string | undefined): string[] | undefined {
-  if (!value?.trim()) return undefined;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== "string")) {
-      throw new Error();
-    }
-    return parsed as string[];
-  } catch {
-    throw new Error("BRUNO_FOUNDER_CONTRACT_REQUIRED_SCENARIOS_JSON is invalid.");
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
