@@ -173,7 +173,7 @@ test("founder resumes a persisted Core Operation on desktop and mobile", async (
                   proposed &&
                   brief.compareDocumentPosition(proposed) & Node.DOCUMENT_POSITION_FOLLOWING,
               ),
-              noHorizontalOverflow: document.documentElement.scrollWidth <= window.innerWidth,
+              noHorizontalOverflow: element.scrollWidth <= element.clientWidth,
               scrollBehavior: style.scrollBehavior,
             };
           });
