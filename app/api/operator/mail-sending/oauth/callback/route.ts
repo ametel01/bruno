@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
 import {
   completeFounderGoogleMailSendingAuthorizationForState,
   denyFounderGoogleMailSendingAuthorizationForState,
@@ -14,6 +15,9 @@ export async function GET(request: Request): Promise<Response> {
   if (url.searchParams.get("error")) {
     await denyFounderGoogleMailSendingAuthorizationForState(state);
     return redirect("/operator?mail_sending=authorization_denied#mail-sending");
+  }
+  if (!isFounderGoogleMailSendingReleased()) {
+    return redirect("/operator?mail_sending=mail_sending_not_released#mail-sending");
   }
   try {
     const connection = await completeFounderGoogleMailSendingAuthorizationForState(state, code);

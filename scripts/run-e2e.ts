@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { readDigitalOceanProviderConfig } from "@/src/server/env";
+import { buildTestGoogleMailSendingAcceptanceRelease } from "./founder-google-mail-sending-test-release";
 import { buildTestGoogleConnectedAcceptanceRelease } from "./founder-google-test-release";
 import {
   buildTestOpenAiConnectedAcceptanceRelease,
@@ -109,6 +110,8 @@ function buildE2ECommandEnvironment(
     buildTestGoogleConnectedAcceptanceRelease("calendar_reading");
   commandEnv.BRUNO_GOOGLE_MAIL_READING_CONNECTED_ACCEPTANCE_RELEASE =
     buildTestGoogleConnectedAcceptanceRelease("gmail_reading");
+  commandEnv.BRUNO_GOOGLE_MAIL_SENDING_CONNECTED_ACCEPTANCE_RELEASE =
+    buildTestGoogleMailSendingAcceptanceRelease();
   commandEnv.BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE =
     buildTestOpenAiConnectedAcceptanceRelease();
   commandEnv.PORT = "3100";

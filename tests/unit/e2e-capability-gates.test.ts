@@ -189,5 +189,13 @@ describe("E2E capability gates", () => {
       sourceRevision: "a".repeat(40),
       gates: { restrictedScopeVerification: true, casaDisposition: true },
     });
+    expect(
+      JSON.parse(childEnv?.BRUNO_GOOGLE_MAIL_SENDING_CONNECTED_ACCEPTANCE_RELEASE ?? "null"),
+    ).toMatchObject({
+      schemaVersion: "bruno.founder-google-mail-sending-connected-acceptance.v1",
+      capability: "gmail_sending",
+      sourceRevision: "a".repeat(40),
+      gates: { exactlyOneCopy: true, uncertainNoSpeculativeResend: true },
+    });
   });
 });

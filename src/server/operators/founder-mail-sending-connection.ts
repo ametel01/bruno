@@ -13,7 +13,12 @@ import {
   operatorPrimaryCommunicationsSuites,
   operators,
 } from "@/src/server/db/schema";
+import { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  deriveFounderConnectionRecovery,
+  type FounderRecoveryDto,
+} from "@/src/server/operators/founder-recovery";
 import {
   decryptOperatorSecret,
   digestOperatorSecret,
@@ -21,10 +26,6 @@ import {
   type OperatorSecretKeyring,
   parseOperatorSecretKeyring,
 } from "@/src/server/secrets/operator-secret-keyring";
-import {
-  deriveFounderConnectionRecovery,
-  type FounderRecoveryDto,
-} from "@/src/server/operators/founder-recovery";
 
 type FounderMailSendingTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -42,11 +43,7 @@ export const FOUNDER_GOOGLE_MAIL_SENDING_RELEASE_CONTROLS = {
     "Disconnect revokes only this send-only grant; Gmail reading and Calendar remain unchanged.",
 } as const;
 
-export function isFounderGoogleMailSendingReleased(
-  env: Record<string, string | undefined> = process.env,
-): boolean {
-  return env.BRUNO_GOOGLE_MAIL_SENDING_RELEASE?.trim().toLowerCase() === "qualified";
-}
+export { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
 
 export type FounderMailSendingConnectionStatus =
   | "authorizing"

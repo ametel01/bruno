@@ -1,3 +1,4 @@
+import { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
 import {
   disconnectFounderGoogleMailSendingForUser,
   FounderMailSendingConnectionError,
@@ -16,6 +17,7 @@ type Dependencies = {
   startAuthorization?: typeof startFounderGoogleMailSendingAuthorizationForUser;
   verifyConnection?: typeof verifyFounderGoogleMailSendingForUser;
   disconnectConnection?: typeof disconnectFounderGoogleMailSendingForUser;
+  isMailSendingReleased?: () => boolean;
 };
 
 export const dynamic = "force-dynamic";
@@ -25,6 +27,9 @@ export async function GET(_request: Request, _context?: unknown, dependencies: D
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!user.ok) return authenticationResponse(user.status);
+  if (!(dependencies.isMailSendingReleased ?? isFounderGoogleMailSendingReleased)()) {
+    return providerNotReleasedResponse();
+  }
   const [connection, offerAvailable] = await Promise.all([
     (dependencies.getConnection ?? getFounderGoogleMailSendingConnectionForUser)(user.userId),
     (dependencies.getOffer ?? getFounderGoogleMailSendingOfferForUser)(user.userId),
@@ -45,6 +50,12 @@ export async function POST(request: Request, _context?: unknown, dependencies: D
   }
   const action = isRecord(payload) && typeof payload.action === "string" ? payload.action : null;
   try {
+    if (
+      action !== "disconnect" &&
+      !(dependencies.isMailSendingReleased ?? isFounderGoogleMailSendingReleased)()
+    ) {
+      return providerNotReleasedResponse();
+    }
     if (action === "start")
       return Response.json(
         await (
@@ -102,6 +113,17 @@ function validationResponse(message: string) {
   return Response.json(
     { error: { code: "validation_failed", message } },
     { status: 400, headers: noStoreHeaders() },
+  );
+}
+function providerNotReleasedResponse() {
+  return Response.json(
+    {
+      error: {
+        code: "mail_sending_not_released",
+        message: "Gmail sending is not available in this Bruno release.",
+      },
+    },
+    { status: 409, headers: noStoreHeaders() },
   );
 }
 function noStoreHeaders(): HeadersInit {

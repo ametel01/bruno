@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
 import { FOUNDER_PRODUCT_CONTRACT_UNIT_FILES } from "@/src/shared/founder-product-contract";
+import { buildTestGoogleMailSendingAcceptanceRelease } from "./founder-google-mail-sending-test-release";
 import { buildTestGoogleConnectedAcceptanceRelease } from "./founder-google-test-release";
 import { buildTestOpenAiConnectedAcceptanceRelease } from "./founder-openai-test-release";
 
@@ -27,6 +28,8 @@ const deterministicProviderEnvironment = {
     new Date(),
     sourceRevision,
   ),
+  BRUNO_GOOGLE_MAIL_SENDING_CONNECTED_ACCEPTANCE_RELEASE:
+    buildTestGoogleMailSendingAcceptanceRelease(new Date(), sourceRevision),
   BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
     new Date(),
     sourceRevision,

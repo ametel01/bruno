@@ -7,7 +7,11 @@ import styles from "./founder-action-inbox.module.css";
 import { FounderActionPreviewCard } from "./founder-action-preview";
 import { FounderProposedActionCard } from "./founder-proposed-action";
 
-export function FounderActionInbox() {
+export function FounderActionInbox({
+  mailSendingReleased = false,
+}: {
+  mailSendingReleased?: boolean;
+}) {
   const [preview, setPreview] = useState<FounderActionPreviewDto | null>(null);
   const [proposedActions, setProposedActions] = useState<FounderProposedActionDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -221,7 +225,7 @@ export function FounderActionInbox() {
           </p>
         </form>
       ) : null}
-      {preview?.mailSendingOffer === "available" ? (
+      {mailSendingReleased && preview?.mailSendingOffer === "available" ? (
         <div className={styles.offer} role="status">
           <p className={styles.kicker}>Contextual Connection Offer</p>
           <strong>Mail Sending is unavailable.</strong>

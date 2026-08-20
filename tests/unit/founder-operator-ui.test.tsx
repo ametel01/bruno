@@ -317,4 +317,30 @@ describe("Founder Operator preparation shell", () => {
     expect(mailOnly).not.toContain("Your Calendar Connection");
     expect(mailOnly).toContain("Your Mail Connection");
   });
+
+  it("keeps Gmail sending hidden until its separate acceptance passes", () => {
+    const readyOperator: FounderOperatorDto = {
+      ...OPERATOR,
+      preparation: {
+        ...OPERATOR.preparation,
+        status: "ready",
+        timezone: "Asia/Manila",
+        timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+      },
+      runtime: { status: "ready", recoveryMessage: null },
+    };
+    const hidden = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, { initialOperator: readyOperator }),
+    );
+    const released = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: readyOperator,
+        mailSendingReleased: true,
+      }),
+    );
+
+    expect(hidden).not.toContain("Optional Mail Sending Connection");
+    expect(released).toContain("Optional Mail Sending Connection");
+    expect(released).toContain("Review send-only Gmail");
+  });
 });

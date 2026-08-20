@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildTestGoogleMailSendingAcceptanceRelease } from "@/scripts/founder-google-mail-sending-test-release";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   operatorActionAuthorizations,
@@ -38,11 +39,16 @@ import {
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003501";
 const NOW = new Date("2026-08-19T05:00:00.000Z");
+const REVISION = "a".repeat(40);
 const KEYRING: OperatorSecretKeyring = {
   activeVersion: "test-v1",
   keys: new Map([["test-v1", Buffer.alloc(32, 9)]]),
 };
-const ENV = { BRUNO_GOOGLE_MAIL_SENDING_RELEASE: "qualified" };
+const ENV = {
+  BRUNO_GOOGLE_MAIL_SENDING_CONNECTED_ACCEPTANCE_RELEASE:
+    buildTestGoogleMailSendingAcceptanceRelease(NOW, REVISION),
+  VERCEL_GIT_COMMIT_SHA: REVISION,
+};
 
 describe("Founder approved Gmail execution", () => {
   let connection: DatabaseConnection;

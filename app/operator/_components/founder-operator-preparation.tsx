@@ -26,6 +26,7 @@ export function FounderOperatorPreparation({
   openAiReleased = false,
   calendarReadingReleased = false,
   mailReadingReleased = false,
+  mailSendingReleased = false,
   mailReleaseControls,
 }: {
   initialOperator: FounderOperatorDto;
@@ -34,6 +35,7 @@ export function FounderOperatorPreparation({
   openAiReleased?: boolean;
   calendarReadingReleased?: boolean;
   mailReadingReleased?: boolean;
+  mailSendingReleased?: boolean;
   mailReleaseControls?: FounderMailConnectionDto["release"] | undefined;
 }) {
   const [operator, setOperator] = useState(initialOperator);
@@ -277,7 +279,7 @@ export function FounderOperatorPreparation({
             )}
           </div>
           <div className={styles.workspaceNeeds}>
-            <FounderActionInbox />
+            <FounderActionInbox mailSendingReleased={mailSendingReleased} />
           </div>
         </section>
       ) : null}
@@ -326,9 +328,11 @@ export function FounderOperatorPreparation({
 
       {!activated && runtimeReady ? <FounderConversation /> : null}
 
-      {!activated && runtimeReady ? <FounderActionInbox /> : null}
+      {!activated && runtimeReady ? (
+        <FounderActionInbox mailSendingReleased={mailSendingReleased} />
+      ) : null}
 
-      {runtimeReady ? <FounderMailSendingConnection /> : null}
+      {runtimeReady && mailSendingReleased ? <FounderMailSendingConnection /> : null}
 
       {runtimeReady && openAiReleased ? <FounderAiConnection /> : null}
 

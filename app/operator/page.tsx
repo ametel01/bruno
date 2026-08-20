@@ -1,5 +1,6 @@
 import { FounderOperatorPreparation } from "@/app/operator/_components/founder-operator-preparation";
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
+import { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
 import {
   isFounderGoogleCalendarReleased,
   isFounderGoogleMailReadingReleased,
@@ -34,6 +35,7 @@ export default async function FounderOperatorPage() {
   const onboarding = await getFounderOnboardingForUser(applicationUser.userId);
   const calendarReadingReleased = isFounderGoogleCalendarReleased();
   const mailReadingReleased = isFounderGoogleMailReadingReleased();
+  const mailSendingReleased = isFounderGoogleMailSendingReleased();
   const openAiReleased = isFounderOpenAiReleased();
 
   return (
@@ -45,6 +47,7 @@ export default async function FounderOperatorPage() {
         openAiReleased={openAiReleased}
         calendarReadingReleased={calendarReadingReleased}
         mailReadingReleased={mailReadingReleased}
+        mailSendingReleased={mailSendingReleased}
         mailReleaseControls={
           mailReadingReleased
             ? {

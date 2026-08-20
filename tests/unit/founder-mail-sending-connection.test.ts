@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildTestGoogleMailSendingAcceptanceRelease } from "@/scripts/founder-google-mail-sending-test-release";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   operatorCalendarConnections,
@@ -10,6 +11,17 @@ import {
   users,
 } from "@/src/server/db/schema";
 import {
+  completeFounderGoogleMailSendingAuthorizationForState,
+  createGoogleMailSendingAdapter,
+  denyFounderGoogleMailSendingAuthorizationForState,
+  disconnectFounderGoogleMailSendingForUser,
+  type FounderGoogleMailSendingAdapter,
+  getFounderGoogleMailSendingConnectionForUser,
+  getFounderGoogleMailSendingOfferForUser,
+  REQUIRED_MAIL_SENDING_SCOPE,
+  startFounderGoogleMailSendingAuthorizationForUser,
+} from "@/src/server/operators/founder-mail-sending-connection";
+import {
   confirmFounderTimezoneForUser,
   ensureFounderOperatorForUser,
 } from "@/src/server/operators/founder-operator";
@@ -17,25 +29,19 @@ import {
   encryptOperatorSecret,
   type OperatorSecretKeyring,
 } from "@/src/server/secrets/operator-secret-keyring";
-import {
-  completeFounderGoogleMailSendingAuthorizationForState,
-  createGoogleMailSendingAdapter,
-  denyFounderGoogleMailSendingAuthorizationForState,
-  disconnectFounderGoogleMailSendingForUser,
-  getFounderGoogleMailSendingConnectionForUser,
-  getFounderGoogleMailSendingOfferForUser,
-  REQUIRED_MAIL_SENDING_SCOPE,
-  startFounderGoogleMailSendingAuthorizationForUser,
-  type FounderGoogleMailSendingAdapter,
-} from "@/src/server/operators/founder-mail-sending-connection";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003490";
 const NOW = new Date("2026-08-19T01:00:00.000Z");
+const REVISION = "a".repeat(40);
 const KEYRING: OperatorSecretKeyring = {
   activeVersion: "test-v1",
   keys: new Map([["test-v1", Buffer.alloc(32, 9)]]),
 };
-const ENV = { BRUNO_GOOGLE_MAIL_SENDING_RELEASE: "qualified" };
+const ENV = {
+  BRUNO_GOOGLE_MAIL_SENDING_CONNECTED_ACCEPTANCE_RELEASE:
+    buildTestGoogleMailSendingAcceptanceRelease(NOW, REVISION),
+  VERCEL_GIT_COMMIT_SHA: REVISION,
+};
 
 describe("Founder Google Mail Sending connection", () => {
   let connection: DatabaseConnection;
