@@ -178,6 +178,8 @@ describe("Founder AI connection route", () => {
         method: "POST",
         body: JSON.stringify({ action: "start", provider: "anthropic" }),
       }),
+      undefined,
+      { isAnthropicReleased: () => true },
     );
     expect(started.status).toBe(200);
     expect(mocks.startAnthropicAuthorization).toHaveBeenCalledWith(USER_ID);
@@ -190,9 +192,69 @@ describe("Founder AI connection route", () => {
           sessionId: "claude-session",
         }),
       }),
+      undefined,
+      { isAnthropicReleased: () => true },
     );
     expect(polled.status).toBe(200);
     expect(mocks.pollAnthropicAuthorization).toHaveBeenCalledWith(USER_ID, "claude-session");
     expect(JSON.stringify(await polled.json())).not.toMatch(/token|secret|setup-token|api.?key/i);
+  });
+
+  it("fails closed before invoking Anthropic without exact acceptance", async () => {
+    const { GET, POST } = await import("@/app/api/operator/connections/route");
+    const base = "http://localhost/api/operator/connections";
+    const read = await GET(new Request(`${base}?provider=anthropic`), undefined, {
+      isAnthropicReleased: () => false,
+    });
+    const start = await POST(
+      new Request(base, {
+        method: "POST",
+        body: JSON.stringify({ action: "start", provider: "anthropic" }),
+      }),
+      undefined,
+      { isAnthropicReleased: () => false },
+    );
+
+    expect(read.status).toBe(409);
+    expect(start.status).toBe(409);
+    await expect(start.json()).resolves.toEqual({
+      error: {
+        code: "provider_not_released",
+        message: "Anthropic is unavailable until current Connected Acceptance passes.",
+      },
+    });
+    expect(mocks.recheckAnthropicConnection).not.toHaveBeenCalled();
+    expect(mocks.startAnthropicAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("does not let missing Anthropic evidence block released OpenAI", async () => {
+    const { POST } = await import("@/app/api/operator/connections/route");
+    const response = await POST(
+      new Request("http://localhost/api/operator/connections", {
+        method: "POST",
+        body: JSON.stringify({ action: "start", provider: "openai" }),
+      }),
+      undefined,
+      { isOpenAiReleased: () => true, isAnthropicReleased: () => false },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startAuthorization).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.startAnthropicAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("keeps Anthropic disconnect available after release evidence expires", async () => {
+    const { POST } = await import("@/app/api/operator/connections/route");
+    const response = await POST(
+      new Request("http://localhost/api/operator/connections", {
+        method: "POST",
+        body: JSON.stringify({ action: "disconnect", provider: "anthropic" }),
+      }),
+      undefined,
+      { isAnthropicReleased: () => false },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.disconnectAnthropicConnection).toHaveBeenCalledWith(USER_ID);
   });
 });

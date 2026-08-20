@@ -3,8 +3,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type * as schema from "@/src/server/db/schema";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import {
   operatorAiConnectionReceipts,
   operatorAiConnections,
@@ -13,6 +13,7 @@ import {
 } from "@/src/server/db/schema";
 import type { FounderAiProvider } from "@/src/server/operators/founder-ai-routing";
 import { routeFounderAiProvider } from "@/src/server/operators/founder-ai-routing";
+import { isFounderAnthropicReleased } from "@/src/server/operators/founder-anthropic-release";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
   deriveFounderConnectionRecovery,
@@ -241,14 +242,6 @@ export type FounderOpenAiAuthorizationResult = {
 };
 
 export type FounderAnthropicAuthorizationResult = FounderOpenAiAuthorizationResult;
-
-/**
- * Anthropic remains hidden unless the deployment explicitly enables the
- * provider program. Account-level compatibility and readiness gates still
- * have to pass before a connection can become Ready.
- */
-export const FOUNDER_ANTHROPIC_CONNECTION_RELEASED =
-  process.env.BRUNO_ANTHROPIC_CONNECTION_RELEASED === "true";
 
 export class FounderAiConnectionError extends Error {
   readonly code: string;
@@ -796,7 +789,7 @@ export async function startFounderAnthropicAuthorizationForUser(
   userId: string,
   dependencies: FounderAiConnectionDependencies = {},
 ): Promise<FounderAnthropicAuthorizationResult> {
-  if (!dependencies.anthropicReleased && !FOUNDER_ANTHROPIC_CONNECTION_RELEASED) {
+  if (!dependencies.anthropicReleased && !isFounderAnthropicReleased()) {
     throw new FounderAiConnectionError(
       "provider_not_released",
       "Anthropic remains unavailable until its privacy, billing, credential, and production-use gates pass.",
@@ -912,7 +905,7 @@ export async function pollFounderAnthropicAuthorizationForUser(
   sessionId: string,
   dependencies: FounderAiConnectionDependencies = {},
 ): Promise<FounderAiConnectionDto> {
-  if (!dependencies.anthropicReleased && !FOUNDER_ANTHROPIC_CONNECTION_RELEASED) {
+  if (!dependencies.anthropicReleased && !isFounderAnthropicReleased()) {
     throw new FounderAiConnectionError("provider_not_released", "Anthropic is not released.", 409);
   }
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
@@ -1070,7 +1063,7 @@ export async function recheckFounderAnthropicConnectionForUser(
   userId: string,
   dependencies: FounderAiConnectionDependencies = {},
 ): Promise<FounderAiConnectionDto | null> {
-  if (!dependencies.anthropicReleased && !FOUNDER_ANTHROPIC_CONNECTION_RELEASED) return null;
+  if (!dependencies.anthropicReleased && !isFounderAnthropicReleased()) return null;
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
@@ -1158,7 +1151,6 @@ export async function disconnectFounderAnthropicForUser(
   userId: string,
   dependencies: FounderAiConnectionDependencies = {},
 ): Promise<FounderAiConnectionDto | null> {
-  if (!dependencies.anthropicReleased && !FOUNDER_ANTHROPIC_CONNECTION_RELEASED) return null;
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;

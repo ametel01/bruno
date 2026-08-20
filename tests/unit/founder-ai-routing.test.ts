@@ -78,6 +78,24 @@ describe("Founder AI compatibility routing", () => {
     ).toBeNull();
   });
 
+  it("keeps provider releases independent in the active routing policy", () => {
+    const openAiOnly = getActiveFounderAiCompatibilityPolicy(true, false);
+    const anthropicOnly = getActiveFounderAiCompatibilityPolicy(false, true);
+
+    expect(
+      selectFounderAiProvider([candidate("openai"), candidate("anthropic")], {
+        now: NOW,
+        policy: openAiOnly,
+      }),
+    ).toMatchObject({ provider: "openai" });
+    expect(
+      selectFounderAiProvider([candidate("openai"), candidate("anthropic")], {
+        now: NOW,
+        policy: anthropicOnly,
+      }),
+    ).toMatchObject({ provider: "anthropic" });
+  });
+
   it("fails over only when the checkpoint explicitly excludes the failed provider", () => {
     const connections = [candidate("openai"), candidate("anthropic")];
     expect(

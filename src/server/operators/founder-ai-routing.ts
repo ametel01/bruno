@@ -4,6 +4,7 @@ import { desc, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/src/server/db/schema";
 import { operatorAiConnections } from "@/src/server/db/schema";
+import { isFounderAnthropicReleased } from "@/src/server/operators/founder-anthropic-release";
 import {
   FOUNDER_OPENAI_POLICY_VERSION,
   isFounderOpenAiReleased,
@@ -48,8 +49,8 @@ export const ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY: FounderAiCompatibilityPolic
       approvedModelAssignments: ["openai-codex"],
     },
     anthropic: {
-      // Anthropic becomes routable only when its gated connection release is
-      // enabled by a later compatibility policy (currently #353).
+      // Anthropic becomes routable only from current, exact-policy Connected
+      // Acceptance evidence. A stored connection is insufficient by itself.
       released: false,
       priority: 20,
       defaultModelAssignment: "anthropic-claude",
@@ -96,6 +97,7 @@ export type FounderAiRoutingOptions = {
 
 export function getActiveFounderAiCompatibilityPolicy(
   openAiReleased = isFounderOpenAiReleased(),
+  anthropicReleased = isFounderAnthropicReleased(),
 ): FounderAiCompatibilityPolicy {
   return {
     ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY,
@@ -104,6 +106,10 @@ export function getActiveFounderAiCompatibilityPolicy(
       openai: {
         ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers.openai,
         released: openAiReleased,
+      },
+      anthropic: {
+        ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers.anthropic,
+        released: anthropicReleased,
       },
     },
   };

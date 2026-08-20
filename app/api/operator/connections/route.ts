@@ -10,6 +10,7 @@ import {
   startFounderAnthropicAuthorizationForUser,
   startFounderOpenAiAuthorizationForUser,
 } from "@/src/server/operators/founder-ai-connection";
+import { isFounderAnthropicReleased } from "@/src/server/operators/founder-anthropic-release";
 import { isFounderOpenAiReleased } from "@/src/server/operators/founder-openai-release";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
@@ -25,6 +26,7 @@ type ConnectionRouteDependencies = {
   recheckAnthropicConnection?: typeof recheckFounderAnthropicConnectionForUser;
   disconnectAnthropicConnection?: typeof disconnectFounderAnthropicForUser;
   isOpenAiReleased?: () => boolean;
+  isAnthropicReleased?: () => boolean;
 };
 
 export const dynamic = "force-dynamic";
@@ -41,7 +43,13 @@ export async function GET(
 
   const provider = readProvider(new URL(request.url).searchParams.get("provider"));
   if (provider === "openai" && !(dependencies.isOpenAiReleased ?? isFounderOpenAiReleased)()) {
-    return providerNotReleasedResponse();
+    return providerNotReleasedResponse("openai");
+  }
+  if (
+    provider === "anthropic" &&
+    !(dependencies.isAnthropicReleased ?? isFounderAnthropicReleased)()
+  ) {
+    return providerNotReleasedResponse("anthropic");
   }
   const connection =
     provider === "anthropic"
@@ -81,7 +89,14 @@ export async function POST(
       action !== "disconnect" &&
       !(dependencies.isOpenAiReleased ?? isFounderOpenAiReleased)()
     ) {
-      return providerNotReleasedResponse();
+      return providerNotReleasedResponse("openai");
+    }
+    if (
+      provider === "anthropic" &&
+      action !== "disconnect" &&
+      !(dependencies.isAnthropicReleased ?? isFounderAnthropicReleased)()
+    ) {
+      return providerNotReleasedResponse("anthropic");
     }
     if (action === "start") {
       const result =
@@ -183,12 +198,12 @@ function validationResponse(message: string): Response {
   );
 }
 
-function providerNotReleasedResponse(): Response {
+function providerNotReleasedResponse(provider: "openai" | "anthropic"): Response {
   return Response.json(
     {
       error: {
         code: "provider_not_released",
-        message: "OpenAI is unavailable until current Connected Acceptance passes.",
+        message: `${provider === "anthropic" ? "Anthropic" : "OpenAI"} is unavailable until current Connected Acceptance passes.`,
       },
     },
     { status: 409, headers: noStoreHeaders() },
