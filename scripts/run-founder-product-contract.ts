@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  buildFounderInitialGeneralReleaseDecision,
+  parseFounderModeratedSummary,
+  parseFounderProviderDecisionSummary,
+} from "@/scripts/create-founder-general-release-decision";
 import { createFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
 import { FOUNDER_PRODUCT_CONTRACT_UNIT_FILES } from "@/src/shared/founder-product-contract";
 import { buildTestGoogleMailSendingAcceptanceRelease } from "./founder-google-mail-sending-test-release";
@@ -12,10 +17,15 @@ const artifactDirectory =
 const browserResultPath = join(artifactDirectory, "browser-results.json");
 const unitResultPath = join(artifactDirectory, "unit-results.json");
 const evidencePath = join(artifactDirectory, "founder-product-contract.json");
+const generalReleaseDecisionPath = join(
+  artifactDirectory,
+  "founder-initial-general-release-decision.json",
+);
 const mode = process.env.BRUNO_FOUNDER_CONTRACT_MODE === "release" ? "release" : "ci";
 
 await mkdir(artifactDirectory, { recursive: true });
 await rm(evidencePath, { force: true });
+await rm(generalReleaseDecisionPath, { force: true });
 const sourceRevision = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION");
 const deterministicProviderEnvironment = {
   BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
@@ -87,11 +97,21 @@ const evidence = await createFounderProductContractEvidence({
 });
 
 await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
+const generalReleaseDecision = buildFounderInitialGeneralReleaseDecision({
+  productContract: evidence,
+  moderatedSummary: parseFounderModeratedSummary(process.env.BRUNO_FOUNDER_MODERATED_SUMMARY_JSON),
+  providerSummary: parseFounderProviderDecisionSummary(
+    process.env.BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON,
+  ),
+});
+await writeFile(generalReleaseDecisionPath, `${JSON.stringify(generalReleaseDecision, null, 2)}\n`);
 console.info(
   JSON.stringify({
     result: evidence.result,
     releaseEligible: evidence.releaseEligible,
+    generalReleaseOutcome: generalReleaseDecision.outcome,
     summaryDigest: evidence.summaryDigest,
+    generalReleaseSummaryDigest: generalReleaseDecision.summaryDigest,
   }),
 );
 

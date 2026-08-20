@@ -85,6 +85,7 @@ export const FOUNDER_PRODUCT_CONTRACT_UNIT_FILES = [
   "tests/unit/founder-support.test.ts",
   "tests/unit/operator-access.test.ts",
   "tests/unit/founder-product-contract-evidence.test.ts",
+  "tests/unit/founder-general-release-decision.test.ts",
 ] as const;
 
 export const FOUNDER_PRODUCT_CONTRACT_ATTENDED_TASKS = [

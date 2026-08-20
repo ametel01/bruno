@@ -38,6 +38,14 @@ on:
         description: Chrome version used for the attended TalkBack journey
         required: false
         type: string
+      moderated_founder_summary_json:
+        description: Allowlisted moderated-study counts and evidence digest; no identities or recordings
+        required: false
+        type: string
+      provider_decision_summary_json:
+        description: Exact-revision provider outcomes and evidence digests
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -84,6 +92,8 @@ jobs:
       BRUNO_FOUNDER_CONTRACT_TALKBACK_DIGEST: ${{ inputs.talkback_evidence_digest }}
       BRUNO_FOUNDER_CONTRACT_TALKBACK_OS_VERSION: ${{ inputs.talkback_os_version }}
       BRUNO_FOUNDER_CONTRACT_TALKBACK_BROWSER_VERSION: ${{ inputs.talkback_browser_version }}
+      BRUNO_FOUNDER_MODERATED_SUMMARY_JSON: ${{ inputs.moderated_founder_summary_json }}
+      BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON: ${{ inputs.provider_decision_summary_json }}
 
     steps:
       - name: Check out exact release candidate
@@ -112,12 +122,12 @@ jobs:
       - name: Attest the allowlisted exact-release summary
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: founder-contract-artifacts/founder-product-contract.json
+          subject-path: founder-contract-artifacts/*.json
 
       - name: Retain the allowlisted summary
         uses: actions/upload-artifact@v4
         with:
           name: founder-product-contract-${{ github.sha }}
-          path: founder-contract-artifacts/founder-product-contract.json
+          path: founder-contract-artifacts/*.json
           if-no-files-found: error
           retention-days: 90
