@@ -10,6 +10,11 @@
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.85fr);
   gap: 22px;
   align-items: start;
+  overflow-wrap: anywhere;
+}
+
+.workspace :global(*) {
+  min-width: 0;
 }
 
 .workspaceConversation,
