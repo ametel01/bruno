@@ -5,8 +5,8 @@ import type {
   FounderMailConnectionDto,
   FounderMailOfferDisposition,
 } from "@/src/server/operators/founder-mail-connection";
-import { FounderRecoveryStatus } from "./founder-recovery-status";
 import styles from "./founder-mail-connection.module.css";
+import { FounderRecoveryStatus } from "./founder-recovery-status";
 
 export function FounderMailConnection({
   releaseControls,
@@ -212,9 +212,17 @@ export function FounderMailConnection({
       {connection?.accountLabel ? (
         <p className={styles.account}>{connection.accountLabel}</p>
       ) : null}
-      {loading ? <p className={styles.notice}>Loading your Mail Connection…</p> : null}
+      {loading ? (
+        <p className={styles.notice} role="status" aria-live="polite">
+          Loading your Mail Connection…
+        </p>
+      ) : null}
       {connection?.recovery ? <FounderRecoveryStatus recovery={connection.recovery} /> : null}
-      {!loading && !connection?.recovery ? <p className={styles.notice}>{statusCopy}</p> : null}
+      {!loading && !connection?.recovery ? (
+        <p className={styles.notice} role="status" aria-live="polite">
+          {statusCopy}
+        </p>
+      ) : null}
 
       {connected && availableResources.length > 0 ? (
         <fieldset className={styles.resources} disabled={busy}>

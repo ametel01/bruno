@@ -66,12 +66,29 @@ export function FounderCoreOperation() {
     }
   }
 
-  if (loading || !operation) return error ? <p className={styles.error}>{error}</p> : null;
+  if (loading) {
+    return (
+      <p className={styles.notice} role="status" aria-live="polite">
+        Loading Core Operation…
+      </p>
+    );
+  }
+  if (!operation)
+    return error ? (
+      <p className={styles.error} role="alert">
+        {error}
+      </p>
+    ) : null;
   const consentActive = operation.consent.status === "active";
   const activated = Boolean(operation.activatedAt);
 
   return (
-    <section className={styles.card} id="core-operation" aria-labelledby="core-operation-title">
+    <section
+      className={styles.card}
+      id="core-operation"
+      aria-labelledby="core-operation-title"
+      aria-busy={busy}
+    >
       <div className={styles.heading}>
         <div>
           <p className={styles.kicker}>Founder workspace</p>
@@ -164,7 +181,7 @@ export function FounderCoreOperation() {
           )}
         </article>
       ) : consentActive ? (
-        <p className={styles.notice}>
+        <p className={styles.notice} role="status" aria-live="polite">
           Bruno is waiting for Current evidence from both Calendar and Mail.
         </p>
       ) : null}

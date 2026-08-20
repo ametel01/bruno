@@ -6,11 +6,15 @@ import type {
   FounderConversationMessageDto,
 } from "@/src/server/operators/founder-conversation";
 import { FounderActionPreviewCard } from "./founder-action-preview";
-import { FounderRecoveryStatus } from "./founder-recovery-status";
 import styles from "./founder-conversation.module.css";
 import { FounderProposedActionCard } from "./founder-proposed-action";
+import { FounderRecoveryStatus } from "./founder-recovery-status";
 
-export function FounderConversation() {
+export function FounderConversation({
+  showDecisionContext = true,
+}: {
+  showDecisionContext?: boolean;
+}) {
   const [conversation, setConversation] = useState<FounderConversationDto | null>(null);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
@@ -111,7 +115,12 @@ export function FounderConversation() {
   }
 
   return (
-    <section className={styles.card} id="conversation" aria-labelledby="conversation-title">
+    <section
+      className={styles.card}
+      id="conversation"
+      aria-labelledby="conversation-title"
+      aria-busy={loading || sending}
+    >
       <div className={styles.heading}>
         <div>
           <p className={styles.kicker}>Bruno Conversation</p>
@@ -122,7 +131,11 @@ export function FounderConversation() {
         </span>
       </div>
 
-      {loading ? <p className={styles.empty}>Loading your conversation…</p> : null}
+      {loading ? (
+        <p className={styles.empty} role="status" aria-live="polite">
+          Loading your conversation…
+        </p>
+      ) : null}
       {!loading && conversation?.messages.length === 0 ? (
         <p className={styles.empty}>
           Ask Bruno a question or describe the work you want prepared. Your conversation stays in
@@ -166,10 +179,10 @@ export function FounderConversation() {
         </div>
       ) : null}
 
-      {conversation?.actionPreview ? (
+      {showDecisionContext && conversation?.actionPreview ? (
         <FounderActionPreviewCard preview={conversation.actionPreview} compact />
       ) : null}
-      {conversation?.proposedAction ? (
+      {showDecisionContext && conversation?.proposedAction ? (
         <FounderProposedActionCard
           action={conversation.proposedAction}
           compact

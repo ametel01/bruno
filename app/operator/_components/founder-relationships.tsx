@@ -79,7 +79,12 @@ export function FounderRelationships() {
   }
 
   if (loading) return null;
-  if (!relationships && error) return <p className={styles.error}>{error}</p>;
+  if (!relationships && error)
+    return (
+      <p className={styles.error} role="alert">
+        {error}
+      </p>
+    );
   if (!relationships) return null;
   const pendingCandidates = relationships.candidates.filter(
     (candidate) => candidate.status === "pending",

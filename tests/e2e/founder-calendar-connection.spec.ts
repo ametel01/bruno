@@ -133,6 +133,7 @@ test("founder resumes a persisted Core Operation on desktop and mobile", async (
         const context = await browser.newContext({ viewport });
         try {
           const page = await context.newPage();
+          await page.emulateMedia({ reducedMotion: "reduce" });
           const state = { confirmed: false, activated: false, mode: "ready" as const };
           await installCoreRoutes(context, state);
           await page.goto("/operator");
@@ -149,6 +150,42 @@ test("founder resumes a persisted Core Operation on desktop and mobile", async (
           await expect(
             page.getByText("Founder Activation recorded. Conversation is your current workspace."),
           ).toBeVisible();
+          const workspace = page.getByRole("region", { name: "Current Founder workspace" });
+          await expect(workspace.locator("#conversation")).toBeVisible();
+          await expect(
+            workspace.getByRole("heading", { name: "Founder Morning Brief" }),
+          ).toBeVisible();
+          await expect(workspace.locator("#needs-you")).toBeVisible();
+          const layoutEvidence = await workspace.evaluate((element) => {
+            const conversation = element.querySelector("#conversation");
+            const brief = element.querySelector("#core-operation #core-brief-title");
+            const proposed = element.querySelector("#core-operation [data-proposed-action-id]");
+            const style = getComputedStyle(element);
+            return {
+              columns: style.gridTemplateColumns.split(" ").length,
+              conversationBeforeBrief: Boolean(
+                conversation &&
+                  brief &&
+                  conversation.compareDocumentPosition(brief) & Node.DOCUMENT_POSITION_FOLLOWING,
+              ),
+              briefBeforeProposed: Boolean(
+                brief &&
+                  proposed &&
+                  brief.compareDocumentPosition(proposed) & Node.DOCUMENT_POSITION_FOLLOWING,
+              ),
+              noHorizontalOverflow: document.documentElement.scrollWidth <= window.innerWidth,
+              scrollBehavior: style.scrollBehavior,
+            };
+          });
+          expect(layoutEvidence.columns).toBe(viewport.width >= 760 ? 2 : 1);
+          expect(layoutEvidence.conversationBeforeBrief).toBe(true);
+          expect(layoutEvidence.briefBeforeProposed).toBe(true);
+          expect(layoutEvidence.noHorizontalOverflow).toBe(true);
+          expect(layoutEvidence.scrollBehavior).toBe("auto");
+          const nowLink = page.getByRole("link", { name: "Now" });
+          await nowLink.focus();
+          await expect(nowLink).toBeFocused();
+          await expect(nowLink).toHaveCSS("outline-style", "solid");
         } finally {
           await closeContextAfterNetworkIdle(context);
         }

@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FounderCalendarConnectionDto } from "@/src/server/operators/founder-calendar-connection";
-import { FounderRecoveryStatus } from "./founder-recovery-status";
 import styles from "./founder-calendar-connection.module.css";
+import { FounderRecoveryStatus } from "./founder-recovery-status";
 
 export function FounderCalendarConnection() {
   const [connection, setConnection] = useState<FounderCalendarConnectionDto | null>(null);
@@ -155,9 +155,17 @@ export function FounderCalendarConnection() {
       {connection?.accountLabel ? (
         <p className={styles.account}>{connection.accountLabel}</p>
       ) : null}
-      {loading ? <p className={styles.notice}>Loading your Calendar Connection…</p> : null}
+      {loading ? (
+        <p className={styles.notice} role="status" aria-live="polite">
+          Loading your Calendar Connection…
+        </p>
+      ) : null}
       {connection?.recovery ? <FounderRecoveryStatus recovery={connection.recovery} /> : null}
-      {!loading && !connection?.recovery ? <p className={styles.notice}>{statusCopy}</p> : null}
+      {!loading && !connection?.recovery ? (
+        <p className={styles.notice} role="status" aria-live="polite">
+          {statusCopy}
+        </p>
+      ) : null}
 
       {connected && availableResources.length > 0 ? (
         <fieldset

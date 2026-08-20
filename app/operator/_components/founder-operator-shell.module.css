@@ -15,9 +15,13 @@
   font-family: var(--font-bruno-body), Inter, ui-sans-serif, system-ui, sans-serif;
 }
 
-.shell :where(a, button, input):focus-visible {
+.shell :where(a, button, input, select, textarea, summary):focus-visible {
   outline: 3px solid var(--operator-mint);
   outline-offset: 3px;
+}
+
+.shell :where(a, button, input, select, textarea, summary) {
+  scroll-margin-block: 1rem;
 }
 
 .sidebar {
@@ -139,6 +143,18 @@
   background: var(--operator-mint);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .shell,
+  .shell *,
+  .shell *::before,
+  .shell *::after {
+    scroll-behavior: auto;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+  }
+}
+
 @media (max-width: 720px) {
   .shell {
     grid-template-columns: minmax(0, 1fr);
@@ -157,7 +173,11 @@
 
   .navLink {
     justify-content: center;
+    min-width: 0;
     padding: 0 8px;
+    text-align: center;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
   }
 
   .sidebarNote {

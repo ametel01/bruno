@@ -73,7 +73,10 @@ export function FounderOperatorPreparation({
         ? "connections"
         : onboarding.nextStep;
     window.history.replaceState(null, "", `/operator#${targetId}`);
-    document.getElementById(targetId)?.scrollIntoView({ block: "start", behavior: "smooth" });
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document
+      .getElementById(targetId)
+      ?.scrollIntoView({ block: "start", behavior: reducedMotion ? "auto" : "smooth" });
   }, [onboarding]);
 
   useEffect(() => {
@@ -256,15 +259,21 @@ export function FounderOperatorPreparation({
       ) : null}
 
       {activated && runtimeReady ? (
-        <>
-          <FounderConversation />
-          {onboarding?.operation === "core" ? (
-            <FounderCoreOperation />
-          ) : (
-            <FounderLimitedOperation />
-          )}
-          <FounderActionInbox />
-        </>
+        <section className={styles.workspace} aria-label="Current Founder workspace">
+          <div className={styles.workspaceConversation}>
+            <FounderConversation showDecisionContext={false} />
+          </div>
+          <div className={styles.workspaceBrief}>
+            {onboarding?.operation === "core" ? (
+              <FounderCoreOperation />
+            ) : (
+              <FounderLimitedOperation />
+            )}
+          </div>
+          <div className={styles.workspaceNeeds}>
+            <FounderActionInbox />
+          </div>
+        </section>
       ) : null}
 
       <section className={styles.card} id="onboarding-timezone" aria-labelledby="timezone-title">

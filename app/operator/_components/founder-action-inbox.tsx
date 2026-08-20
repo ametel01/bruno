@@ -124,7 +124,12 @@ export function FounderActionInbox() {
   }
 
   return (
-    <section className={styles.card} id="needs-you" aria-labelledby="action-inbox-title">
+    <section
+      className={styles.card}
+      id="needs-you"
+      aria-labelledby="action-inbox-title"
+      aria-busy={loading || saving}
+    >
       <div className={styles.heading}>
         <div>
           <p className={styles.kicker}>Action Inbox</p>
@@ -132,7 +137,11 @@ export function FounderActionInbox() {
         </div>
         <span className={styles.badge}>Non-executable</span>
       </div>
-      {loading ? <p className={styles.notice}>Loading your canonical preview…</p> : null}
+      {loading ? (
+        <p className={styles.notice} role="status" aria-live="polite">
+          Loading your canonical preview…
+        </p>
+      ) : null}
       {preview ? <FounderActionPreviewCard preview={preview} /> : null}
       {proposedActions.map((action) => (
         <FounderProposedActionCard

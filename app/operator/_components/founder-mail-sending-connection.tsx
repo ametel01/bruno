@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { FounderMailSendingConnectionDto } from "@/src/server/operators/founder-mail-sending-connection";
-import { FounderRecoveryStatus } from "./founder-recovery-status";
 import styles from "./founder-mail-connection.module.css";
+import { FounderRecoveryStatus } from "./founder-recovery-status";
 
 export function FounderMailSendingConnection() {
   const [connection, setConnection] = useState<FounderMailSendingConnectionDto | null>(null);
@@ -90,13 +90,19 @@ export function FounderMailSendingConnection() {
       {connection?.accountLabel ? (
         <p className={styles.account}>{connection.accountLabel}</p>
       ) : null}
-      {loading ? <p className={styles.notice}>Loading your Mail Sending Connection…</p> : null}
+      {loading ? (
+        <p className={styles.notice} role="status" aria-live="polite">
+          Loading your Mail Sending Connection…
+        </p>
+      ) : null}
       {connection?.recovery ? <FounderRecoveryStatus recovery={connection.recovery} /> : null}
       {!connection?.recovery && !loading && connection?.recoveryMessage ? (
-        <p className={styles.notice}>{connection.recoveryMessage}</p>
+        <p className={styles.notice} role="status" aria-live="polite">
+          {connection.recoveryMessage}
+        </p>
       ) : null}
       {!loading && !connection ? (
-        <p className={styles.notice}>
+        <p className={styles.notice} role="status" aria-live="polite">
           This offer appears only beside an approved sending outcome or its first send preview.
           Dismiss it once and it will not nag you.
         </p>

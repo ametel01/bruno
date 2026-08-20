@@ -78,7 +78,19 @@ export function FounderLimitedOperation() {
     }
   }
 
-  if (loading || !operation) return error ? <p className={styles.error}>{error}</p> : null;
+  if (loading) {
+    return (
+      <p className={styles.notice} role="status" aria-live="polite">
+        Loading Limited Operation…
+      </p>
+    );
+  }
+  if (!operation)
+    return error ? (
+      <p className={styles.error} role="alert">
+        {error}
+      </p>
+    ) : null;
 
   const consentActive = operation.consent.status === "active";
   const briefReady = Boolean(operation.brief);
@@ -89,6 +101,7 @@ export function FounderLimitedOperation() {
       className={styles.card}
       id="limited-operation"
       aria-labelledby="limited-operation-title"
+      aria-busy={busy}
     >
       <div className={styles.heading}>
         <div>
@@ -182,7 +195,7 @@ export function FounderLimitedOperation() {
           )}
         </article>
       ) : consentActive ? (
-        <p className={styles.notice}>
+        <p className={styles.notice} role="status" aria-live="polite">
           Bruno is waiting for a Current check of the selected Calendar.
         </p>
       ) : null}
