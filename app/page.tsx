@@ -1,7 +1,7 @@
 /*
 THESIS: Bruno.Ai is the always-on AI agent that keeps a one-person company in motion, learns from the founder, and improves through one calm operating loop.
 OWN-WORLD: Ivory and stone fields, deep-charcoal Satoshi, warm espresso rules, mint and lime signals, orbital linework, and softly precise product panels.
-STORY: Understand Bruno.Ai’s 24/7 role and learning loop, see the Action Inbox and Business Graph at work, then enter the shipped dashboard or create an agent.
+STORY: Understand Bruno.Ai’s 24/7 role and learning loop, see the Action Inbox and Business Graph at work, then enter the Founder workspace.
 FIRST VIEWPORT: A quiet navigation bar leads into an always-on promise and two clear actions beside a high-fidelity illustrative Action Inbox crossed by Bruno.Ai’s circular signal pattern.
 FORM: Calm Operations Brandboard, the user-pinned hard reference; seed b32744ed.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
@@ -172,8 +172,8 @@ export default function Home() {
           <Link className={styles.signInLink} href="/sign-in">
             Sign in
           </Link>
-          <Link className={styles.headerCta} href="/dashboard">
-            Open dashboard
+          <Link className={styles.headerCta} href="/operator">
+            Open Founder workspace
             <ArrowIcon />
           </Link>
         </div>
@@ -196,12 +196,12 @@ export default function Home() {
             correction, approval, and outcome—then gets better at the work you trust it to handle.
           </p>
           <div className={styles.heroActions}>
-            <Link className={styles.primaryAction} href="/dashboard">
-              Open dashboard
+            <Link className={styles.primaryAction} href="/operator">
+              Open Founder workspace
               <ArrowIcon />
             </Link>
-            <Link className={styles.secondaryAction} href="/agents#create-agent-title">
-              Create an agent
+            <Link className={styles.secondaryAction} href="/operator#onboarding-timezone">
+              Start with Bruno
             </Link>
           </div>
           <a

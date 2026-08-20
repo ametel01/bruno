@@ -2,8 +2,8 @@ import "server-only";
 
 import { desc, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type * as schema from "@/src/server/db/schema";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import {
   operatorAiConnections,
   operatorCalendarConnections,
@@ -15,8 +15,8 @@ import {
   operatorRuntimes,
   operators,
 } from "@/src/server/db/schema";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import { isFounderGoogleMailReadingReleased } from "@/src/server/operators/founder-mail-connection";
+import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 
 type OnboardingTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -201,10 +201,7 @@ export async function getFounderOnboardingForUser(
           : "none";
       return {
         nextStep,
-        defaultRoute:
-          nextStep === "conversation"
-            ? "/operator#conversation"
-            : `/operator#onboarding-${nextStep}`,
+        defaultRoute: `/operator#${onboardingAnchor(nextStep)}`,
         activated: Boolean(activation),
         operation: operationKind,
         capabilities: {
@@ -223,6 +220,12 @@ export async function getFounderOnboardingForUser(
       };
     }),
   );
+}
+
+function onboardingAnchor(step: FounderOnboardingStep): string {
+  if (step === "conversation") return "conversation";
+  if (step === "ai") return "connections";
+  return `onboarding-${step}`;
 }
 
 async function selectMailDisposition(tx: OnboardingTransaction, operatorId: string) {

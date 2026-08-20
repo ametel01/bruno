@@ -19,7 +19,7 @@ export function FounderOperatorShell({
         <nav className={styles.nav} aria-label="Founder workspace">
           <Link
             className={styles.navLink}
-            href="/operator"
+            href="/operator#conversation"
             aria-current={activePage === "now" ? "page" : undefined}
           >
             <span>Now</span>

@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import type { FounderActionPreviewDto } from "@/src/server/operators/founder-action-previews";
 import type { FounderProposedActionDto } from "@/src/server/operators/founder-proposed-actions";
+import styles from "./founder-action-inbox.module.css";
 import { FounderActionPreviewCard } from "./founder-action-preview";
 import { FounderProposedActionCard } from "./founder-proposed-action";
-import styles from "./founder-action-inbox.module.css";
 
 export function FounderActionInbox() {
   const [preview, setPreview] = useState<FounderActionPreviewDto | null>(null);
@@ -124,7 +124,7 @@ export function FounderActionInbox() {
   }
 
   return (
-    <section className={styles.card} id="action-inbox" aria-labelledby="action-inbox-title">
+    <section className={styles.card} id="needs-you" aria-labelledby="action-inbox-title">
       <div className={styles.heading}>
         <div>
           <p className={styles.kicker}>Action Inbox</p>

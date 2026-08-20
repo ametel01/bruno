@@ -4,18 +4,19 @@ import { AccountControls } from "@/app/_components/clerk-auth-surfaces";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 
 type ProductShellProps = {
-  active: "dashboard" | "agents" | "settings";
+  active: "dashboard" | "agents" | "settings" | "now" | "needs-you" | "connections" | "privacy";
   eyebrow: string;
   title: string;
   description: string;
-  children: React.ReactNode;
+  children?: React.ReactNode;
   showHealthLink?: boolean;
 };
 
 const navigationItems = [
-  { href: "/dashboard", label: "Dashboard", key: "dashboard" },
-  { href: "/agents", label: "Agents", key: "agents" },
-  { href: "/settings", label: "Settings", key: "settings" },
+  { href: "/operator", label: "Now", key: "now" },
+  { href: "/operator#needs-you", label: "Needs you", key: "needs-you" },
+  { href: "/operator#connections", label: "Connections", key: "connections" },
+  { href: "/operator/privacy", label: "Privacy Center", key: "privacy" },
 ] as const;
 
 export function ProductShell({
@@ -24,22 +25,26 @@ export function ProductShell({
   title,
   description,
   children,
-  showHealthLink = true,
+  showHealthLink = false,
 }: ProductShellProps) {
   const clerkEnabled = resolveAuthMode(process.env).mode === "clerk";
+  // Legacy dashboard/agents/settings pages remain directly reachable for compatibility,
+  // but ordinary Founder navigation intentionally has no legacy current item.
+  const activeFounderKey =
+    active === "dashboard" ? "now" : active === "agents" || active === "settings" ? null : active;
 
   return (
     <div className="app-shell" data-active={active} data-impeccable-authenticated-seed="b32744ed">
       <aside className="app-sidebar" aria-label="Primary navigation">
         <div className="brand-block">
-          <Link className="brand-mark" href="/dashboard" aria-label="Bruno.Ai dashboard">
+          <Link className="brand-mark" href="/operator" aria-label="Bruno.Ai Founder workspace">
             <BrunoLogo className="product-bruno-logo" />
           </Link>
         </div>
         <nav className="nav-list" aria-label="Product routes">
           {navigationItems.map((item) => (
             <Link
-              aria-current={active === item.key ? "page" : undefined}
+              aria-current={activeFounderKey === item.key ? "page" : undefined}
               className="nav-link"
               href={item.href}
               key={item.key}
@@ -59,7 +64,7 @@ export function ProductShell({
         </div>
         <div className="sidebar-note">
           <span className="status-dot" aria-hidden="true" />
-          <Link href="/health">System health</Link>
+          <span>Private Founder workspace</span>
         </div>
       </aside>
       <div className="shell-main">

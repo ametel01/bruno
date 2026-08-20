@@ -132,6 +132,7 @@ describe("Founder Core Operation", () => {
       }),
     ).resolves.toMatchObject({
       nextStep: "consent",
+      defaultRoute: "/operator#onboarding-consent",
       capabilities: { ai: "ready", calendar: "ready", mail: "ready" },
       facts: { primarySuiteIdentity: "google-founder" },
     });
@@ -175,6 +176,7 @@ describe("Founder Core Operation", () => {
       }),
     ).resolves.toMatchObject({
       nextStep: "conversation",
+      defaultRoute: "/operator#conversation",
       activated: true,
       operation: "core",
       capabilities: { core: "ready" },

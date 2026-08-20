@@ -2,18 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { FounderMailConnectionDto } from "@/src/server/operators/founder-mail-connection";
-import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
 import type { FounderOnboardingDto } from "@/src/server/operators/founder-onboarding";
+import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
+import { FounderActionInbox } from "./founder-action-inbox";
 import { FounderAiConnection } from "./founder-ai-connection";
 import { FounderCalendarConnection } from "./founder-calendar-connection";
 import { FounderConversation } from "./founder-conversation";
-import { FounderActionInbox } from "./founder-action-inbox";
-import { FounderLimitedOperation } from "./founder-limited-operation";
 import { FounderCoreOperation } from "./founder-core-operation";
+import { FounderLimitedOperation } from "./founder-limited-operation";
 import { FounderMailConnection } from "./founder-mail-connection";
 import { FounderMailSendingConnection } from "./founder-mail-sending-connection";
-import { FounderRelationships } from "./founder-relationships";
 import styles from "./founder-operator-preparation.module.css";
+import { FounderRelationships } from "./founder-relationships";
 
 const TIMEZONE_OPTIONS = buildTimezoneOptions();
 
@@ -72,6 +72,7 @@ export function FounderOperatorPreparation({
       : onboarding.nextStep === "ai"
         ? "connections"
         : onboarding.nextStep;
+    window.history.replaceState(null, "", `/operator#${targetId}`);
     document.getElementById(targetId)?.scrollIntoView({ block: "start", behavior: "smooth" });
   }, [onboarding]);
 
@@ -117,6 +118,7 @@ export function FounderOperatorPreparation({
   const runtime = operator.runtime;
   const runtimeReady = runtime?.status === "ready";
   const runtimeNeedsAttention = runtime?.status === "needs_attention";
+  const activated = onboarding?.activated === true;
 
   async function confirmTimezone(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -253,7 +255,19 @@ export function FounderOperatorPreparation({
         </section>
       ) : null}
 
-      <section className={styles.card} aria-labelledby="timezone-title">
+      {activated && runtimeReady ? (
+        <>
+          <FounderConversation />
+          {onboarding?.operation === "core" ? (
+            <FounderCoreOperation />
+          ) : (
+            <FounderLimitedOperation />
+          )}
+          <FounderActionInbox />
+        </>
+      ) : null}
+
+      <section className={styles.card} id="onboarding-timezone" aria-labelledby="timezone-title">
         <div className={styles.cardHeading}>
           <div>
             <p className={styles.kicker}>Your local time</p>
@@ -295,9 +309,9 @@ export function FounderOperatorPreparation({
         </form>
       </section>
 
-      {runtimeReady ? <FounderConversation /> : null}
+      {!activated && runtimeReady ? <FounderConversation /> : null}
 
-      {runtimeReady ? <FounderActionInbox /> : null}
+      {!activated && runtimeReady ? <FounderActionInbox /> : null}
 
       {runtimeReady ? <FounderMailSendingConnection /> : null}
 
@@ -309,9 +323,13 @@ export function FounderOperatorPreparation({
         <FounderMailConnection releaseControls={mailReleaseControls} />
       ) : null}
 
-      {runtimeReady && onboarding?.operation === "core" ? <FounderCoreOperation /> : null}
+      {!activated && runtimeReady && onboarding?.operation === "core" ? (
+        <FounderCoreOperation />
+      ) : null}
 
-      {runtimeReady && onboarding?.operation !== "core" ? <FounderLimitedOperation /> : null}
+      {!activated && runtimeReady && onboarding?.operation !== "core" ? (
+        <FounderLimitedOperation />
+      ) : null}
 
       {runtimeReady ? <FounderRelationships /> : null}
 

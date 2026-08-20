@@ -44,14 +44,26 @@ for (const route of shellRoutes) {
   test(`${route.path} renders the bruno shell`, async ({ page }) => {
     await page.goto(route.path);
 
-    await expect(page.getByRole("link", { name: "bruno dashboard" })).toHaveAttribute(
+    await expect(page.getByRole("link", { name: "Bruno.Ai Founder workspace" })).toHaveAttribute(
       "href",
-      "/dashboard",
+      "/operator",
     );
     await expect(page.getByRole("heading", { name: route.heading })).toBeVisible();
-    await expect(page.getByRole("link", { name: "System health" })).toHaveAttribute(
-      "href",
-      "/health",
+    await expect(page.getByRole("navigation", { name: "Product routes" })).toContainText("Now");
+    await expect(page.getByRole("navigation", { name: "Product routes" })).toContainText(
+      "Needs you",
+    );
+    await expect(page.getByRole("navigation", { name: "Product routes" })).toContainText(
+      "Connections",
+    );
+    await expect(page.getByRole("navigation", { name: "Product routes" })).toContainText(
+      "Privacy Center",
+    );
+    await expect(page.getByRole("navigation", { name: "Product routes" })).not.toContainText(
+      "Agents",
+    );
+    await expect(page.getByRole("navigation", { name: "Product routes" })).not.toContainText(
+      "Settings",
     );
   });
 }
@@ -67,13 +79,12 @@ test("/ renders the public Bruno.Ai product direction", async ({ page }) => {
     page.getByRole("heading", { name: "Bruno.Ai runs your business with you. 24/7." }),
   ).toBeVisible();
   const hero = page.locator('section[aria-labelledby="landing-title"]');
-  await expect(hero.getByRole("link", { exact: true, name: "Open dashboard" })).toHaveAttribute(
+  await expect(
+    hero.getByRole("link", { exact: true, name: "Open Founder workspace" }),
+  ).toHaveAttribute("href", "/operator");
+  await expect(hero.getByRole("link", { exact: true, name: "Start with Bruno" })).toHaveAttribute(
     "href",
-    "/dashboard",
-  );
-  await expect(hero.getByRole("link", { exact: true, name: "Create an agent" })).toHaveAttribute(
-    "href",
-    "/agents#create-agent-title",
+    "/operator#onboarding-timezone",
   );
   await expect(page.getByRole("link", { name: "Follow the build" })).toHaveAttribute(
     "href",
@@ -82,15 +93,33 @@ test("/ renders the public Bruno.Ai product direction", async ({ page }) => {
   await expect(page.getByText("Illustrative data")).toBeVisible();
   await expect(page.locator('a[href="/sign-in"]')).toHaveAttribute("href", "/sign-in");
 
-  await hero.getByRole("link", { exact: true, name: "Open dashboard" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole("heading", { name: "Founder dispatch" })).toBeVisible();
+  await hero.getByRole("link", { exact: true, name: "Open Founder workspace" }).click();
+  await expect(page).toHaveURL(/\/operator(?:#.*)?$/);
+  await expect(page.getByRole("heading", { name: "Bruno.Ai Operator" })).toBeVisible();
+});
+
+test("/operator keeps ordinary workspace language free of infrastructure surfaces", async ({
+  page,
+}) => {
+  await page.goto("/operator");
+
+  await expect(page.getByRole("navigation", { name: "Founder workspace" })).toContainText("Now");
+  await expect(page.getByRole("navigation", { name: "Founder workspace" })).toContainText(
+    "Needs you",
+  );
+  await expect(page.getByRole("navigation", { name: "Founder workspace" })).toContainText(
+    "Connections",
+  );
+  await expect(page.getByRole("navigation", { name: "Founder workspace" })).toContainText(
+    "Privacy Center",
+  );
+  await expect(page.locator("body")).not.toContainText(
+    /agent roster|runner|container|deployment stage|raw log|terminal|api key|model choice|cost/i,
+  );
 });
 
 test("/health returns reachable database JSON in the browser", async ({ page }) => {
-  await page.goto("/dashboard");
-  await page.getByRole("link", { name: "System health" }).click();
-
+  await page.goto("/health");
   await expect(page).toHaveURL(/\/health$/);
   await expect(page.locator("body")).toContainText('"status":"ok"');
   await expect(page.locator("body")).toContainText('"database":"reachable"');
