@@ -295,6 +295,18 @@ async function installCoreRoutes(
       }),
     });
   });
+  await context.route("**/api/operator/action-preview", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ preview: null }),
+    });
+  });
+  await context.route("**/api/operator/proposed-actions", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ actions: [coreProposedAction()] }),
+    });
+  });
   await context.route("**/api/operator/calendar", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -364,7 +376,42 @@ function coreOperation(state: { confirmed: boolean; activated: boolean }) {
           openedAt: state.activated ? "2026-08-19T01:03:00.000Z" : null,
         }
       : null,
+    proposedAction: state.confirmed ? coreProposedAction() : null,
     activatedAt: state.activated ? "2026-08-19T01:03:00.000Z" : null,
+  };
+}
+
+function coreProposedAction() {
+  return {
+    id: "core-proposed-action-1",
+    version: 1,
+    supersedesId: null,
+    actionFamily: "external_communication" as const,
+    actionSubtype: "one_to_one_follow_up",
+    businessOutcome: "Send one exact follow-up to the known relationship.",
+    connection: {
+      companyConnectionId: null,
+      connectionResourceId: null,
+      accessVersion: null,
+      processingConsentId: null,
+      consentVersion: null,
+    },
+    destination: { recipient: "founder@example.com" },
+    materialContent: { subject: "Founder follow-up", body: "A prepared note." },
+    sideEffects: ["One external message after approval."],
+    policy: { id: null, version: 1, mode: "approval_required" as const },
+    productGuardrails: { version: 1, blocked: false, reason: null },
+    preconditions: [
+      { key: "connection", description: "A reviewed Founder connection is current." },
+    ],
+    validUntil: "2026-08-20T02:00:00.000Z",
+    executionWindow: { start: null, end: null },
+    idempotencyKey: "core-proposed-action-key",
+    state: "awaiting_approval" as const,
+    decision: null,
+    authorization: null,
+    createdAt: "2026-08-19T01:03:00.000Z",
+    updatedAt: "2026-08-19T01:03:00.000Z",
   };
 }
 
