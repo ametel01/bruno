@@ -122,12 +122,16 @@ jobs:
       - name: Attest the allowlisted exact-release summary
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: founder-contract-artifacts/*.json
+          subject-path: |
+            founder-contract-artifacts/founder-product-contract.json
+            founder-contract-artifacts/founder-initial-general-release-decision.json
 
       - name: Retain the allowlisted summary
         uses: actions/upload-artifact@v4
         with:
           name: founder-product-contract-${{ github.sha }}
-          path: founder-contract-artifacts/*.json
+          path: |
+            founder-contract-artifacts/founder-product-contract.json
+            founder-contract-artifacts/founder-initial-general-release-decision.json
           if-no-files-found: error
           retention-days: 90
