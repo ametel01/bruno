@@ -156,7 +156,6 @@ describe("E2E capability gates", () => {
     expect(childEnv).toMatchObject({
       PATH: "/test-bin",
       BRUNO_AUTH_MODE: "development",
-      BRUNO_GOOGLE_MAIL_READING_RELEASE: "qualified",
       BRUNO_DIGITALOCEAN_TOKEN: "",
       BRUNO_PROVIDER_TRIAL_MODEL_API_KEY: "",
       BRUNO_PROVIDER_TRIAL_TELEGRAM_BOT_TOKEN: "",
@@ -174,5 +173,21 @@ describe("E2E capability gates", () => {
         gates: { revocationAndRecovery: true },
       },
     );
+    expect(
+      JSON.parse(childEnv?.BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE ?? "null"),
+    ).toMatchObject({
+      schemaVersion: "bruno.founder-google-connected-acceptance.v1",
+      capability: "calendar_reading",
+      sourceRevision: "a".repeat(40),
+      gates: { siblingRevocationIsolation: true },
+    });
+    expect(
+      JSON.parse(childEnv?.BRUNO_GOOGLE_MAIL_READING_CONNECTED_ACCEPTANCE_RELEASE ?? "null"),
+    ).toMatchObject({
+      schemaVersion: "bruno.founder-google-connected-acceptance.v1",
+      capability: "gmail_reading",
+      sourceRevision: "a".repeat(40),
+      gates: { restrictedScopeVerification: true, casaDisposition: true },
+    });
   });
 });

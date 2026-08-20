@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   operatorCalendarConnections,
@@ -39,7 +40,15 @@ const KEYRING: OperatorSecretKeyring = {
   activeVersion: "test-v1",
   keys: new Map([["test-v1", Buffer.alloc(32, 7)]]),
 };
-const ENV = { BRUNO_GOOGLE_MAIL_READING_RELEASE: "qualified" };
+const GOOGLE_RELEASE_REVISION = "d".repeat(40);
+const ENV = {
+  BRUNO_GOOGLE_MAIL_READING_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
+    "gmail_reading",
+    NOW,
+    GOOGLE_RELEASE_REVISION,
+  ),
+  VERCEL_GIT_COMMIT_SHA: GOOGLE_RELEASE_REVISION,
+};
 
 describe("Founder Google Gmail reading application seam", () => {
   let connection: DatabaseConnection;
@@ -73,6 +82,7 @@ describe("Founder Google Gmail reading application seam", () => {
       startFounderGoogleMailAuthorizationForUser(OWNER_ID, {
         createConnection: () => connection,
         adapter: mailAdapter(),
+        env: {},
         keyring: KEYRING,
         now: () => NOW,
       }),
@@ -80,6 +90,7 @@ describe("Founder Google Gmail reading application seam", () => {
     await expect(
       getFounderGoogleMailConnectionForUser(OWNER_ID, {
         createConnection: () => connection,
+        env: {},
       }),
     ).resolves.toBeNull();
   });

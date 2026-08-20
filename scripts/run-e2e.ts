@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { readDigitalOceanProviderConfig } from "@/src/server/env";
+import { buildTestGoogleConnectedAcceptanceRelease } from "./founder-google-test-release";
 import {
   buildTestOpenAiConnectedAcceptanceRelease,
   TEST_OPENAI_RELEASE_REVISION,
@@ -104,7 +105,10 @@ function buildE2ECommandEnvironment(
   commandEnv.BRUNO_PROVIDER_TRIAL_MODEL_API_KEY = "";
   commandEnv.BRUNO_PROVIDER_TRIAL_TELEGRAM_BOT_TOKEN = "";
   commandEnv.BRUNO_AUTH_MODE = "development";
-  commandEnv.BRUNO_GOOGLE_MAIL_READING_RELEASE = "qualified";
+  commandEnv.BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE =
+    buildTestGoogleConnectedAcceptanceRelease("calendar_reading");
+  commandEnv.BRUNO_GOOGLE_MAIL_READING_CONNECTED_ACCEPTANCE_RELEASE =
+    buildTestGoogleConnectedAcceptanceRelease("gmail_reading");
   commandEnv.BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE =
     buildTestOpenAiConnectedAcceptanceRelease();
   commandEnv.PORT = "3100";

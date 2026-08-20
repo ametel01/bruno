@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import postgres from "postgres";
 import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
+import { buildTestGoogleConnectedAcceptanceRelease } from "./founder-google-test-release";
 import {
   buildTestOpenAiConnectedAcceptanceRelease,
   TEST_OPENAI_RELEASE_REVISION,
@@ -113,6 +114,10 @@ export async function runUnitTests(
     // Deterministic provider fakes exercise the released-provider product
     // path. Production has no equivalent default: it must supply current,
     // exact-revision Connected Acceptance evidence.
+    BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE:
+      buildTestGoogleConnectedAcceptanceRelease("calendar_reading"),
+    BRUNO_GOOGLE_MAIL_READING_CONNECTED_ACCEPTANCE_RELEASE:
+      buildTestGoogleConnectedAcceptanceRelease("gmail_reading"),
     BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(),
     DATABASE_URL: plan.databaseUrl,
     NEXT_PUBLIC_APP_URL: DEFAULT_APP_URL,

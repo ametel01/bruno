@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   operatorAiConnections,
@@ -23,6 +24,20 @@ import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-ope
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003450";
 const NOW = new Date("2026-08-19T01:00:00.000Z");
+const GOOGLE_RELEASE_REVISION = "d".repeat(40);
+const GOOGLE_MAIL_RELEASE_ENV = {
+  BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
+    "calendar_reading",
+    NOW,
+    GOOGLE_RELEASE_REVISION,
+  ),
+  BRUNO_GOOGLE_MAIL_READING_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
+    "gmail_reading",
+    NOW,
+    GOOGLE_RELEASE_REVISION,
+  ),
+  VERCEL_GIT_COMMIT_SHA: GOOGLE_RELEASE_REVISION,
+};
 
 describe("Founder Core Operation", () => {
   let connection: DatabaseConnection;
@@ -128,7 +143,7 @@ describe("Founder Core Operation", () => {
     await expect(
       getFounderOnboardingForUser(OWNER_ID, {
         createConnection: () => connection,
-        env: { BRUNO_GOOGLE_MAIL_READING_RELEASE: "qualified" },
+        env: GOOGLE_MAIL_RELEASE_ENV,
       }),
     ).resolves.toMatchObject({
       nextStep: "consent",
@@ -172,7 +187,7 @@ describe("Founder Core Operation", () => {
     await expect(
       getFounderOnboardingForUser(OWNER_ID, {
         createConnection: () => connection,
-        env: { BRUNO_GOOGLE_MAIL_READING_RELEASE: "qualified" },
+        env: GOOGLE_MAIL_RELEASE_ENV,
       }),
     ).resolves.toMatchObject({
       nextStep: "conversation",

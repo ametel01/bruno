@@ -3,6 +3,7 @@ import {
   completeFounderGoogleCalendarAuthorizationForState,
   FounderCalendarConnectionError,
 } from "@/src/server/operators/founder-calendar-connection";
+import { isFounderGoogleCalendarReleased } from "@/src/server/operators/founder-google-reading-release";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,9 @@ export async function GET(request: Request): Promise<Response> {
   const providerError = url.searchParams.get("error");
   if (providerError) {
     return redirect("/operator?calendar=authorization_denied#calendar");
+  }
+  if (!isFounderGoogleCalendarReleased()) {
+    return redirect("/operator?calendar=calendar_reading_not_released#calendar");
   }
 
   try {

@@ -15,7 +15,10 @@ import {
   operatorRuntimes,
   operators,
 } from "@/src/server/db/schema";
-import { isFounderGoogleMailReadingReleased } from "@/src/server/operators/founder-mail-connection";
+import {
+  isFounderGoogleCalendarReleased,
+  isFounderGoogleMailReadingReleased,
+} from "@/src/server/operators/founder-google-reading-release";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 
 type OnboardingTransaction = Parameters<
@@ -118,6 +121,7 @@ export async function getFounderOnboardingForUser(
         .from(operatorFounderActivations)
         .where(eq(operatorFounderActivations.operatorId, operator.id))
         .limit(1);
+      const calendarReleased = isFounderGoogleCalendarReleased(dependencies.env);
       const mailReleased = isFounderGoogleMailReadingReleased(dependencies.env);
 
       const timezoneConfirmed = Boolean(preparation?.timezone && preparation.timezoneConfirmedAt);
@@ -129,17 +133,19 @@ export async function getFounderOnboardingForUser(
           : ai.status === "authorizing" || ai.status === "verifying"
             ? "authorizing"
             : "missing";
-      const calendarState: FounderCapabilityState = !calendar
-        ? "missing"
-        : calendar.status !== "ready"
-          ? calendar.status === "authorizing" ||
-            calendar.status === "selecting" ||
-            calendar.status === "verifying"
-            ? "authorizing"
-            : "missing"
-          : calendar.evidenceState === "current"
-            ? "ready"
-            : "stale";
+      const calendarState: FounderCapabilityState = !calendarReleased
+        ? "not_offered"
+        : !calendar
+          ? "missing"
+          : calendar.status !== "ready"
+            ? calendar.status === "authorizing" ||
+              calendar.status === "selecting" ||
+              calendar.status === "verifying"
+              ? "authorizing"
+              : "missing"
+            : calendar.evidenceState === "current"
+              ? "ready"
+              : "stale";
       const mailState: FounderCapabilityState = !mailReleased
         ? "not_offered"
         : !mail
@@ -182,7 +188,7 @@ export async function getFounderOnboardingForUser(
       if (!timezoneConfirmed) nextStep = "timezone";
       else if (!runtimeReady) nextStep = "runtime";
       else if (aiState !== "ready") nextStep = "ai";
-      else if (calendarState !== "ready") nextStep = "calendar";
+      else if (calendarReleased && calendarState !== "ready") nextStep = "calendar";
       else if (!mailDeferred && mailReleased && effectiveMailState !== "ready") nextStep = "mail";
       else if (sameSuiteIdentity && operation?.status !== "core" && !operation?.processingConsentId)
         nextStep = "consent";

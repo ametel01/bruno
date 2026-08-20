@@ -30,6 +30,7 @@ describe("Founder Google Calendar route", () => {
     const response = await GET(new Request("http://localhost/api/operator/calendar"), undefined, {
       requireApplicationUser: async () => ({ ok: true, userId: USER_ID }),
       getConnection: async () => CONNECTION,
+      isCalendarReleased: () => true,
     });
     const body = await response.json();
 
@@ -60,6 +61,7 @@ describe("Founder Google Calendar route", () => {
       selectResources: select,
       verifyConnection: verify,
       disconnectConnection: disconnect,
+      isCalendarReleased: () => true,
     };
     const base = "http://localhost/api/operator/calendar";
 
@@ -113,9 +115,45 @@ describe("Founder Google Calendar route", () => {
         body: JSON.stringify({ action: "select", resourceIds: [] }),
       }),
       undefined,
-      { requireApplicationUser: async () => ({ ok: true as const, userId: USER_ID }) },
+      {
+        requireApplicationUser: async () => ({ ok: true as const, userId: USER_ID }),
+        isCalendarReleased: () => true,
+      },
     );
     expect(malformed.status).toBe(400);
     expect(await malformed.json()).toMatchObject({ error: { code: "validation_failed" } });
+  });
+
+  it("fails closed before exposing or starting an unqualified Calendar connection", async () => {
+    const getConnection = vi.fn(async () => CONNECTION);
+    const startAuthorization = vi.fn();
+    const dependencies = {
+      requireApplicationUser: async () => ({ ok: true as const, userId: USER_ID }),
+      getConnection,
+      startAuthorization,
+      isCalendarReleased: () => false,
+    };
+
+    const getResponse = await GET(
+      new Request("http://localhost/api/operator/calendar"),
+      undefined,
+      dependencies,
+    );
+    const startResponse = await POST(
+      new Request("http://localhost/api/operator/calendar", {
+        method: "POST",
+        body: JSON.stringify({ action: "start" }),
+      }),
+      undefined,
+      dependencies,
+    );
+
+    expect(getResponse.status).toBe(409);
+    expect(startResponse.status).toBe(409);
+    expect(await startResponse.json()).toMatchObject({
+      error: { code: "calendar_reading_not_released" },
+    });
+    expect(getConnection).not.toHaveBeenCalled();
+    expect(startAuthorization).not.toHaveBeenCalled();
   });
 });

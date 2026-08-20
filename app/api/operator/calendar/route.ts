@@ -6,6 +6,7 @@ import {
   startFounderGoogleCalendarAuthorizationForUser,
   verifyFounderGoogleCalendarForUser,
 } from "@/src/server/operators/founder-calendar-connection";
+import { isFounderGoogleCalendarReleased } from "@/src/server/operators/founder-google-reading-release";
 import type { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import { requireConfiguredApplicationUser as defaultRequireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
@@ -16,6 +17,7 @@ type CalendarRouteDependencies = {
   selectResources?: typeof selectFounderGoogleCalendarResourcesForUser;
   verifyConnection?: typeof verifyFounderGoogleCalendarForUser;
   disconnectConnection?: typeof disconnectFounderGoogleCalendarForUser;
+  isCalendarReleased?: () => boolean;
 };
 
 export const dynamic = "force-dynamic";
@@ -29,6 +31,9 @@ export async function GET(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  if (!(dependencies.isCalendarReleased ?? isFounderGoogleCalendarReleased)()) {
+    return providerNotReleasedResponse();
+  }
 
   const connection = await (
     dependencies.getConnection ?? getFounderGoogleCalendarConnectionForUser
@@ -55,6 +60,12 @@ export async function POST(
 
   const action = readAction(payload);
   try {
+    if (
+      action !== "disconnect" &&
+      !(dependencies.isCalendarReleased ?? isFounderGoogleCalendarReleased)()
+    ) {
+      return providerNotReleasedResponse();
+    }
     if (action === "start") {
       const result = await (
         dependencies.startAuthorization ?? startFounderGoogleCalendarAuthorizationForUser
@@ -131,6 +142,18 @@ function validationResponse(message: string): Response {
   return Response.json(
     { error: { code: "validation_failed", message } },
     { status: 400, headers: noStoreHeaders() },
+  );
+}
+
+function providerNotReleasedResponse(): Response {
+  return Response.json(
+    {
+      error: {
+        code: "calendar_reading_not_released",
+        message: "Google Calendar reading is not available in this Bruno release.",
+      },
+    },
+    { status: 409, headers: noStoreHeaders() },
   );
 }
 

@@ -1,3 +1,4 @@
+import { isFounderGoogleMailReadingReleased } from "@/src/server/operators/founder-google-reading-release";
 import {
   disconnectFounderGoogleMailForUser,
   FounderMailConnectionError,
@@ -20,6 +21,7 @@ type MailRouteDependencies = {
   selectResources?: typeof selectFounderGoogleMailResourcesForUser;
   verifyConnection?: typeof verifyFounderGoogleMailForUser;
   disconnectConnection?: typeof disconnectFounderGoogleMailForUser;
+  isMailReadingReleased?: () => boolean;
 };
 
 export const dynamic = "force-dynamic";
@@ -33,6 +35,9 @@ export async function GET(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  if (!(dependencies.isMailReadingReleased ?? isFounderGoogleMailReadingReleased)()) {
+    return providerNotReleasedResponse();
+  }
 
   const connection = await (dependencies.getConnection ?? getFounderGoogleMailConnectionForUser)(
     applicationUser.userId,
@@ -62,6 +67,12 @@ export async function POST(
 
   const action = readAction(payload);
   try {
+    if (
+      action !== "disconnect" &&
+      !(dependencies.isMailReadingReleased ?? isFounderGoogleMailReadingReleased)()
+    ) {
+      return providerNotReleasedResponse();
+    }
     if (action === "start") {
       const result = await (
         dependencies.startAuthorization ?? startFounderGoogleMailAuthorizationForUser
@@ -159,6 +170,18 @@ function validationResponse(message: string): Response {
   return Response.json(
     { error: { code: "validation_failed", message } },
     { status: 400, headers: noStoreHeaders() },
+  );
+}
+
+function providerNotReleasedResponse(): Response {
+  return Response.json(
+    {
+      error: {
+        code: "mail_reading_not_released",
+        message: "Gmail reading is not available in this Bruno release.",
+      },
+    },
+    { status: 409, headers: noStoreHeaders() },
   );
 }
 

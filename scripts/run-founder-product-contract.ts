@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
 import { FOUNDER_PRODUCT_CONTRACT_UNIT_FILES } from "@/src/shared/founder-product-contract";
+import { buildTestGoogleConnectedAcceptanceRelease } from "./founder-google-test-release";
 import { buildTestOpenAiConnectedAcceptanceRelease } from "./founder-openai-test-release";
 
 const artifactDirectory =
@@ -16,6 +17,16 @@ await mkdir(artifactDirectory, { recursive: true });
 await rm(evidencePath, { force: true });
 const sourceRevision = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION");
 const deterministicProviderEnvironment = {
+  BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
+    "calendar_reading",
+    new Date(),
+    sourceRevision,
+  ),
+  BRUNO_GOOGLE_MAIL_READING_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
+    "gmail_reading",
+    new Date(),
+    sourceRevision,
+  ),
   BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
     new Date(),
     sourceRevision,

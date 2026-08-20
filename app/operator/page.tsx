@@ -1,8 +1,11 @@
 import { FounderOperatorPreparation } from "@/app/operator/_components/founder-operator-preparation";
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
 import {
-  FOUNDER_GOOGLE_MAIL_RELEASE_CONTROLS,
+  isFounderGoogleCalendarReleased,
   isFounderGoogleMailReadingReleased,
+} from "@/src/server/operators/founder-google-reading-release";
+import {
+  FOUNDER_GOOGLE_MAIL_RELEASE_CONTROLS,
   REQUIRED_MAIL_SCOPE,
 } from "@/src/server/operators/founder-mail-connection";
 import { getFounderOnboardingForUser } from "@/src/server/operators/founder-onboarding";
@@ -29,6 +32,7 @@ export default async function FounderOperatorPage() {
 
   const operator = await ensureFounderOperatorForUser(applicationUser.userId);
   const onboarding = await getFounderOnboardingForUser(applicationUser.userId);
+  const calendarReadingReleased = isFounderGoogleCalendarReleased();
   const mailReadingReleased = isFounderGoogleMailReadingReleased();
   const openAiReleased = isFounderOpenAiReleased();
 
@@ -39,6 +43,7 @@ export default async function FounderOperatorPage() {
         initialOnboarding={onboarding}
         timezoneOptions={buildFounderTimezoneOptions()}
         openAiReleased={openAiReleased}
+        calendarReadingReleased={calendarReadingReleased}
         mailReadingReleased={mailReadingReleased}
         mailReleaseControls={
           mailReadingReleased

@@ -14,7 +14,12 @@ import {
   operators,
 } from "@/src/server/db/schema";
 import { reconcileFounderCoreOperationForUser } from "@/src/server/operators/founder-core-operation";
+import { isFounderGoogleMailReadingReleased } from "@/src/server/operators/founder-google-reading-release";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  deriveFounderConnectionRecovery,
+  type FounderRecoveryDto,
+} from "@/src/server/operators/founder-recovery";
 import {
   type FounderRelationshipObservation,
   ingestFounderRelationshipEvidenceForUser,
@@ -26,10 +31,6 @@ import {
   type OperatorSecretKeyring,
   parseOperatorSecretKeyring,
 } from "@/src/server/secrets/operator-secret-keyring";
-import {
-  deriveFounderConnectionRecovery,
-  type FounderRecoveryDto,
-} from "@/src/server/operators/founder-recovery";
 
 type FounderMailTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -52,11 +53,7 @@ export const FOUNDER_GOOGLE_MAIL_RELEASE_CONTROLS = {
     "Selected mail evidence may be processed only to prepare the Founder workspace and its bounded briefs.",
 } as const;
 
-export function isFounderGoogleMailReadingReleased(
-  env: Record<string, string | undefined> = process.env,
-): boolean {
-  return env.BRUNO_GOOGLE_MAIL_READING_RELEASE?.trim().toLowerCase() === "qualified";
-}
+export { isFounderGoogleMailReadingReleased } from "@/src/server/operators/founder-google-reading-release";
 
 export type FounderMailConnectionStatus =
   | "authorizing"

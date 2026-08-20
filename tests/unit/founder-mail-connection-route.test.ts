@@ -44,6 +44,7 @@ describe("Founder Gmail reading route", () => {
       requireApplicationUser: async () => ({ ok: true, userId: USER_ID }),
       getConnection: async () => CONNECTION,
       getOfferDisposition: async () => null,
+      isMailReadingReleased: () => true,
     });
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -74,6 +75,7 @@ describe("Founder Gmail reading route", () => {
       verifyConnection: verify,
       disconnectConnection: disconnect,
       setOfferDisposition: setOffer,
+      isMailReadingReleased: () => true,
     };
     const base = "http://localhost/api/operator/mail";
     await POST(
@@ -135,9 +137,44 @@ describe("Founder Gmail reading route", () => {
       undefined,
       {
         requireApplicationUser: async () => ({ ok: true as const, userId: USER_ID }),
+        isMailReadingReleased: () => true,
       },
     );
     expect(malformed.status).toBe(400);
     expect(await malformed.json()).toMatchObject({ error: { code: "validation_failed" } });
+  });
+
+  it("fails closed before exposing or starting unqualified Gmail reading", async () => {
+    const getConnection = vi.fn(async () => CONNECTION);
+    const startAuthorization = vi.fn();
+    const dependencies = {
+      requireApplicationUser: async () => ({ ok: true as const, userId: USER_ID }),
+      getConnection,
+      getOfferDisposition: vi.fn(async () => null),
+      startAuthorization,
+      isMailReadingReleased: () => false,
+    };
+
+    const getResponse = await GET(
+      new Request("http://localhost/api/operator/mail"),
+      undefined,
+      dependencies,
+    );
+    const startResponse = await POST(
+      new Request("http://localhost/api/operator/mail", {
+        method: "POST",
+        body: JSON.stringify({ action: "start" }),
+      }),
+      undefined,
+      dependencies,
+    );
+
+    expect(getResponse.status).toBe(409);
+    expect(startResponse.status).toBe(409);
+    expect(await startResponse.json()).toMatchObject({
+      error: { code: "mail_reading_not_released" },
+    });
+    expect(getConnection).not.toHaveBeenCalled();
+    expect(startAuthorization).not.toHaveBeenCalled();
   });
 });

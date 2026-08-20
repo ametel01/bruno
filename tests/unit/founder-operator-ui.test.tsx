@@ -264,6 +264,7 @@ describe("Founder Operator preparation shell", () => {
           },
           runtime: { status: "ready", recoveryMessage: null },
         },
+        calendarReadingReleased: true,
       }),
     );
 
@@ -272,5 +273,48 @@ describe("Founder Operator preparation shell", () => {
     expect(html).toContain("Google Calendar data remains in Google");
     expect(html).not.toContain("Telegram");
     expect(html).not.toContain("WhatsApp");
+  });
+
+  it("keeps Calendar and Gmail reading independently hidden until each acceptance passes", () => {
+    const readyOperator: FounderOperatorDto = {
+      ...OPERATOR,
+      preparation: {
+        ...OPERATOR.preparation,
+        status: "ready",
+        timezone: "Asia/Manila",
+        timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+      },
+      runtime: { status: "ready", recoveryMessage: null },
+    };
+    const hidden = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, { initialOperator: readyOperator }),
+    );
+    const calendarOnly = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: readyOperator,
+        calendarReadingReleased: true,
+      }),
+    );
+    const mailOnly = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: readyOperator,
+        mailReadingReleased: true,
+        mailReleaseControls: {
+          qualified: true,
+          requiredScope: "https://www.googleapis.com/auth/gmail.readonly",
+          disclosure: "bounded",
+          retentionDays: 90,
+          deletion: "staged",
+          aiLimitedUse: "bounded",
+        },
+      }),
+    );
+
+    expect(hidden).not.toContain("Your Calendar Connection");
+    expect(hidden).not.toContain("Your Mail Connection");
+    expect(calendarOnly).toContain("Your Calendar Connection");
+    expect(calendarOnly).not.toContain("Your Mail Connection");
+    expect(mailOnly).not.toContain("Your Calendar Connection");
+    expect(mailOnly).toContain("Your Mail Connection");
   });
 });

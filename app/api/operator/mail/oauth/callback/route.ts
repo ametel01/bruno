@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { isFounderGoogleMailReadingReleased } from "@/src/server/operators/founder-google-reading-release";
 import {
   completeFounderGoogleMailAuthorizationForState,
   denyFounderGoogleMailAuthorizationForState,
@@ -15,6 +16,9 @@ export async function GET(request: Request): Promise<Response> {
   if (providerError) {
     await denyFounderGoogleMailAuthorizationForState(state);
     return redirect("/operator?mail=authorization_denied#mail");
+  }
+  if (!isFounderGoogleMailReadingReleased()) {
+    return redirect("/operator?mail=mail_reading_not_released#mail");
   }
 
   try {

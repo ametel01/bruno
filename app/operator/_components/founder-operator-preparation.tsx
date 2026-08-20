@@ -24,6 +24,7 @@ export function FounderOperatorPreparation({
   initialOnboarding,
   timezoneOptions = DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
   openAiReleased = false,
+  calendarReadingReleased = false,
   mailReadingReleased = false,
   mailReleaseControls,
 }: {
@@ -31,6 +32,7 @@ export function FounderOperatorPreparation({
   initialOnboarding?: FounderOnboardingDto;
   timezoneOptions?: ReadonlyArray<FounderTimezoneOption>;
   openAiReleased?: boolean;
+  calendarReadingReleased?: boolean;
   mailReadingReleased?: boolean;
   mailReleaseControls?: FounderMailConnectionDto["release"] | undefined;
 }) {
@@ -330,7 +332,7 @@ export function FounderOperatorPreparation({
 
       {runtimeReady && openAiReleased ? <FounderAiConnection /> : null}
 
-      {runtimeReady ? <FounderCalendarConnection /> : null}
+      {runtimeReady && calendarReadingReleased ? <FounderCalendarConnection /> : null}
 
       {runtimeReady && mailReadingReleased && mailReleaseControls ? (
         <FounderMailConnection releaseControls={mailReleaseControls} />
