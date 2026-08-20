@@ -28,8 +28,8 @@ export function ProductShell({
   showHealthLink = false,
 }: ProductShellProps) {
   const clerkEnabled = resolveAuthMode(process.env).mode === "clerk";
-  // Legacy dashboard/agents/settings pages remain directly reachable for compatibility,
-  // but ordinary Founder navigation intentionally has no legacy current item.
+  // Internal compatibility components can still render this shell, but retired Founder routes
+  // never expose a legacy current item.
   const activeFounderKey =
     active === "dashboard" ? "now" : active === "agents" || active === "settings" ? null : active;
 

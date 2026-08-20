@@ -76,8 +76,8 @@ describe("Clerk session proxy", () => {
   });
 
   it.each([
-    "/dashboard",
-    "/api/agents",
+    "/operator",
+    "/api/operator",
   ])("allows registration-free local development on %s without invoking Clerk", async (pathname) => {
     process.env.BRUNO_AUTH_MODE = "development";
     delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -95,10 +95,9 @@ describe("Clerk session proxy", () => {
   });
 
   it.each([
-    "/dashboard",
-    "/agents",
-    "/agents/00000000-0000-4000-8000-000000000001",
-    "/settings",
+    "/operator",
+    "/operator/privacy",
+    "/operator/troubleshooting",
   ])("redirects the signed-out protected page %s to sign-in", async (pathname) => {
     mocks.auth.mockResolvedValueOnce({
       isAuthenticated: false,
@@ -133,22 +132,21 @@ describe("Clerk session proxy", () => {
   });
 
   it.each([
-    "/api/agents",
-    "/api/agents/00000000-0000-4000-8000-000000000001",
-    "/api/agents/00000000-0000-4000-8000-000000000001/actions/start",
-    "/api/agents/00000000-0000-4000-8000-000000000001/actions/stop",
-    "/api/agents/00000000-0000-4000-8000-000000000001/actions/restart",
-    "/api/agents/00000000-0000-4000-8000-000000000001/actions/simulate-error",
-    "/api/agents/00000000-0000-4000-8000-000000000001/events",
-    "/api/agents/00000000-0000-4000-8000-000000000001/logs",
-    "/api/agents/00000000-0000-4000-8000-000000000001/backups",
-    "/api/agents/00000000-0000-4000-8000-000000000001/backups/00000000-0000-4000-8000-000000000002/restore",
-    "/api/approvals/00000000-0000-4000-8000-000000000003/approve",
-    "/api/approvals/00000000-0000-4000-8000-000000000003/deny",
-    "/api/runners",
-    "/api/runners/registration-tokens",
-    "/api/runners/00000000-0000-4000-8000-000000000004/credentials/rotate",
-    "/api/runners/00000000-0000-4000-8000-000000000004/credentials/revoke",
+    "/api/operator",
+    "/api/operator/onboarding",
+    "/api/operator/conversation",
+    "/api/operator/connections",
+    "/api/operator/calendar",
+    "/api/operator/mail",
+    "/api/operator/mail-sending",
+    "/api/operator/limited-operation",
+    "/api/operator/core-operation",
+    "/api/operator/proposed-actions",
+    "/api/operator/proposed-actions/00000000-0000-4000-8000-000000000001/decision",
+    "/api/operator/privacy",
+    "/api/operator/privacy/export",
+    "/api/operator/troubleshooting",
+    "/api/operator/troubleshooting/hermes-setup-session",
   ])("returns the same safe JSON 401 for signed-out browser API %s", async (pathname) => {
     mocks.auth.mockResolvedValueOnce({
       isAuthenticated: false,
@@ -172,7 +170,7 @@ describe("Clerk session proxy", () => {
     mocks.auth.mockResolvedValueOnce({ isAuthenticated: true });
 
     const response = await proxy(
-      new NextRequest("http://localhost/settings"),
+      new NextRequest("http://localhost/operator"),
       {} as NextFetchEvent,
     );
 
@@ -241,7 +239,7 @@ describe("Clerk session proxy", () => {
     delete process.env.CLERK_SECRET_KEY;
 
     const response = await proxy(
-      new NextRequest("http://localhost/api/agents"),
+      new NextRequest("http://localhost/api/operator"),
       {} as NextFetchEvent,
     );
 
@@ -268,7 +266,7 @@ describe("Clerk session proxy", () => {
     });
 
     const response = await proxy(
-      new NextRequest("https://caller-controlled.example/api/agents", {
+      new NextRequest("https://caller-controlled.example/api/operator", {
         headers: { authorization: basicAuth("bruno", "operator-secret") },
       }),
       {} as NextFetchEvent,
@@ -291,7 +289,7 @@ describe("Clerk session proxy", () => {
     delete process.env.CLERK_SECRET_KEY;
 
     const response = await proxy(
-      new NextRequest("https://caller-controlled.example/api/agents", {
+      new NextRequest("https://caller-controlled.example/api/operator", {
         headers: { authorization: basicAuth("bruno", "operator-secret") },
       }),
       {} as NextFetchEvent,
@@ -311,7 +309,7 @@ describe("Clerk session proxy", () => {
     process.env.BRUNO_AUTH_MODE = "unexpected";
 
     const response = await proxy(
-      new NextRequest("http://localhost/dashboard"),
+      new NextRequest("http://localhost/operator"),
       {} as NextFetchEvent,
     );
 
@@ -329,7 +327,7 @@ describe("Clerk session proxy", () => {
     delete process.env.CLERK_SECRET_KEY;
 
     const response = await proxy(
-      new NextRequest("https://127.attacker.example/dashboard"),
+      new NextRequest("https://127.attacker.example/operator"),
       {} as NextFetchEvent,
     );
 
@@ -353,7 +351,7 @@ describe("Clerk session proxy", () => {
     delete process.env.CLERK_SECRET_KEY;
 
     const response = await proxy(
-      new NextRequest("https://caller-controlled.example/dashboard", {
+      new NextRequest("https://caller-controlled.example/operator", {
         headers: { authorization: basicAuth("bruno", "operator-secret") },
       }),
       {} as NextFetchEvent,
@@ -374,7 +372,7 @@ describe("Clerk session proxy", () => {
     delete process.env.BRUNO_PREVIEW_PROTECTION_VERIFIED;
 
     const response = await proxy(
-      new NextRequest("https://localhost/api/agents", {
+      new NextRequest("https://localhost/api/operator", {
         headers: { authorization: basicAuth("bruno", "operator-secret") },
       }),
       {} as NextFetchEvent,

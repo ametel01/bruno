@@ -1,5 +1,10 @@
 # Use a cold-deployment SLO without pre-created capacity
 
+> **Scope after the founder-experience Wayfinder:** This ADR governs only the legacy Agent
+> Deployment path. Its Telegram-dependent Ready Deployment boundary does not define Operator
+> Preparation, a Prepared Operator, Founder Setup Complete, or Founder Activation. The Operator
+> path requires a separate readiness decision when implementation is decomposed.
+
 Agent deployment must be measured from the durable acceptance of a user's request until the real
 Hermes gateway, intended Telegram configuration, and readiness record are all usable. At least 95
 percent of eligible cold deployments must reach that state within 300 seconds, with failures and

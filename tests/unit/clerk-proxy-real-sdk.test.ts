@@ -100,7 +100,7 @@ describe("real Clerk SDK proxy configuration", () => {
 
     const { proxy } = await import("@/proxy");
     const response = await proxy(
-      new NextRequest("https://caller-controlled.example/dashboard"),
+      new NextRequest("https://caller-controlled.example/operator"),
       {} as NextFetchEvent,
     );
 

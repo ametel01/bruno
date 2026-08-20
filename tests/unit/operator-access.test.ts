@@ -1,7 +1,43 @@
-import { describe, expect, it } from "vitest";
 import { type NextFetchEvent, NextRequest } from "next/server";
+import { describe, expect, it } from "vitest";
 import { proxy } from "@/proxy";
+import {
+  evaluateLegacyFounderSurface,
+  LEGACY_FOUNDER_API_PATHS,
+  LEGACY_FOUNDER_PAGE_PATHS,
+} from "@/src/auth/legacy-founder-surface";
 import { evaluateOperatorAccess, isOperatorProtectedPath } from "@/src/auth/operator-access";
+
+describe("legacy Founder surface retirement", () => {
+  it.each(LEGACY_FOUNDER_PAGE_PATHS)("retires page path %s and every descendant", (pathname) => {
+    expect(evaluateLegacyFounderSurface(pathname)).toEqual({
+      kind: "retired_page",
+      destination: "/operator",
+    });
+    expect(evaluateLegacyFounderSurface(`${pathname}/nested`)).toEqual({
+      kind: "retired_page",
+      destination: "/operator",
+    });
+  });
+
+  it.each(
+    LEGACY_FOUNDER_API_PATHS,
+  )("retires browser API path %s and every descendant", (pathname) => {
+    expect(evaluateLegacyFounderSurface(pathname)).toEqual({ kind: "retired_api" });
+    expect(evaluateLegacyFounderSurface(`${pathname}/nested`)).toEqual({ kind: "retired_api" });
+  });
+
+  it.each([
+    "/operator",
+    "/operator/troubleshooting",
+    "/api/operator",
+    "/api/internal/agent-deployments/reconcile",
+    "/api/internal/runner-replacements/reconcile",
+    "/runner/v1/heartbeat",
+  ])("preserves Operator and server-owned infrastructure path %s", (pathname) => {
+    expect(evaluateLegacyFounderSurface(pathname)).toEqual({ kind: "available" });
+  });
+});
 
 describe("operator access path decisions", () => {
   it.each([
@@ -211,10 +247,38 @@ describe("evaluateOperatorAccess", () => {
 });
 
 describe("operator access proxy responses", () => {
+  it.each(
+    LEGACY_FOUNDER_PAGE_PATHS,
+  )("redirects retired Founder page %s to the Operator", async (pathname) => {
+    const response = await proxy(
+      new NextRequest(`http://localhost${pathname}`),
+      {} as NextFetchEvent,
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://localhost/operator");
+  });
+
+  it.each(LEGACY_FOUNDER_API_PATHS)("returns Gone for retired Founder API %s", async (pathname) => {
+    const response = await proxy(
+      new NextRequest(`http://localhost${pathname}`),
+      {} as NextFetchEvent,
+    );
+
+    expect(response.status).toBe(410);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      error: {
+        code: "legacy_founder_surface_retired",
+        message: "This legacy setup surface is no longer available. Use the Founder workspace.",
+      },
+    });
+  });
+
   it("returns safe JSON 401 responses for protected API paths", async () => {
     await withOperatorEnv({ BRUNO_OPERATOR_PASSWORD: "test-password", VERCEL: "1" }, async () => {
       const response = await proxy(
-        new NextRequest("http://localhost/api/agents"),
+        new NextRequest("http://localhost/api/operator"),
         {} as NextFetchEvent,
       );
       const body = await response.json();
@@ -234,7 +298,7 @@ describe("operator access proxy responses", () => {
   it("returns safe 401 text responses for protected page paths", async () => {
     await withOperatorEnv({ BRUNO_OPERATOR_PASSWORD: "test-password", VERCEL: "1" }, async () => {
       const response = await proxy(
-        new NextRequest("http://localhost/dashboard"),
+        new NextRequest("http://localhost/operator"),
         {} as NextFetchEvent,
       );
 
@@ -247,7 +311,7 @@ describe("operator access proxy responses", () => {
   it("returns safe 503 responses when production operator access is not configured", async () => {
     await withOperatorEnv({ BRUNO_OPERATOR_PASSWORD: undefined, VERCEL: "1" }, async () => {
       const response = await proxy(
-        new NextRequest("http://localhost/api/runners"),
+        new NextRequest("http://localhost/api/operator"),
         {} as NextFetchEvent,
       );
       const body = await response.json();
@@ -277,7 +341,7 @@ describe("operator access proxy responses", () => {
     });
   });
 
-  it("passes authenticated operator-mode requests to the shared application", async () => {
+  it("passes authenticated operator-mode requests to the Founder application", async () => {
     await withOperatorEnv(
       {
         BRUNO_AUTH_MODE: "operator",
@@ -286,7 +350,7 @@ describe("operator access proxy responses", () => {
       },
       async () => {
         const response = await proxy(
-          new NextRequest("http://localhost/dashboard", {
+          new NextRequest("http://localhost/operator", {
             headers: { authorization: basicAuth("bruno", "test-password") },
           }),
           {} as NextFetchEvent,

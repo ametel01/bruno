@@ -1,11 +1,6 @@
-import { clerkMiddleware, type ClerkMiddlewareAuth } from "@clerk/nextjs/server";
+import { type ClerkMiddlewareAuth, clerkMiddleware } from "@clerk/nextjs/server";
 import type { NextFetchEvent } from "next/server";
-import { NextResponse, type NextRequest } from "next/server";
-import {
-  authModeConfigurationMessage,
-  type AuthModeConfigurationErrorCode,
-  resolveAuthMode,
-} from "@/src/auth/server-auth-mode";
+import { type NextRequest, NextResponse } from "next/server";
 import {
   isBrowserApiPath,
   isClerkAuthPagePath,
@@ -14,7 +9,13 @@ import {
   isPublicMarketingPath,
   isRunnerMachineAuthPath,
 } from "@/src/auth/clerk-transition";
+import { evaluateLegacyFounderSurface } from "@/src/auth/legacy-founder-surface";
 import { evaluateOperatorAccess, type OperatorAccessDecision } from "@/src/auth/operator-access";
+import {
+  type AuthModeConfigurationErrorCode,
+  authModeConfigurationMessage,
+  resolveAuthMode,
+} from "@/src/auth/server-auth-mode";
 
 const AUTHENTICATE_HEADER = 'Basic realm="bruno"';
 
@@ -25,6 +26,24 @@ const clerkSessionProxy = clerkMiddleware(handleClerkSessionRequest, {
 
 export async function proxy(request: NextRequest, event: NextFetchEvent): Promise<Response> {
   const pathname = request.nextUrl.pathname;
+  const legacySurface = evaluateLegacyFounderSurface(pathname);
+
+  if (legacySurface.kind === "retired_page") {
+    return NextResponse.redirect(new URL(legacySurface.destination, request.url));
+  }
+
+  if (legacySurface.kind === "retired_api") {
+    return NextResponse.json(
+      {
+        error: {
+          code: "legacy_founder_surface_retired",
+          message: "This legacy setup surface is no longer available. Use the Founder workspace.",
+        },
+      },
+      { status: 410, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   const operatorDecision = evaluateOperatorAccess({
     pathname,
     authorizationHeader: request.headers.get("authorization"),

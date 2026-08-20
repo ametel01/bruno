@@ -4,13 +4,10 @@ import { readDigitalOceanProviderConfig } from "@/src/server/env";
 
 export const CI_E2E_SELECTORS = [
   "tests/e2e/health-route.spec.ts",
-  "tests/e2e/root-route.spec.ts:45",
-  "tests/e2e/root-route.spec.ts:60",
-  "tests/e2e/root-route.spec.ts:2187",
-  "tests/e2e/automatic-ready.spec.ts",
+  "tests/e2e/founder-surface-retirement.spec.ts",
+  "tests/e2e/root-route.spec.ts:54",
   "tests/e2e/founder-conversation.spec.ts",
   "tests/e2e/founder-calendar-connection.spec.ts",
-  "tests/e2e/runtime-presentation.spec.ts",
 ] as const;
 
 export const FULL_E2E_CAPABILITY_MESSAGE =

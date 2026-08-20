@@ -34,36 +34,16 @@ test.afterEach(async ({ request }) => {
   await removeOrphanedStoppedBrunoDockerContainers();
 });
 
-const shellRoutes = [
-  { path: "/dashboard", heading: "Founder dispatch" },
-  { path: "/agents", heading: "Agent roster" },
-  { path: "/settings", heading: "Workspace settings" },
-] as const;
+const retiredFounderRoutes = ["/dashboard", "/agents", "/settings"] as const;
 
-for (const route of shellRoutes) {
-  test(`${route.path} renders the bruno shell`, async ({ page }) => {
-    await page.goto(route.path);
+for (const route of retiredFounderRoutes) {
+  test(`${route} retires the legacy Founder shell`, async ({ page }) => {
+    await page.goto(route);
 
-    await expect(page.getByRole("link", { name: "Bruno.Ai Founder workspace" })).toHaveAttribute(
-      "href",
-      "/operator",
-    );
-    await expect(page.getByRole("heading", { name: route.heading })).toBeVisible();
-    await expect(page.getByRole("navigation", { name: "Product routes" })).toContainText("Now");
-    await expect(page.getByRole("navigation", { name: "Product routes" })).toContainText(
-      "Needs you",
-    );
-    await expect(page.getByRole("navigation", { name: "Product routes" })).toContainText(
-      "Connections",
-    );
-    await expect(page.getByRole("navigation", { name: "Product routes" })).toContainText(
-      "Privacy Center",
-    );
-    await expect(page.getByRole("navigation", { name: "Product routes" })).not.toContainText(
-      "Agents",
-    );
-    await expect(page.getByRole("navigation", { name: "Product routes" })).not.toContainText(
-      "Settings",
+    await expect(page).toHaveURL(/\/operator(?:#.*)?$/);
+    await expect(page.getByRole("heading", { name: "Bruno.Ai Operator" })).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(
+      /agent roster|agent template|api key|telegram|numeric allowlist|cron expression|runner management|deployment configuration/i,
     );
   });
 }

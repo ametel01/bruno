@@ -1,16 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { POST as createBackupRoute } from "@/app/api/agents/[agentId]/backups/route";
+import { POST as restartAgentRoute } from "@/app/api/agents/[agentId]/actions/restart/route";
+import { POST as simulateErrorAgentRoute } from "@/app/api/agents/[agentId]/actions/simulate-error/route";
+import { POST as startAgentRoute } from "@/app/api/agents/[agentId]/actions/start/route";
+import { POST as stopAgentRoute } from "@/app/api/agents/[agentId]/actions/stop/route";
 import { POST as restoreBackupRoute } from "@/app/api/agents/[agentId]/backups/[backupId]/restore/route";
+import { POST as createBackupRoute } from "@/app/api/agents/[agentId]/backups/route";
 import { GET as agentEventsRoute } from "@/app/api/agents/[agentId]/events/route";
 import { GET as agentLogsRoute } from "@/app/api/agents/[agentId]/logs/route";
 import {
   DELETE as deleteAgentRoute,
   PATCH as updateAgentRoute,
 } from "@/app/api/agents/[agentId]/route";
-import { POST as restartAgentRoute } from "@/app/api/agents/[agentId]/actions/restart/route";
-import { POST as simulateErrorAgentRoute } from "@/app/api/agents/[agentId]/actions/simulate-error/route";
-import { POST as startAgentRoute } from "@/app/api/agents/[agentId]/actions/start/route";
-import { POST as stopAgentRoute } from "@/app/api/agents/[agentId]/actions/stop/route";
 import { POST as createAgentRoute } from "@/app/api/agents/route";
 import { POST as approveApprovalRoute } from "@/app/api/approvals/[approvalId]/approve/route";
 import { POST as denyApprovalRoute } from "@/app/api/approvals/[approvalId]/deny/route";
@@ -136,7 +136,9 @@ const AUTH_FAILURES = [
 
 type RequireApplicationUser = () => Promise<(typeof AUTH_FAILURES)[number]["result"]>;
 
-describe("configured user operational route boundaries", () => {
+// These handler-level tests preserve internal legacy infrastructure contracts. Founder-facing
+// reachability is retired and proved separately at the proxy boundary.
+describe("internal legacy handler authentication boundaries", () => {
   for (const route of ROUTES) {
     it.each(
       AUTH_FAILURES,
