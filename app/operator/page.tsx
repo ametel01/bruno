@@ -5,9 +5,10 @@ import {
   isFounderGoogleMailReadingReleased,
   REQUIRED_MAIL_SCOPE,
 } from "@/src/server/operators/founder-mail-connection";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import { getFounderOnboardingForUser } from "@/src/server/operators/founder-onboarding";
+import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
+import { buildFounderTimezoneOptions } from "@/src/shared/founder-timezones";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,7 @@ export default async function FounderOperatorPage() {
       <FounderOperatorPreparation
         initialOperator={operator}
         initialOnboarding={onboarding}
+        timezoneOptions={buildFounderTimezoneOptions()}
         mailReadingReleased={mailReadingReleased}
         mailReleaseControls={
           mailReadingReleased

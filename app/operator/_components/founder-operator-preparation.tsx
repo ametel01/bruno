@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import type { FounderMailConnectionDto } from "@/src/server/operators/founder-mail-connection";
 import type { FounderOnboardingDto } from "@/src/server/operators/founder-onboarding";
 import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
+import {
+  DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
+  type FounderTimezoneOption,
+} from "@/src/shared/founder-timezones";
 import { FounderActionInbox } from "./founder-action-inbox";
 import { FounderAiConnection } from "./founder-ai-connection";
 import { FounderCalendarConnection } from "./founder-calendar-connection";
@@ -15,18 +19,16 @@ import { FounderMailSendingConnection } from "./founder-mail-sending-connection"
 import styles from "./founder-operator-preparation.module.css";
 import { FounderRelationships } from "./founder-relationships";
 
-const TIMEZONE_OPTIONS = buildTimezoneOptions();
-
-const TIMEZONE_VALUES: ReadonlySet<string> = new Set(TIMEZONE_OPTIONS.map(([value]) => value));
-
 export function FounderOperatorPreparation({
   initialOperator,
   initialOnboarding,
+  timezoneOptions = DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
   mailReadingReleased = false,
   mailReleaseControls,
 }: {
   initialOperator: FounderOperatorDto;
   initialOnboarding?: FounderOnboardingDto;
+  timezoneOptions?: ReadonlyArray<FounderTimezoneOption>;
   mailReadingReleased?: boolean;
   mailReleaseControls?: FounderMailConnectionDto["release"] | undefined;
 }) {
@@ -81,11 +83,11 @@ export function FounderOperatorPreparation({
 
   useEffect(() => {
     const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (detected && TIMEZONE_VALUES.has(detected)) {
+    if (detected && timezoneOptions.some(([value]) => value === detected)) {
       setDetectedTimezone(detected);
       setTimezone((current) => current || detected);
     }
-  }, []);
+  }, [timezoneOptions]);
 
   useEffect(() => {
     if (
@@ -296,7 +298,7 @@ export function FounderOperatorPreparation({
             <option value="" disabled>
               Choose your local time
             </option>
-            {TIMEZONE_OPTIONS.map(([value, label]) => (
+            {timezoneOptions.map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
               </option>
@@ -304,7 +306,7 @@ export function FounderOperatorPreparation({
           </select>
           <p className={styles.hint}>
             {detectedTimezone
-              ? `We detected ${timezoneLabel(detectedTimezone)}. Change it if that is not right.`
+              ? `We detected ${timezoneLabel(timezoneOptions, detectedTimezone)}. Change it if that is not right.`
               : "Choose the place whose local time matches your working day."}
           </p>
           <button className={styles.button} type="submit" disabled={saving || !timezone.trim()}>
@@ -354,8 +356,11 @@ export function FounderOperatorPreparation({
   );
 }
 
-function timezoneLabel(value: string): string {
-  return TIMEZONE_OPTIONS.find(([option]) => option === value)?.[1] ?? "your local time";
+function timezoneLabel(
+  timezoneOptions: ReadonlyArray<FounderTimezoneOption>,
+  value: string,
+): string {
+  return timezoneOptions.find(([option]) => option === value)?.[1] ?? "your local time";
 }
 
 function onboardingStepLabel(step: FounderOnboardingDto["nextStep"]): string {
@@ -382,20 +387,4 @@ function capabilityLabel(state: FounderOnboardingDto["capabilities"]["ai"]): str
     deferred: "Deferred",
     not_offered: "Not offered",
   }[state];
-}
-
-function buildTimezoneOptions(): ReadonlyArray<readonly [string, string]> {
-  const values =
-    typeof Intl.supportedValuesOf === "function"
-      ? ["UTC", ...Intl.supportedValuesOf("timeZone")]
-      : ["UTC", "Asia/Manila", "America/Los_Angeles", "America/New_York"];
-
-  return [...new Set(values)].map((value) => [value, friendlyTimezoneLabel(value)] as const);
-}
-
-function friendlyTimezoneLabel(value: string): string {
-  const [region, ...placeParts] = value.split("/");
-  const place = placeParts.join(" / ").replaceAll("_", " ");
-  const readableRegion = (region ?? "Other").replaceAll("_", " ");
-  return place ? `${place} (${readableRegion})` : readableRegion;
 }

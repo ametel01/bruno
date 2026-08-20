@@ -11,6 +11,7 @@ coverage/
 playwright-report/
 test-results/
 playwright/.clerk/
+founder-contract-artifacts/
 tsconfig.tsbuildinfo
 
 # Local environment

@@ -1,0 +1,123 @@
+name: Founder Product Contract
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: CI proves automated invariants; release also requires attended AT digests
+        required: true
+        default: ci
+        type: choice
+        options:
+          - ci
+          - release
+      voiceover_evidence_digest:
+        description: Sanitized sha256 digest from attended VoiceOver on Safari evidence
+        required: false
+        type: string
+      voiceover_os_version:
+        description: OS version used for the attended VoiceOver journey
+        required: false
+        type: string
+      voiceover_browser_version:
+        description: Safari version used for the attended VoiceOver journey
+        required: false
+        type: string
+      talkback_evidence_digest:
+        description: Sanitized sha256 digest from attended TalkBack on Chrome evidence
+        required: false
+        type: string
+      talkback_os_version:
+        description: OS version used for the attended TalkBack journey
+        required: false
+        type: string
+      talkback_browser_version:
+        description: Chrome version used for the attended TalkBack journey
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: founder-product-contract-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    name: Exact-release Founder contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: bruno
+          POSTGRES_USER: bruno
+          POSTGRES_PASSWORD: bruno
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd "pg_isready -U bruno -d bruno"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://bruno:bruno@127.0.0.1:54329/bruno
+      NEXT_PUBLIC_APP_URL: http://localhost:3100
+      BRUNO_AUTH_MODE: development
+      PORT: "3100"
+      PLAYWRIGHT_BASE_URL: http://localhost:3100
+      BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION: ${{ github.sha }}
+      BRUNO_FOUNDER_CONTRACT_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
+      BRUNO_FOUNDER_CONTRACT_MODE: ${{ inputs.mode || 'ci' }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_DIGEST: ${{ inputs.voiceover_evidence_digest }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_OS_VERSION: ${{ inputs.voiceover_os_version }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_BROWSER_VERSION: ${{ inputs.voiceover_browser_version }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_DIGEST: ${{ inputs.talkback_evidence_digest }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_OS_VERSION: ${{ inputs.talkback_os_version }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_BROWSER_VERSION: ${{ inputs.talkback_browser_version }}
+
+    steps:
+      - name: Check out exact release candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install exact browser engines
+        run: bunx playwright install --with-deps chromium firefox webkit
+
+      - name: Run migrations
+        run: bun run db:migrate
+
+      - name: Bind the observation time
+        run: echo "BRUNO_FOUNDER_CONTRACT_OBSERVED_AT=$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" >> "$GITHUB_ENV"
+
+      - name: Run all-or-nothing Founder Product Contract
+        run: bun run founder:contract
+
+      - name: Attest the allowlisted exact-release summary
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: founder-contract-artifacts/founder-product-contract.json
+
+      - name: Retain the allowlisted summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: founder-product-contract-${{ github.sha }}
+          path: founder-contract-artifacts/founder-product-contract.json
+          if-no-files-found: error
+          retention-days: 90
