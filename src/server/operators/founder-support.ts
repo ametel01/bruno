@@ -365,7 +365,8 @@ export async function invokeFounderSupportTool(
   if (!FOUNDER_SUPPORT_TOOLS.includes(input.tool))
     throw new FounderSupportError("scope_denied", "Support tool is not allowlisted.");
   const requiredScope = TOOL_SCOPE[input.tool];
-  return withConnection(dependencies, (connection) =>
+  let expired = false;
+  const result = await withConnection(dependencies, (connection) =>
     connection.db.transaction(async (tx) => {
       const now = dependencies.now?.() ?? new Date();
       const [grant] = await tx
@@ -384,7 +385,8 @@ export async function invokeFounderSupportTool(
           .update(operatorSupportAccessGrants)
           .set({ status: "expired" })
           .where(eq(operatorSupportAccessGrants.id, grant.id));
-        grant.status = "expired";
+        expired = true;
+        return {};
       }
       if (grant.status === "expired")
         throw new FounderSupportError("grant_expired", "Support Access Grant has expired.", 409);
@@ -449,6 +451,9 @@ export async function invokeFounderSupportTool(
       return { incidentId: input.incidentId, checkpoint: "checkpoint_identity_is_founder_only" };
     }),
   );
+  if (expired)
+    throw new FounderSupportError("grant_expired", "Support Access Grant has expired.", 409);
+  return result;
 }
 
 export async function createFounderRepairProposalForSupport(
@@ -755,7 +760,8 @@ async function loadActiveGrant(
   incidentId: string,
   dependencies: FounderSupportDependencies,
 ): Promise<{ operatorId: string }> {
-  return withConnection(dependencies, (connection) =>
+  let expired = false;
+  const result = await withConnection(dependencies, (connection) =>
     connection.db.transaction(async (tx) => {
       const now = dependencies.now?.() ?? new Date();
       const [grant] = await tx
@@ -779,7 +785,8 @@ async function loadActiveGrant(
           .update(operatorSupportAccessGrants)
           .set({ status: "expired" })
           .where(eq(operatorSupportAccessGrants.id, grant.id));
-        grant.status = "expired";
+        expired = true;
+        return { operatorId: grant.operatorId };
       }
       if (grant.status === "expired")
         throw new FounderSupportError("grant_expired", "Support Access Grant has expired.", 409);
@@ -792,6 +799,9 @@ async function loadActiveGrant(
       return { operatorId: grant.operatorId };
     }),
   );
+  if (expired)
+    throw new FounderSupportError("grant_expired", "Support Access Grant has expired.", 409);
+  return result;
 }
 
 async function expireGrants(tx: SupportTransaction, operatorId: string, now: Date): Promise<void> {
