@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { FounderHermesSetup } from "@/app/operator/_components/founder-hermes-setup";
+import type { FounderSupportDto } from "@/src/server/operators/founder-support";
 import type {
   FounderTroubleshootingDto,
   FounderTroubleshootingIncidentDto,
 } from "@/src/server/operators/founder-troubleshooting";
-import type { FounderSupportDto } from "@/src/server/operators/founder-support";
 import styles from "./founder-troubleshooting.module.css";
 
 export function FounderTroubleshooting({
@@ -119,12 +120,13 @@ export function FounderTroubleshooting({
       };
       if (!response.ok || !body.grant)
         throw new Error(body.error?.message ?? "Support access could not be granted.");
+      const nextGrant = body.grant;
       setSupport((current) =>
         current
           ? {
               ...current,
               grants: [
-                body.grant!,
+                nextGrant,
                 ...current.grants.filter((grant) => grant.incidentId !== incidentId),
               ],
             }
@@ -196,6 +198,8 @@ export function FounderTroubleshooting({
           ))}
         </section>
       ) : null}
+
+      {help.technicalEvidenceAvailable ? <FounderHermesSetup /> : null}
 
       {support ? (
         <section className={styles.incidents} aria-labelledby="support-access-title">

@@ -1,6 +1,6 @@
-import { createElement } from "react";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
@@ -81,5 +81,21 @@ describe("Founder Troubleshooting surface", () => {
     expect(stylesheet).toContain("@media (max-width: 40rem)");
     expect(stylesheet).toContain("grid-template-columns: 1fr");
     expect(stylesheet).toContain(".actions button");
+  });
+
+  it("does not expose Full Hermes Setup before recovery exhaustion", () => {
+    const routine: FounderTroubleshootingDto = {
+      help: {
+        ...TROUBLESHOOTING.help,
+        state: "recovering",
+        technicalEvidenceAvailable: false,
+        incidentId: null,
+      },
+      incidents: [],
+    };
+    const html = renderToStaticMarkup(
+      createElement(FounderTroubleshooting, { initialTroubleshooting: routine }),
+    );
+    expect(html).not.toContain("Full Hermes Setup");
   });
 });

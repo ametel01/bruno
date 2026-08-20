@@ -14,6 +14,7 @@ import {
   createFounderSupportAccessGrantForUser,
   decideFounderRepairProposalForUser,
   executeFounderRepairProposalForUser,
+  FOUNDER_SUPPORT_TOOLS,
   FounderSupportError,
   invokeFounderSupportTool,
   revokeFounderSupportAccessGrantForUser,
@@ -51,6 +52,11 @@ describe("Founder Support Access and typed repairs", () => {
       createdAt: START,
       updatedAt: START,
     });
+  });
+
+  it("never allowlists terminal access for support", () => {
+    expect(FOUNDER_SUPPORT_TOOLS).not.toContain("terminal");
+    expect(FOUNDER_SUPPORT_TOOLS).not.toContain("shell");
   });
 
   afterEach(async () => {

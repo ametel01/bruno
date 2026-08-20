@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -69,11 +69,34 @@ describe("Hermes setup sessions", () => {
     ]);
   });
 
+  it("rejects an upgrade after expiry even when no websocket has opened", async () => {
+    vi.useFakeTimers();
+    const stateRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-setup-"));
+    tempRoots.push(stateRoot);
+    const manager = new HermesSetupSessionManager({
+      stateRoot,
+      sessionTtlMs: 1_000,
+      docker: async () => ({ stdout: "" }),
+    });
+    const descriptor = await manager.create(AGENT_ID);
+    await vi.advanceTimersByTimeAsync(1_001);
+
+    expect(
+      manager.authorizeUpgrade(
+        new Request(`https://runner.test${descriptor.websocketPath}`, {
+          headers: { "Sec-WebSocket-Protocol": descriptor.websocketProtocol },
+        }),
+      ),
+    ).toEqual({ ok: false });
+    await expect(manager.create(AGENT_ID)).resolves.toMatchObject({ id: expect.any(String) });
+  });
+
   it("issues a one-time websocket protocol and streams a real PTY contract", async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-setup-"));
     tempRoots.push(stateRoot);
     const dockerCalls: string[][] = [];
     const spawnCalls: string[][] = [];
+    const spawnEnvironments: Array<Record<string, string | undefined>> = [];
     const terminalWrites: string[] = [];
     const terminalResizes: Array<[number, number]> = [];
     const terminalClose = vi.fn();
@@ -93,6 +116,7 @@ describe("Hermes setup sessions", () => {
       },
       spawn: (command, options) => {
         spawnCalls.push(command);
+        spawnEnvironments.push(options.env);
         const terminal = {
           write(data: string | Uint8Array) {
             terminalWrites.push(String(data));
@@ -153,6 +177,8 @@ describe("Hermes setup sessions", () => {
       ]),
     );
     expect(JSON.stringify(spawnCalls)).not.toContain(descriptor.websocketProtocol);
+    expect(spawnEnvironments[0]).not.toHaveProperty("BRUNO_RUNNER_BEARER_TOKEN");
+    expect(spawnEnvironments[0]).not.toHaveProperty("DATABASE_URL");
     expect(terminalWrites).toEqual(["\r"]);
     expect(terminalResizes).toEqual([[120, 40]]);
     expect(sent.map((message) => JSON.parse(message))).toEqual(
@@ -198,6 +224,42 @@ describe("Hermes setup sessions", () => {
     await expect(runningManager.create(AGENT_ID)).rejects.toMatchObject({
       reason: "agent_running",
     });
+  });
+
+  it("reuses the persistent Hermes home after the runner service restarts", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-setup-"));
+    tempRoots.push(stateRoot);
+    const first = new HermesSetupSessionManager({
+      stateRoot,
+      docker: async () => ({ stdout: "" }),
+    });
+    await first.create(AGENT_ID);
+    const configPath = join(stateRoot, AGENT_ID, "hermes", "config.yaml");
+    await writeFile(configPath, "model:\n  provider: hermes\n  default: founder-choice\n");
+
+    const restarted = new HermesSetupSessionManager({
+      stateRoot,
+      docker: async () => ({ stdout: "" }),
+    });
+    await restarted.create(AGENT_ID);
+
+    await expect(readFile(configPath, "utf8")).resolves.toContain("founder-choice");
+  });
+
+  it("keeps the one-time transport token out of the persistent Hermes home", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-setup-"));
+    tempRoots.push(stateRoot);
+    const manager = new HermesSetupSessionManager({
+      stateRoot,
+      docker: async () => ({ stdout: "" }),
+    });
+    const descriptor = await manager.create(AGENT_ID);
+    const persistedConfig = join(stateRoot, AGENT_ID, "hermes", "config.yaml");
+    await writeFile(persistedConfig, "model:\n  provider: hermes\n");
+
+    await expect(readFile(persistedConfig, "utf8")).resolves.not.toContain(
+      descriptor.websocketProtocol,
+    );
   });
 
   it("exposes authenticated session creation and upgrades without the runner bearer token", async () => {

@@ -1,16 +1,16 @@
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { validateManualRunnerEndpointUrl } from "@/src/env/validation";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { classifyManagedRuntimeForUpdate } from "@/src/server/agents/agent-runtime-lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agents, runners } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
+import { agents, runners } from "@/src/server/db/schema";
 import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import {
+  type RunnerCompatibilityRequirement,
   readRunnerCompatibilityRequirement,
   runnerCompatibilityPredicate,
-  type RunnerCompatibilityRequirement,
 } from "@/src/server/runners/runner-compatibility";
 import {
   lockRunnerPlacementCapacityInTransaction,
@@ -351,6 +351,48 @@ export async function getAssignedRunnerForActiveAgentForUser(
             isNull(runners.deletedAt),
           ),
         )
+        .limit(1);
+
+      return row ? toManualRunnerRecord(row) : null;
+    });
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function getFirstAssignableRunnerForUser(
+  userId: string,
+  dependencies: { createConnection?: () => DatabaseConnection } = {},
+): Promise<ManualRunnerRecord | null> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select({
+          id: runners.id,
+          userId: runners.userId,
+          name: runners.name,
+          kind: runners.kind,
+          endpointUrl: runners.endpointUrl,
+          status: runners.status,
+          createdAt: runners.createdAt,
+          updatedAt: runners.updatedAt,
+          deletedAt: runners.deletedAt,
+        })
+        .from(runners)
+        .where(
+          and(
+            eq(runners.userId, userId),
+            inArray(runners.status, [...ASSIGNABLE_RUNNER_STATUSES]),
+            isNotNull(runners.endpointUrl),
+            isNull(runners.deletedAt),
+          ),
+        )
+        .orderBy(desc(runners.updatedAt), desc(runners.createdAt))
         .limit(1);
 
       return row ? toManualRunnerRecord(row) : null;

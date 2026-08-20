@@ -6,7 +6,6 @@ import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell"
 import { AgentBackupControls } from "@/app/agents/_components/agent-backup-controls";
 import { AgentConfigEditor } from "@/app/agents/_components/agent-config-editor";
 import { AgentDeploymentProgress } from "@/app/agents/_components/agent-deployment-progress";
-import { AgentHermesSetup } from "@/app/agents/_components/agent-hermes-setup";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { AgentRuntimeLogPanel } from "@/app/agents/_components/agent-runtime-log-panel";
 import { AgentRuntimeStatus } from "@/app/agents/_components/agent-runtime-status";
@@ -59,7 +58,6 @@ type AgentDetailPageProps = {
 
 type AgentApprovalsResult = Awaited<ReturnType<typeof loadAgentApprovals>>;
 type AgentBackupsResult = Awaited<ReturnType<typeof loadAgentBackups>>;
-type AgentSecretsResult = Awaited<ReturnType<typeof loadAgentSecrets>>;
 type AgentDetailRecord = NonNullable<Awaited<ReturnType<typeof getActiveAgentForUser>>>;
 
 export const dynamic = "force-dynamic";
@@ -205,12 +203,6 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
             {agent.runtime ? (
               <AgentRuntimeStatus agentId={agent.id} initialRuntime={agent.runtime} />
             ) : null}
-            <AdvancedHermesSetupPanel
-              agentId={agent.id}
-              managed={latestDeployment !== null}
-              readiness={hermesReadiness}
-              result={secretsResult}
-            />
             <PlaceholderPanel title="Configuration">
               <AgentConfigEditor
                 agentId={agent.id}
@@ -411,59 +403,6 @@ function AgentTemplatePanel({ agent }: { agent: AgentDetailRecord }) {
         </div>
       </dl>
     </details>
-  );
-}
-
-function AdvancedHermesSetupPanel({
-  agentId,
-  managed,
-  readiness,
-  result,
-}: {
-  agentId: string;
-  managed: boolean;
-  readiness: ReturnType<typeof buildHermesSetupReadiness>;
-  result: AgentSecretsResult;
-}) {
-  if (!managed) {
-    return result.ok ? (
-      <AgentHermesSetup agentId={agentId} readiness={readiness} />
-    ) : (
-      <HermesSetupLoadError />
-    );
-  }
-
-  return (
-    <details className="advanced-hermes-recovery">
-      <summary>
-        <span>
-          <strong>Advanced Hermes setup and recovery</strong>
-          <small>Manual terminal setup for recovery and compatibility</small>
-        </span>
-      </summary>
-      <p>
-        Managed provider and Telegram keys are control-plane-owned and may be reprojected during
-        recovery.
-      </p>
-      {result.ok ? (
-        <AgentHermesSetup agentId={agentId} readiness={readiness} />
-      ) : (
-        <HermesSetupLoadError />
-      )}
-    </details>
-  );
-}
-
-function HermesSetupLoadError() {
-  return (
-    <section className="hermes-setup-panel" aria-labelledby="hermes-setup-title">
-      <div className="section-heading">
-        <h2 id="hermes-setup-title">Hermes setup</h2>
-      </div>
-      <div className="safe-error" role="alert">
-        Hermes setup status could not be loaded.
-      </div>
-    </section>
   );
 }
 

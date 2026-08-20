@@ -121,9 +121,9 @@ export class HermesSetupSessionManager {
   }
 
   async create(agentId: string): Promise<HermesSetupSessionDescriptor> {
-    this.#pruneExpired();
+    await this.#pruneExpired();
 
-    if (this.#sessions.size > 0) {
+    if ([...this.#sessions.values()].some((session) => this.#now() < session.expiresAt)) {
       throw new HermesSetupSessionError("setup_session_active");
     }
 
@@ -174,7 +174,7 @@ export class HermesSetupSessionManager {
   authorizeUpgrade(
     request: Request,
   ): { ok: true; data: HermesSetupWebSocketData; protocol: string } | { ok: false } {
-    this.#pruneExpired();
+    void this.#pruneExpired();
     const sessionId = parseSetupSessionPath(new URL(request.url).pathname);
     const requestedProtocol = readSetupProtocol(request.headers.get("sec-websocket-protocol"));
     const session = sessionId ? this.#sessions.get(sessionId) : null;
@@ -182,6 +182,7 @@ export class HermesSetupSessionManager {
     if (
       !session ||
       session.used ||
+      this.#now() >= session.expiresAt ||
       !requestedProtocol ||
       !tokenMatches(session.tokenHash, requestedProtocol.slice(SETUP_PROTOCOL_PREFIX.length))
     ) {
@@ -201,6 +202,9 @@ export class HermesSetupSessionManager {
 
     if (!session || session.socket || this.#now() >= session.expiresAt) {
       socket.close(4401, "Setup session expired.");
+      if (session && this.#now() >= session.expiresAt) {
+        void this.#cleanup(session.id);
+      }
       return;
     }
 
@@ -242,8 +246,15 @@ export class HermesSetupSessionManager {
   message(sessionId: string, rawMessage: string | Buffer): void {
     const session = this.#sessions.get(sessionId);
 
-    if (!session?.process || Buffer.byteLength(rawMessage) > MAX_CLIENT_MESSAGE_BYTES) {
+    if (
+      !session?.process ||
+      this.#now() >= (session?.expiresAt ?? 0) ||
+      Buffer.byteLength(rawMessage) > MAX_CLIENT_MESSAGE_BYTES
+    ) {
       session?.socket?.close(1008, "Invalid setup message.");
+      if (session && this.#now() >= session.expiresAt) {
+        void this.#cleanup(session.id);
+      }
       return;
     }
 
@@ -406,14 +417,13 @@ export class HermesSetupSessionManager {
     await this.#docker(["rm", "--force", session.containerName]).catch(() => undefined);
   }
 
-  #pruneExpired(): void {
+  async #pruneExpired(): Promise<void> {
     const now = this.#now();
-
-    for (const [sessionId, session] of this.#sessions) {
-      if (now >= session.expiresAt) {
-        void this.#cleanup(sessionId);
-      }
-    }
+    await Promise.all(
+      [...this.#sessions].flatMap(([sessionId, session]) =>
+        now >= session.expiresAt ? [this.#cleanup(sessionId)] : [],
+      ),
+    );
   }
 }
 
@@ -479,7 +489,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function processEnv(): Record<string, string | undefined> {
-  return process.env;
+  const environment: Record<string, string | undefined> = {};
+  for (const key of [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "DOCKER_HOST",
+    "DOCKER_CONTEXT",
+    "DOCKER_CONFIG",
+    "XDG_RUNTIME_DIR",
+  ]) {
+    if (process.env[key] !== undefined) environment[key] = process.env[key];
+  }
+  return environment;
 }
 
 declare const Bun: {

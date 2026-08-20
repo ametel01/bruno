@@ -113,10 +113,8 @@ describe("operational page user isolation", () => {
       expect(agentsHtml).not.toContain(`${expected.foreignPrefix}-DEPLOYMENT-DETAIL`);
       expect(dashboardHtml).not.toContain(`${expected.foreignPrefix}-DEPLOYMENT-DETAIL`);
       expect(detailHtml).not.toContain(`${expected.foreignPrefix}-DEPLOYMENT-DETAIL`);
-      expect(detailHtml).toContain("Advanced Hermes setup and recovery");
-      expect(detailHtml.indexOf("deployment-progress-title")).toBeLessThan(
-        detailHtml.indexOf("Advanced Hermes setup and recovery"),
-      );
+      expect(detailHtml).not.toContain("Advanced Hermes setup and recovery");
+      expect(detailHtml).not.toContain("Full Hermes Setup");
       expect(detailHtml).not.toContain(`${expected.foreignPrefix}-PROCESS-LOG`);
       expect(costJson).toContain(`${expected.ownPrefix}-MANUAL-RUNNER`);
       expect(costJson).toContain(`${expected.ownPrefix}-CLOUD-RUNNER`);
