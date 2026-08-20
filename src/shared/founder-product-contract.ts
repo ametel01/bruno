@@ -86,6 +86,14 @@ export const FOUNDER_PRODUCT_CONTRACT_UNIT_FILES = [
   "tests/unit/operator-access.test.ts",
   "tests/unit/founder-product-contract-evidence.test.ts",
   "tests/unit/founder-general-release-decision.test.ts",
+  "tests/unit/founder-product-contract-harness.test.ts",
+] as const;
+
+export const FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS = [
+  "release_stage_admission",
+  "product_entitlement_lifecycle",
+  "recovery_archive_lifecycle",
+  "infrastructure_retirement",
 ] as const;
 
 export const FOUNDER_PRODUCT_CONTRACT_ATTENDED_TASKS = [

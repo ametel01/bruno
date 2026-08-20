@@ -33,6 +33,7 @@ describe("Founder Product Contract evidence", () => {
     const evidence = buildFounderProductContractEvidence({
       ...validInput(),
       mode: "release",
+      scenarioResults: lifecycleScenarioResults(),
       voiceOverDigest: DIGEST,
       voiceOverOsVersion: "macOS 15.6",
       voiceOverBrowserVersion: "Safari 26.0",
@@ -114,6 +115,37 @@ describe("Founder Product Contract evidence", () => {
       }),
     ).toThrow("VoiceOver evidence metadata is incomplete.");
   });
+
+  it("accepts an exact lifecycle ledger and rejects a missing required scenario", () => {
+    const scenarioResults = [
+      "release_stage_admission",
+      "product_entitlement_lifecycle",
+      "recovery_archive_lifecycle",
+      "infrastructure_retirement",
+    ].map((id) => ({
+      id,
+      status: "passed" as const,
+      attempts: 1,
+      sourceRevision: REVISION,
+      observedAt: "2026-08-20T00:00:00.000Z",
+    }));
+    const evidence = buildFounderProductContractEvidence({
+      ...validInput(),
+      scenarioResults,
+    });
+
+    expect(evidence.scenarios).toEqual(
+      scenarioResults.map(({ id, status, attempts }) => ({ id, status, attempts })),
+    );
+    expect(() =>
+      buildFounderProductContractEvidence({
+        ...validInput(),
+        scenarioResults: scenarioResults.slice(1),
+      }),
+    ).toThrow(
+      "Required Founder Product Contract scenario release_stage_admission was not present.",
+    );
+  });
 });
 
 function validInput() {
@@ -129,4 +161,19 @@ function validInput() {
     mode: "ci" as const,
     observedAt: "2026-08-20T00:00:00.000Z",
   };
+}
+
+function lifecycleScenarioResults() {
+  return [
+    "release_stage_admission",
+    "product_entitlement_lifecycle",
+    "recovery_archive_lifecycle",
+    "infrastructure_retirement",
+  ].map((id) => ({
+    id,
+    status: "passed" as const,
+    attempts: 1,
+    sourceRevision: REVISION,
+    observedAt: "2026-08-20T00:00:00.000Z",
+  }));
 }

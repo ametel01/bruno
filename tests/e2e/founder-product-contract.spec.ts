@@ -2,6 +2,13 @@ import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import postgres from "postgres";
+import {
+  createFounderProductContractClock,
+  createFounderProductContractHarness,
+  createFounderProductContractProviderDoubles,
+  runFounderProductContractScenario,
+  type FounderProductContractClock,
+} from "@/src/testing/founder-product-contract";
 
 const DEVELOPMENT_USER_E2E_LOCK_KEY = 125_365;
 
@@ -9,63 +16,87 @@ test("one persisted Operator scenario drives API, browser, keyboard, and accessi
   page,
   request,
 }) => {
-  const fixture = await createFixture();
+  const clock = createFounderProductContractClock("2026-08-20T00:00:00.000Z");
+  const providers = createFounderProductContractProviderDoubles({ clock });
+  const fixture = await createFixture(clock);
+  const harness = createFounderProductContractHarness({
+    clock,
+    providers,
+    application: {
+      request: async ({ method, path, body }) => {
+        const response = await request.fetch(path, {
+          method,
+          ...(body === undefined ? {} : { data: body as object }),
+        });
+        return {
+          status: response.status(),
+          headers: response.headers(),
+          json: () => response.json(),
+        };
+      },
+    },
+  });
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
   try {
-    await withPinnedDevelopmentUser(fixture.userId, async () => {
-      const apiResponse = await request.get("/api/operator");
-      expect(apiResponse.status()).toBe(200);
-      expect(apiResponse.headers()["cache-control"]).toBe("no-store");
-      const apiBody = (await apiResponse.json()) as { operator: { id: string } };
-      expect(apiBody.operator.id).toBe(fixture.operatorId);
+    await runFounderProductContractScenario(harness, async ({ application }) => {
+      await withPinnedDevelopmentUser(fixture.userId, async () => {
+        const apiResponse = await application.request({ method: "GET", path: "/api/operator" });
+        expect(apiResponse.status).toBe(200);
+        expect(apiResponse.headers["cache-control"]).toBe("no-store");
+        const apiBody = (await apiResponse.json()) as { operator: { id: string } };
+        expect(apiBody.operator.id).toBe(fixture.operatorId);
 
-      await page.goto("/operator");
-      await expect(page.getByRole("heading", { name: "Bruno.Ai Operator" })).toBeVisible();
-      await expect(page.getByText("Your Operator is ready.")).toBeVisible();
-      await expect(page.getByText("Next step: Connect your Ready AI Connection")).toBeVisible();
+        await page.goto("/operator");
+        await expect(page.getByRole("heading", { name: "Bruno.Ai Operator" })).toBeVisible();
+        await expect(page.getByText("Your Operator is ready.")).toBeVisible();
+        await expect(page.getByText("Next step: Connect your Ready AI Connection")).toBeVisible();
 
-      const forbiddenTechnicalControl =
-        /agent template|manage api keys?|connect telegram|numeric allowlist|cron expression|runner management|deployment configuration|view raw logs?|open terminal/i;
-      await expect(
-        page
-          .getByRole("button", { name: forbiddenTechnicalControl })
-          .or(page.getByRole("link", { name: forbiddenTechnicalControl })),
-      ).toHaveCount(0);
-      await expect(page.getByRole("heading", { name: forbiddenTechnicalControl })).toHaveCount(0);
+        const forbiddenTechnicalControl =
+          /agent template|manage api keys?|connect telegram|numeric allowlist|cron expression|runner management|deployment configuration|view raw logs?|open terminal/i;
+        await expect(
+          page
+            .getByRole("button", { name: forbiddenTechnicalControl })
+            .or(page.getByRole("link", { name: forbiddenTechnicalControl })),
+        ).toHaveCount(0);
+        await expect(page.getByRole("heading", { name: forbiddenTechnicalControl })).toHaveCount(0);
 
-      await page.keyboard.press("Tab");
-      expect(await page.evaluate(() => document.activeElement?.tagName.toLowerCase())).not.toBe(
-        "body",
-      );
+        await page.keyboard.press("Tab");
+        expect(await page.evaluate(() => document.activeElement?.tagName.toLowerCase())).not.toBe(
+          "body",
+        );
 
-      const accessibility = await new AxeBuilder({ page })
-        .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
-        .analyze();
-      expect(accessibility.violations).toEqual([]);
+        const accessibility = await new AxeBuilder({ page })
+          .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+          .analyze();
+        expect(accessibility.violations).toEqual([]);
 
-      await page.reload();
-      const resumedResponse = await request.get("/api/operator");
-      const resumedBody = (await resumedResponse.json()) as { operator: { id: string } };
-      expect(resumedBody.operator.id).toBe(fixture.operatorId);
-      await expect(page.getByText("Your Operator is ready.")).toBeVisible();
-      await page.waitForLoadState("networkidle");
-      expect(pageErrors).toEqual([]);
-      await page.close();
+        await page.reload();
+        const resumedResponse = await application.request({ method: "GET", path: "/api/operator" });
+        const resumedBody = (await resumedResponse.json()) as { operator: { id: string } };
+        expect(resumedBody.operator.id).toBe(fixture.operatorId);
+        await expect(page.getByText("Your Operator is ready.")).toBeVisible();
+        await page.waitForLoadState("networkidle");
+        expect(pageErrors).toEqual([]);
+        await page.close();
+      });
     });
   } finally {
     await deleteFixture(fixture);
   }
 });
 
-async function createFixture(): Promise<{ userId: string; operatorId: string }> {
+async function createFixture(clock: FounderProductContractClock): Promise<{
+  userId: string;
+  operatorId: string;
+}> {
   const userId = randomUUID();
   const operatorId = randomUUID();
   const preparationId = randomUUID();
   const runtimeId = randomUUID();
-  const createdAt = "2026-08-20T00:00:00.000Z";
-  const readyAt = "2026-08-20T00:00:01.000Z";
+  const createdAt = clock.now().toISOString();
+  const readyAt = clock.advance(1_000).toISOString();
 
   await withDatabase(async (sql) => {
     await sql`insert into users (id, created_at, updated_at) values (${userId}, ${createdAt}, ${readyAt})`;

@@ -4,8 +4,13 @@ import {
   FOUNDER_PRODUCT_CONTRACT_ATTENDED_TASKS,
   FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS,
   FOUNDER_PRODUCT_CONTRACT_INVARIANTS,
+  FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
   FOUNDER_PRODUCT_CONTRACT_SCHEMA_VERSION,
 } from "@/src/shared/founder-product-contract";
+import {
+  type FounderProductContractScenarioResult,
+  validateFounderProductContractScenarios,
+} from "@/src/testing/founder-product-contract";
 
 type ContractMode = "ci" | "release";
 
@@ -44,6 +49,9 @@ export async function createFounderProductContractEvidence(input: {
   talkBackDigest?: string;
   talkBackOsVersion?: string;
   talkBackBrowserVersion?: string;
+  scenarioResults?: readonly FounderProductContractScenarioResult[];
+  requiredScenarioIds?: readonly string[];
+  scenarioMaxAgeMilliseconds?: number;
 }): Promise<FounderProductContractEvidence> {
   const browser = JSON.parse(await readFile(input.browserResultPath, "utf8")) as PlaywrightResult;
   const unit = JSON.parse(await readFile(input.unitResultPath, "utf8")) as VitestResult;
@@ -63,6 +71,9 @@ export function buildFounderProductContractEvidence(input: {
   talkBackDigest?: string;
   talkBackOsVersion?: string;
   talkBackBrowserVersion?: string;
+  scenarioResults?: readonly FounderProductContractScenarioResult[];
+  requiredScenarioIds?: readonly string[];
+  scenarioMaxAgeMilliseconds?: number;
 }) {
   requirePattern(input.sourceRevision, /^[a-f0-9]{40}$/, "source revision");
   requirePattern(input.runId, /^[A-Za-z0-9._:-]{1,128}$/, "run ID");
@@ -118,6 +129,29 @@ export function buildFounderProductContractEvidence(input: {
   if (input.mode === "release" && (!voiceOverEvidence || !talkBackEvidence)) {
     throw new Error("Release evidence requires bound VoiceOver and TalkBack evidence digests.");
   }
+  if (input.mode === "release" && !input.scenarioResults) {
+    throw new Error("Release evidence requires lifecycle scenario results.");
+  }
+
+  const scenarioEvidence = input.scenarioResults
+    ? (() => {
+        const required = input.requiredScenarioIds ?? FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS;
+        validateFounderProductContractScenarios({
+          required,
+          results: input.scenarioResults,
+          sourceRevision: input.sourceRevision,
+          observedAt: input.observedAt,
+          ...(input.scenarioMaxAgeMilliseconds === undefined
+            ? {}
+            : { maxAgeMilliseconds: input.scenarioMaxAgeMilliseconds }),
+        });
+        return input.scenarioResults.map(({ id, status, attempts }) => ({
+          id,
+          status,
+          attempts,
+        }));
+      })()
+    : undefined;
 
   const invariantResults = FOUNDER_PRODUCT_CONTRACT_INVARIANTS.map((invariant) => {
     if (invariant.id === "voiceover_safari") {
@@ -166,6 +200,7 @@ export function buildFounderProductContractEvidence(input: {
       },
     },
     invariants: invariantResults,
+    ...(scenarioEvidence ? { scenarios: scenarioEvidence } : {}),
     sanitization: {
       allowlisted: true,
       excluded: [

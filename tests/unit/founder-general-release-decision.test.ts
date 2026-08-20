@@ -133,6 +133,18 @@ function productContract(mode: "ci" | "release") {
     observedAt: "2026-08-20T12:00:00.000Z",
     ...(mode === "release"
       ? {
+          scenarioResults: [
+            "release_stage_admission",
+            "product_entitlement_lifecycle",
+            "recovery_archive_lifecycle",
+            "infrastructure_retirement",
+          ].map((id) => ({
+            id,
+            status: "passed" as const,
+            attempts: 1,
+            sourceRevision: REVISION,
+            observedAt: "2026-08-20T12:00:00.000Z",
+          })),
           voiceOverDigest: DIGEST,
           voiceOverOsVersion: "macOS 15.6",
           voiceOverBrowserVersion: "Safari 26.0",

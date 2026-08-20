@@ -53,3 +53,18 @@ credentials, prompts, and provider responses.
 The workflow runs in automated mode for every push to `main`. A release candidate uses the manual
 `release` mode only after attended assistive-technology evidence exists. No provider credential is
 used by either mode.
+
+## Deterministic lifecycle seam
+
+Lifecycle scenarios use the public seam in `src/testing/founder-product-contract.ts`. The seam
+provides a controllable clock, deterministic doubles for Clerk, Lemon Squeezy, DigitalOcean,
+OpenAI, Anthropic, and Google, and a small public application request boundary. Scenarios advance
+time explicitly and drive persisted state through HTTP requests; they do not sleep, call domain
+helpers directly, or depend on provider credentials. The initial contract registers release-stage,
+entitlement, recovery-archive, and infrastructure-retirement scenario identifiers so later slices
+can add coverage without changing the evidence schema. When a lifecycle ledger is supplied, the
+evidence builder requires every listed scenario to pass exactly once against the same revision and
+observation instant; missing, failed, skipped, retried, stale, or mismatched results fail closed.
+The runner accepts these allowlisted results through
+`BRUNO_FOUNDER_CONTRACT_SCENARIO_RESULTS_JSON` and an optional required-ID list through
+`BRUNO_FOUNDER_CONTRACT_REQUIRED_SCENARIOS_JSON`.
