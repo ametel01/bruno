@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY,
+  type FounderAiRoutingCandidate,
+  getActiveFounderAiCompatibilityPolicy,
   isEligibleFounderAiConnection,
   selectFounderAiProvider,
   selectFounderAiProviderAtCheckpoint,
-  type FounderAiRoutingCandidate,
 } from "@/src/server/operators/founder-ai-routing";
 
 const NOW = new Date("2026-08-19T02:00:00.000Z");
@@ -12,6 +13,10 @@ const MULTI_PROVIDER_POLICY = {
   ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY,
   providers: {
     ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers,
+    openai: {
+      ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers.openai,
+      released: true,
+    },
     anthropic: {
       ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers.anthropic,
       released: true,
@@ -60,8 +65,17 @@ describe("Founder AI compatibility routing", () => {
       providerSubjectId: "openai-account",
       accountLabel: "openai@example.com",
       approvedModelAssignment: "openai-codex",
-      policyVersion: 1,
+      policyVersion: 2,
     });
+  });
+
+  it("keeps OpenAI unroutable when current Connected Acceptance is absent", () => {
+    expect(
+      selectFounderAiProvider([candidate("openai")], {
+        now: NOW,
+        policy: getActiveFounderAiCompatibilityPolicy(false),
+      }),
+    ).toBeNull();
   });
 
   it("fails over only when the checkpoint explicitly excludes the failed provider", () => {

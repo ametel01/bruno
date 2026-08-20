@@ -1,3 +1,4 @@
+import type { getFounderAiConnectionForUser } from "@/src/server/operators/founder-ai-connection";
 import {
   disconnectFounderAnthropicForUser,
   disconnectFounderOpenAiForUser,
@@ -9,7 +10,7 @@ import {
   startFounderAnthropicAuthorizationForUser,
   startFounderOpenAiAuthorizationForUser,
 } from "@/src/server/operators/founder-ai-connection";
-import type { getFounderAiConnectionForUser } from "@/src/server/operators/founder-ai-connection";
+import { isFounderOpenAiReleased } from "@/src/server/operators/founder-openai-release";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 type ConnectionRouteDependencies = {
@@ -23,6 +24,7 @@ type ConnectionRouteDependencies = {
   pollAnthropicAuthorization?: typeof pollFounderAnthropicAuthorizationForUser;
   recheckAnthropicConnection?: typeof recheckFounderAnthropicConnectionForUser;
   disconnectAnthropicConnection?: typeof disconnectFounderAnthropicForUser;
+  isOpenAiReleased?: () => boolean;
 };
 
 export const dynamic = "force-dynamic";
@@ -38,6 +40,9 @@ export async function GET(
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
 
   const provider = readProvider(new URL(request.url).searchParams.get("provider"));
+  if (provider === "openai" && !(dependencies.isOpenAiReleased ?? isFounderOpenAiReleased)()) {
+    return providerNotReleasedResponse();
+  }
   const connection =
     provider === "anthropic"
       ? await (dependencies.recheckAnthropicConnection ?? recheckFounderAnthropicConnectionForUser)(
@@ -71,6 +76,13 @@ export async function POST(
     payload && typeof payload === "object" && "provider" in payload ? payload.provider : null,
   );
   try {
+    if (
+      provider === "openai" &&
+      action !== "disconnect" &&
+      !(dependencies.isOpenAiReleased ?? isFounderOpenAiReleased)()
+    ) {
+      return providerNotReleasedResponse();
+    }
     if (action === "start") {
       const result =
         provider === "anthropic"
@@ -168,6 +180,18 @@ function validationResponse(message: string): Response {
   return Response.json(
     { error: { code: "validation_failed", message } },
     { status: 400, headers: noStoreHeaders() },
+  );
+}
+
+function providerNotReleasedResponse(): Response {
+  return Response.json(
+    {
+      error: {
+        code: "provider_not_released",
+        message: "OpenAI is unavailable until current Connected Acceptance passes.",
+      },
+    },
+    { status: 409, headers: noStoreHeaders() },
   );
 }
 

@@ -1,8 +1,12 @@
-import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import postgres from "postgres";
 import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
+import {
+  buildTestOpenAiConnectedAcceptanceRelease,
+  TEST_OPENAI_RELEASE_REVISION,
+} from "./founder-openai-test-release";
 
 const DEFAULT_DATABASE_URL = "postgres://bruno:bruno@127.0.0.1:54329/bruno";
 const DEFAULT_APP_URL = "http://localhost:3000";
@@ -106,8 +110,13 @@ export async function runUnitTests(
     BRUNO_DOCKER_RUNNER_IMAGE: DEFAULT_TEST_DOCKER_RUNNER_IMAGE,
     BRUNO_HERMES_WORKLOAD_IMAGE: DEFAULT_HERMES_WORKLOAD_IMAGE,
     BRUNO_RUNNER_BOOT_VALIDATION_MODE: "full",
+    // Deterministic provider fakes exercise the released-provider product
+    // path. Production has no equivalent default: it must supply current,
+    // exact-revision Connected Acceptance evidence.
+    BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(),
     DATABASE_URL: plan.databaseUrl,
     NEXT_PUBLIC_APP_URL: DEFAULT_APP_URL,
+    VERCEL_GIT_COMMIT_SHA: TEST_OPENAI_RELEASE_REVISION,
   };
   const vitestExecutable = join(
     cwd,

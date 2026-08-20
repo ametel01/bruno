@@ -8,6 +8,7 @@ import {
   operatorRuntimes,
   users,
 } from "@/src/server/db/schema";
+import { ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY } from "@/src/server/operators/founder-ai-routing";
 import {
   assertFounderExternalActionsNotPaused,
   getFounderExternalActionPauseForUser,
@@ -23,13 +24,16 @@ import {
   confirmFounderTimezoneForUser,
   ensureFounderOperatorForUser,
 } from "@/src/server/operators/founder-operator";
-import { ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY } from "@/src/server/operators/founder-ai-routing";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003401";
 const MULTI_PROVIDER_POLICY = {
   ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY,
   providers: {
     ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers,
+    openai: {
+      ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers.openai,
+      released: true,
+    },
     anthropic: {
       ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers.anthropic,
       released: true,
@@ -104,7 +108,7 @@ describe("Founder Conversation application seam", () => {
         state: "completed",
         checkpointId: expect.stringMatching(/^bruno-ai-checkpoint-/),
         provider: "openai",
-        policyVersion: 1,
+        policyVersion: 2,
         completionIdentity: expect.stringMatching(/^bruno-ai-completion-/),
         externalEffectStarted: false,
         recoveryChoices: [],
@@ -171,7 +175,7 @@ describe("Founder Conversation application seam", () => {
         state: "paused",
         recoveryMessage: "Your connected AI account has no available capacity right now.",
         provider: "openai",
-        policyVersion: 1,
+        policyVersion: 2,
         completionIdentity: expect.stringMatching(/^bruno-ai-completion-/),
         externalEffectStarted: false,
         recoveryChoices: [
@@ -251,7 +255,7 @@ describe("Founder Conversation application seam", () => {
     });
     expect(sent.activeWork).toMatchObject({
       provider: "anthropic",
-      policyVersion: 1,
+      policyVersion: 2,
       state: "completed",
     });
     const [work] = await connection.db.select().from(operatorConversationWorks);
@@ -260,7 +264,7 @@ describe("Founder Conversation application seam", () => {
       providerConnectionId: anthropic?.id,
       providerSubjectId: "anthropic-account-1",
       providerAccountLabel: "founder@anthropic.example",
-      policyVersion: 1,
+      policyVersion: 2,
     });
     expect(operator.id).toBeTruthy();
   });

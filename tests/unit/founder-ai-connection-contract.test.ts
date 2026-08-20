@@ -185,4 +185,57 @@ describe("Founder OpenAI connection readiness contract", () => {
       }),
     ).resolves.toEqual({ providerRevoked: false });
   });
+
+  it("does not invent identity, capacity, or inference from current Hermes public shapes", async () => {
+    const adapter = createHermesOpenAiAdapter({
+      request: async (path) => {
+        if (path.includes("/poll/")) return { status: "authorized" };
+        if (path === "/api/providers/oauth") {
+          return {
+            providers: [
+              {
+                id: "openai-codex",
+                status: {
+                  logged_in: true,
+                  source: "pool:device_code",
+                  source_label: "chatgpt",
+                },
+              },
+            ],
+          };
+        }
+        if (path === "/api/model/info") {
+          return { provider: "openai-codex", model: "gpt-5.6-sol" };
+        }
+        return {
+          gateway_running: true,
+          gateway_state: "running",
+          overall: "ok",
+        };
+      },
+    });
+
+    await expect(
+      adapter.pollAuthorization({
+        operatorId: "operator",
+        userId: "owner",
+        sessionId: "session-1",
+      }),
+    ).resolves.toEqual({ state: "pending" });
+    await expect(
+      adapter.verifyConnection({
+        operatorId: "operator",
+        userId: "owner",
+        providerIdentity: "previous-identity",
+      }),
+    ).resolves.toMatchObject({
+      providerIdentity: "previous-identity",
+      accountLabel: null,
+      eligibleAccount: true,
+      authorizationPersisted: true,
+      approvedModelAssigned: true,
+      capacity: "unavailable",
+      inference: "failed",
+    });
+  });
 });

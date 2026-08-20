@@ -153,7 +153,7 @@ describe("E2E capability gates", () => {
       ),
     ).resolves.toBe(0);
 
-    expect(childEnv).toEqual({
+    expect(childEnv).toMatchObject({
       PATH: "/test-bin",
       BRUNO_AUTH_MODE: "development",
       BRUNO_GOOGLE_MAIL_READING_RELEASE: "qualified",
@@ -164,6 +164,15 @@ describe("E2E capability gates", () => {
       PLAYWRIGHT_BASE_URL: "http://localhost:3100",
       PLAYWRIGHT_REUSE_EXISTING_SERVER: "",
       PORT: "3100",
+      VERCEL_GIT_COMMIT_SHA: "a".repeat(40),
     });
+    expect(JSON.parse(childEnv?.BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE ?? "null")).toMatchObject(
+      {
+        schemaVersion: "bruno.founder-openai-connected-acceptance.v1",
+        outcome: "passed",
+        sourceRevision: "a".repeat(40),
+        gates: { revocationAndRecovery: true },
+      },
+    );
   });
 });

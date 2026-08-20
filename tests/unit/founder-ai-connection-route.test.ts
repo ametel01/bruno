@@ -34,6 +34,11 @@ vi.mock("@/src/server/users/configured-application-user", () => ({
   requireConfiguredApplicationUser: mocks.requireApplicationUser,
 }));
 
+vi.mock("@/src/server/operators/founder-openai-release", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/server/operators/founder-openai-release")>()),
+  isFounderOpenAiReleased: () => true,
+}));
+
 const USER_ID = "00000000-0000-4000-8000-000000003381";
 const CONNECTION = {
   provider: "openai",
@@ -123,6 +128,27 @@ describe("Founder AI connection route", () => {
       authorization: { authorizationUrl: expect.any(String), userCode: expect.any(String) },
     });
     expect(mocks.startAuthorization).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it("fails closed before starting a new OpenAI connection without current acceptance", async () => {
+    const { POST } = await import("@/app/api/operator/connections/route");
+    const response = await POST(
+      new Request("http://localhost/api/operator/connections", {
+        method: "POST",
+        body: JSON.stringify({ action: "start" }),
+      }),
+      undefined,
+      { isOpenAiReleased: () => false },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "provider_not_released",
+        message: "OpenAI is unavailable until current Connected Acceptance passes.",
+      },
+    });
+    expect(mocks.startAuthorization).not.toHaveBeenCalled();
   });
 
   it("polls, rechecks, and disconnects through explicit actions", async () => {

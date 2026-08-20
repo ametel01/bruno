@@ -179,6 +179,31 @@ describe("Founder Operator preparation shell", () => {
     expect(html).not.toContain("WhatsApp");
   });
 
+  it("keeps OpenAI hidden until current Connected Acceptance releases it", () => {
+    const readyOperator: FounderOperatorDto = {
+      ...OPERATOR,
+      preparation: {
+        ...OPERATOR.preparation,
+        status: "ready",
+        timezone: "Asia/Manila",
+        timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+      },
+      runtime: { status: "ready", recoveryMessage: null },
+    };
+    const hidden = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, { initialOperator: readyOperator }),
+    );
+    const released = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: readyOperator,
+        openAiReleased: true,
+      }),
+    );
+
+    expect(hidden).not.toContain("Your AI Connection");
+    expect(released).toContain("Your AI Connection");
+  });
+
   it("opens an activated workspace on Conversation and Needs you before setup", () => {
     const html = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {

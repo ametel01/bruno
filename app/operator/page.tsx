@@ -6,6 +6,7 @@ import {
   REQUIRED_MAIL_SCOPE,
 } from "@/src/server/operators/founder-mail-connection";
 import { getFounderOnboardingForUser } from "@/src/server/operators/founder-onboarding";
+import { isFounderOpenAiReleased } from "@/src/server/operators/founder-openai-release";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import { buildFounderTimezoneOptions } from "@/src/shared/founder-timezones";
@@ -29,6 +30,7 @@ export default async function FounderOperatorPage() {
   const operator = await ensureFounderOperatorForUser(applicationUser.userId);
   const onboarding = await getFounderOnboardingForUser(applicationUser.userId);
   const mailReadingReleased = isFounderGoogleMailReadingReleased();
+  const openAiReleased = isFounderOpenAiReleased();
 
   return (
     <FounderOperatorShell>
@@ -36,6 +38,7 @@ export default async function FounderOperatorPage() {
         initialOperator={operator}
         initialOnboarding={onboarding}
         timezoneOptions={buildFounderTimezoneOptions()}
+        openAiReleased={openAiReleased}
         mailReadingReleased={mailReadingReleased}
         mailReleaseControls={
           mailReadingReleased

@@ -4,6 +4,10 @@ import { desc, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/src/server/db/schema";
 import { operatorAiConnections } from "@/src/server/db/schema";
+import {
+  FOUNDER_OPENAI_POLICY_VERSION,
+  isFounderOpenAiReleased,
+} from "@/src/server/operators/founder-openai-release";
 
 type FounderAiRoutingTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -30,15 +34,15 @@ export type FounderAiCompatibilityPolicy = {
 };
 
 /**
- * This is deliberately a server-owned release policy. A connected account can
- * become eligible only when its provider is present here and its assignment is
- * one of the approved assignments for that provider.
+ * This is the fail-closed policy baseline. Runtime release evidence may enable
+ * a provider through getActiveFounderAiCompatibilityPolicy, but a connected
+ * account is never routable from this baseline alone.
  */
 export const ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY: FounderAiCompatibilityPolicy = {
-  version: 1,
+  version: FOUNDER_OPENAI_POLICY_VERSION,
   providers: {
     openai: {
-      released: true,
+      released: false,
       priority: 10,
       defaultModelAssignment: "openai-codex",
       approvedModelAssignments: ["openai-codex"],
@@ -90,12 +94,27 @@ export type FounderAiRoutingOptions = {
   staleAfterMs?: number;
 };
 
+export function getActiveFounderAiCompatibilityPolicy(
+  openAiReleased = isFounderOpenAiReleased(),
+): FounderAiCompatibilityPolicy {
+  return {
+    ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY,
+    providers: {
+      ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers,
+      openai: {
+        ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers.openai,
+        released: openAiReleased,
+      },
+    },
+  };
+}
+
 export function selectFounderAiProvider(
   candidates: readonly FounderAiRoutingCandidate[],
   options: FounderAiRoutingOptions = {},
 ): FounderAiRoutingDecision | null {
   const now = options.now ?? new Date();
-  const policy = options.policy ?? ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY;
+  const policy = options.policy ?? getActiveFounderAiCompatibilityPolicy();
   const excluded = new Set(options.excludedProviders ?? []);
   const staleAfterMs = options.staleAfterMs ?? FOUNDER_AI_PROVIDER_STALE_AFTER_MS;
 
@@ -150,7 +169,7 @@ export function isEligibleFounderAiConnection(
   candidate: FounderAiRoutingCandidate,
   options: Pick<FounderAiRoutingOptions, "now" | "policy" | "staleAfterMs"> = {},
 ): boolean {
-  const policy = options.policy ?? ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY;
+  const policy = options.policy ?? getActiveFounderAiCompatibilityPolicy();
   const provider = candidate.provider as FounderAiProvider;
   const providerPolicy = policy.providers[provider];
   if (!providerPolicy?.released) return false;
