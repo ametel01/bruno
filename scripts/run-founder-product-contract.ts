@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
 import { FOUNDER_PRODUCT_CONTRACT_UNIT_FILES } from "@/src/shared/founder-product-contract";
+import { buildTestOpenAiConnectedAcceptanceRelease } from "./founder-openai-test-release";
 
 const artifactDirectory =
   process.env.BRUNO_FOUNDER_CONTRACT_ARTIFACT_DIR ?? "founder-contract-artifacts";
@@ -13,18 +14,29 @@ const mode = process.env.BRUNO_FOUNDER_CONTRACT_MODE === "release" ? "release" :
 
 await mkdir(artifactDirectory, { recursive: true });
 await rm(evidencePath, { force: true });
+const sourceRevision = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION");
+const deterministicProviderEnvironment = {
+  BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
+    new Date(),
+    sourceRevision,
+  ),
+  VERCEL_GIT_COMMIT_SHA: sourceRevision,
+};
 
-await run([
-  "bun",
-  "--conditions",
-  "react-server",
-  "node_modules/.bin/vitest",
-  "run",
-  "--no-file-parallelism",
-  "--reporter=json",
-  `--outputFile=${unitResultPath}`,
-  ...FOUNDER_PRODUCT_CONTRACT_UNIT_FILES,
-]);
+await run(
+  [
+    "bun",
+    "--conditions",
+    "react-server",
+    "node_modules/.bin/vitest",
+    "run",
+    "--no-file-parallelism",
+    "--reporter=json",
+    `--outputFile=${unitResultPath}`,
+    ...FOUNDER_PRODUCT_CONTRACT_UNIT_FILES,
+  ],
+  deterministicProviderEnvironment,
+);
 
 await run(
   [
@@ -33,7 +45,10 @@ await run(
     "tests/e2e/founder-product-contract.spec.ts",
     "--config=playwright.founder-contract.config.ts",
   ],
-  { BRUNO_FOUNDER_CONTRACT_BROWSER_RESULT: browserResultPath },
+  {
+    ...deterministicProviderEnvironment,
+    BRUNO_FOUNDER_CONTRACT_BROWSER_RESULT: browserResultPath,
+  },
 );
 
 const voiceOverDigest = process.env.BRUNO_FOUNDER_CONTRACT_VOICEOVER_DIGEST;
@@ -45,7 +60,7 @@ const talkBackBrowserVersion = process.env.BRUNO_FOUNDER_CONTRACT_TALKBACK_BROWS
 const evidence = await createFounderProductContractEvidence({
   browserResultPath,
   unitResultPath,
-  sourceRevision: requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION"),
+  sourceRevision,
   runId: requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID"),
   mode,
   observedAt: requiredEnvironment("BRUNO_FOUNDER_CONTRACT_OBSERVED_AT"),

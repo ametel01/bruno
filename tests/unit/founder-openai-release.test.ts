@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildTestOpenAiConnectedAcceptanceRelease } from "@/scripts/founder-openai-test-release";
 import {
   evaluateFounderOpenAiRelease,
   FOUNDER_OPENAI_CONNECTED_ACCEPTANCE_SCHEMA,
@@ -37,6 +38,16 @@ function release(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Founder OpenAI release evidence", () => {
+  it("binds deterministic contract fixtures to their exact candidate revision", () => {
+    const candidateRevision = "d".repeat(40);
+    expect(
+      JSON.parse(buildTestOpenAiConnectedAcceptanceRelease(NOW, candidateRevision)),
+    ).toMatchObject({
+      sourceRevision: candidateRevision,
+      operatorReleaseRevision: candidateRevision,
+    });
+  });
+
   it("releases only a complete current record bound to the deployed revision", () => {
     expect(
       evaluateFounderOpenAiRelease(
