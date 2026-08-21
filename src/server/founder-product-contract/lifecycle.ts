@@ -134,27 +134,7 @@ export async function executeFounderProductContractLifecycleAction(
         ? await createDurableRecoveryArchive(input, dependencies.providers, connection)
         : null;
     return await connection.db.transaction(async (tx) => {
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${input.userId}`}, 0))`,
-      );
-
-      const [operator] = await tx
-        .select({ id: operators.id })
-        .from(operators)
-        .where(and(eq(operators.userId, input.userId), eq(operators.status, "active")))
-        .limit(1)
-        .for("update");
-      if (!operator) throw new Error("An active persisted Operator is required.");
-
-      const [preparation] = await tx
-        .select({ status: operatorPreparations.status })
-        .from(operatorPreparations)
-        .where(eq(operatorPreparations.operatorId, operator.id))
-        .limit(1);
-      if (preparation?.status !== "ready") {
-        throw new Error("A ready persisted Operator preparation is required.");
-      }
-      const runtimeRevision = await requireReadyRuntimeRevision(tx, operator.id);
+      const { operatorId, runtimeRevision } = await requireReadyLifecycleOperator(tx, input.userId);
 
       const cleanup = emptyCleanup(input.now);
       switch (input.action) {
@@ -167,7 +147,7 @@ export async function executeFounderProductContractLifecycleAction(
           if (!lifecycleArchiveId) throw new Error("A verified Recovery Archive is required.");
           await tx.insert(founderReleaseDecisions).values({
             userId: input.userId,
-            operatorId: operator.id,
+            operatorId,
             stage: "owner_preview",
             outcome: "enter",
             applicationRevision: dependencies.applicationRevision,
@@ -215,6 +195,35 @@ export async function executeFounderProductContractLifecycleAction(
 }
 
 type Transaction = Parameters<Parameters<DatabaseConnection["db"]["transaction"]>[0]>[0];
+
+async function requireReadyLifecycleOperator(
+  tx: Transaction,
+  userId: string,
+): Promise<{ operatorId: string; runtimeRevision: string }> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${userId}`}, 0))`,
+  );
+  const [operator] = await tx
+    .select({ id: operators.id })
+    .from(operators)
+    .where(and(eq(operators.userId, userId), eq(operators.status, "active")))
+    .limit(1)
+    .for("update");
+  if (!operator) throw new Error("An active persisted Operator is required.");
+
+  const [preparation] = await tx
+    .select({ status: operatorPreparations.status })
+    .from(operatorPreparations)
+    .where(eq(operatorPreparations.operatorId, operator.id))
+    .limit(1);
+  if (preparation?.status !== "ready") {
+    throw new Error("A ready persisted Operator preparation is required.");
+  }
+  return {
+    operatorId: operator.id,
+    runtimeRevision: await requireReadyRuntimeRevision(tx, operator.id),
+  };
+}
 
 async function requireReleaseDecision(
   tx: Transaction,
@@ -311,25 +320,7 @@ async function prepareInfrastructureRetirement(
   connection: DatabaseConnection,
 ): Promise<RetirementWork | { cleanup: FounderLifecycleCleanup }> {
   return connection.db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${input.userId}`}, 0))`,
-    );
-    const [operator] = await tx
-      .select({ id: operators.id })
-      .from(operators)
-      .where(and(eq(operators.userId, input.userId), eq(operators.status, "active")))
-      .limit(1)
-      .for("update");
-    if (!operator) throw new Error("An active persisted Operator is required.");
-    const [preparation] = await tx
-      .select({ status: operatorPreparations.status })
-      .from(operatorPreparations)
-      .where(eq(operatorPreparations.operatorId, operator.id))
-      .limit(1);
-    if (preparation?.status !== "ready") {
-      throw new Error("A ready persisted Operator preparation is required.");
-    }
-    const runtimeRevision = await requireReadyRuntimeRevision(tx, operator.id);
+    const { operatorId, runtimeRevision } = await requireReadyLifecycleOperator(tx, input.userId);
     await requireReleaseDecision(
       tx,
       input.userId,
@@ -459,7 +450,7 @@ async function prepareInfrastructureRetirement(
         .insert(founderRecoveryArchives)
         .values({
           userId: input.userId,
-          operatorId: operator.id,
+          operatorId,
           status: "pending",
           storageObjectKey: null,
           ciphertextDigest: null,
@@ -500,7 +491,7 @@ async function prepareInfrastructureRetirement(
           externalActionPausedAt: input.now,
           updatedAt: input.now,
         })
-        .where(eq(operators.id, operator.id));
+        .where(eq(operators.id, operatorId));
       await tx
         .update(runnerCredentials)
         .set({ status: "revoked", revokedAt: input.now, updatedAt: input.now })
@@ -520,7 +511,7 @@ async function prepareInfrastructureRetirement(
       receiptId: receipt.id,
       leaseToken,
       runnerId: runner.id,
-      operatorId: operator.id,
+      operatorId,
       recoveryArchiveId,
       archiveNeedsExecution,
       expectation,
