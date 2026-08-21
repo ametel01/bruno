@@ -10,8 +10,9 @@ Run it after migrating a disposable local PostgreSQL database:
 The workflow first binds the exact run identity and observation instant. The contract runner then
 executes the persisted lifecycle producer through the public API and writes the producer's fixed
 artifact path. It does not accept a dispatch input or caller-authored JSON. It intentionally fails
-before writing evidence when the producer is absent, the ledger is missing, or the signing secret is
-absent.
+before writing evidence when the producer is absent, the ledger is missing, or release signing
+authority is absent. Automated CI binds a masked random signing key for that job only; it is never a
+release authority and is destroyed with the runner.
 
 ```bash
 BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION="$(git rev-parse HEAD)" \

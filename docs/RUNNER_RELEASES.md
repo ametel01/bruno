@@ -63,10 +63,9 @@ Configure `runner-release-canary` with required reviewers and these scoped value
 | Variable | `BRUNO_RELEASE_PREVIOUS_OCI_REFERENCE` | Retained previous Verified Release OCI reference after the first publication. |
 | Variable | `BRUNO_RELEASE_PREVIOUS_BUNDLE_DIGEST` | Canonical digest paired with the retained previous release. |
 
-The Founder Product Contract workflow also reads the repository-scoped
-`BRUNO_FOUNDER_CONTRACT_CI_SCENARIO_SIGNING_SECRET` for automated `ci` runs. That CI-only secret
-cannot authorize release-mode evidence; release dispatches use the protected environment secret
-above instead.
+The Founder Product Contract workflow creates a masked random HMAC key inside each automated `ci`
+job. The ephemeral key is never persisted and cannot authorize release-mode evidence; release
+dispatches use only the protected environment secret above.
 
 The canary provisions a job-scoped PostgreSQL service from a digest-pinned image and applies every
 repository migration before starting the control plane. The service is destroyed with the GitHub

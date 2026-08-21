@@ -32,10 +32,13 @@ describe("Founder Product Contract workflow", () => {
       "BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: $" +
         "{{ secrets.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET }}",
     );
+    expect(workflow).toContain("Bind an ephemeral CI signing authority");
+    expect(workflow).toContain('ci_signing_secret="$(openssl rand -hex 32)"');
+    expect(workflow).toContain('echo "::add-mask::$ci_signing_secret"');
     expect(workflow).toContain(
-      "BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: $" +
-        "{{ secrets.BRUNO_FOUNDER_CONTRACT_CI_SCENARIO_SIGNING_SECRET }}",
+      'echo "BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET=$ci_signing_secret" >> "$GITHUB_ENV"',
     );
+    expect(workflow).not.toContain("BRUNO_FOUNDER_CONTRACT_CI_SCENARIO_SIGNING_SECRET");
     expect(workflow).not.toContain(
       "secrets.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET || secrets.BRUNO_FOUNDER_CONTRACT_CI_SCENARIO_SIGNING_SECRET",
     );
