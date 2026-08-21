@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -33,11 +34,15 @@ await rm(generalReleaseDecisionPath, { force: true });
 const sourceRevision = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION");
 const observedAt = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_OBSERVED_AT");
 const runId = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID");
+const providerFailureRunId = `fpct-failure:${createHash("sha256").update(runId).digest("hex")}`;
 const runAttempt = requiredPositiveIntegerEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT");
 const scenarioSigningSecret = requiredEnvironment(
   FOUNDER_PRODUCT_CONTRACT_SCENARIO_SIGNING_SECRET_ENV,
 );
 const scenarioLedgerPath = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH");
+await rm(browserResultPath, { force: true });
+await rm(unitResultPath, { force: true });
+await rm(scenarioLedgerPath, { force: true });
 const deterministicProviderEnvironment = {
   BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE: "deterministic",
   BRUNO_FOUNDER_CONTRACT_COMMERCE_WEBHOOK_SECRET: "founder-contract-lemon-test-secret-v1",
@@ -76,6 +81,29 @@ await run(
     "--reporter=json",
     `--outputFile=${unitResultPath}`,
     ...FOUNDER_PRODUCT_CONTRACT_UNIT_FILES,
+  ],
+  deterministicProviderEnvironment,
+);
+
+await run(
+  [
+    "node_modules/.bin/playwright",
+    "test",
+    "tests/e2e/founder-product-contract-failure.spec.ts",
+    "--config=playwright.founder-contract-lifecycle.config.ts",
+  ],
+  {
+    ...deterministicProviderEnvironment,
+    BRUNO_FOUNDER_CONTRACT_RUN_ID: providerFailureRunId,
+  },
+);
+
+await run(
+  [
+    "node_modules/.bin/playwright",
+    "test",
+    "tests/e2e/founder-product-contract-lifecycle.spec.ts",
+    "--config=playwright.founder-contract-lifecycle.config.ts",
   ],
   deterministicProviderEnvironment,
 );

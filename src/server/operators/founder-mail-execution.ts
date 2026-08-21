@@ -140,11 +140,17 @@ export async function executeFounderApprovedGmailActionForUser(
         .orderBy(desc(operatorActionExecutionAttempts.attemptNumber))
         .limit(1);
       if (started) return { kind: "in_progress" as const };
-      const check = await recheckFounderProposedActionForExecution(tx, operator.id, action, now());
+      const checkedAt = now();
+      const check = await recheckFounderProposedActionForExecution(
+        tx,
+        operator.id,
+        action,
+        checkedAt,
+      );
       if (check.reason) throw new FounderMailExecutionError("execution_blocked", check.reason);
-      await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id);
+      await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id, checkedAt);
       const email = parseExactEmail(action.destination, action.materialContent);
-      const sending = await selectReadySending(tx, operator.id, now());
+      const sending = await selectReadySending(tx, operator.id, checkedAt);
       if (!sending) {
         throw new FounderMailExecutionError(
           "execution_blocked",
@@ -224,20 +230,26 @@ export async function executeFounderApprovedGmailActionForUser(
         .orderBy(desc(operatorActionExecutionAttempts.attemptNumber))
         .limit(1);
       if (existingStart) return { kind: "in_progress" as const };
-      await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id);
-      const check = await recheckFounderProposedActionForExecution(tx, operator.id, action, now());
+      const checkedAt = now();
+      await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id, checkedAt);
+      const check = await recheckFounderProposedActionForExecution(
+        tx,
+        operator.id,
+        action,
+        checkedAt,
+      );
       if (check.reason) {
         await tx
           .update(operatorProposedActions)
-          .set({ state: "blocked", updatedAt: now() })
+          .set({ state: "blocked", updatedAt: checkedAt })
           .where(eq(operatorProposedActions.id, action.id));
         throw new FounderMailExecutionError("execution_blocked", check.reason);
       }
-      const sending = await selectReadySending(tx, operator.id, now());
+      const sending = await selectReadySending(tx, operator.id, checkedAt);
       if (!sending) {
         await tx
           .update(operatorProposedActions)
-          .set({ state: "blocked", updatedAt: now() })
+          .set({ state: "blocked", updatedAt: checkedAt })
           .where(eq(operatorProposedActions.id, action.id));
         throw new FounderMailExecutionError(
           "execution_blocked",
@@ -267,7 +279,7 @@ export async function executeFounderApprovedGmailActionForUser(
         provider: GOOGLE_MAIL_SENDING_PROVIDER,
         messageIdentity,
         requestDigest: digest(rawMessage),
-        createdAt: now(),
+        createdAt: checkedAt,
       });
       return {
         kind: "started" as const,
@@ -592,6 +604,7 @@ async function assertFounderMailSubmissionStillReady(
   now: () => Date,
 ): Promise<void> {
   await connection.db.transaction(async (tx) => {
+    const checkedAt = now();
     const [action] = await tx
       .select()
       .from(operatorProposedActions)
@@ -604,10 +617,10 @@ async function assertFounderMailSubmissionStillReady(
       .limit(1);
     if (!action || action.version !== expectedVersion)
       throw new FounderMailExecutionError("execution_blocked", "The approved action changed.");
-    const check = await recheckFounderProposedActionForExecution(tx, operatorId, action, now());
+    const check = await recheckFounderProposedActionForExecution(tx, operatorId, action, checkedAt);
     if (check.reason) throw new FounderMailExecutionError("execution_blocked", check.reason);
-    await assertFounderExternalActionsNotPausedInTransaction(tx, operatorId);
-    const sending = await selectReadySending(tx, operatorId, now());
+    await assertFounderExternalActionsNotPausedInTransaction(tx, operatorId, checkedAt);
+    const sending = await selectReadySending(tx, operatorId, checkedAt);
     if (
       !sending ||
       sending.id !== started.sending.id ||

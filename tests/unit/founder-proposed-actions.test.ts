@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  founderCheckoutCorrelations,
+  founderCommerceEvents,
+  founderProductEntitlements,
   operatorActionAuthorizations,
   operatorActionDecisions,
   operatorAuthorityPolicies,
@@ -22,6 +25,7 @@ const OWNER_ID = "00000000-0000-4000-8000-000000003471";
 const OTHER_OWNER_ID = "00000000-0000-4000-8000-000000003472";
 const NOW = new Date("2026-08-19T04:00:00.000Z");
 const VALID_UNTIL = "2026-08-20T04:00:00.000Z";
+const CONTROLLED_DEADLINE = new Date("2099-01-01T00:00:00.000Z");
 
 describe("Founder Proposed Actions application seam", () => {
   let connection: DatabaseConnection;
@@ -129,6 +133,28 @@ describe("Founder Proposed Actions application seam", () => {
       claimFounderActionAuthorizationForUser(OWNER_ID, action.id, 1, {
         createConnection: () => connection,
         now: () => NOW,
+      }),
+    ).rejects.toMatchObject({ code: "external_action_paused", status: 409 });
+    const [authorization] = await connection.db.select().from(operatorActionAuthorizations);
+    expect(authorization?.claimedAt).toBeNull();
+  });
+
+  it("uses the captured claim time when Product Entitlement reaches its deadline", async () => {
+    const action = await createFounderProposedActionForUser(
+      OWNER_ID,
+      draft({ actionFamily: "external_communication", validUntil: "2100-01-01T00:00:00.000Z" }),
+      { createConnection: () => connection, now: () => NOW },
+    );
+    await decideFounderProposedActionForUser(OWNER_ID, action.id, "approve", 1, null, {
+      createConnection: () => connection,
+      now: () => NOW,
+    });
+    await insertPastDueEntitlement(connection);
+
+    await expect(
+      claimFounderActionAuthorizationForUser(OWNER_ID, action.id, 1, {
+        createConnection: () => connection,
+        now: () => CONTROLLED_DEADLINE,
       }),
     ).rejects.toMatchObject({ code: "external_action_paused", status: 409 });
     const [authorization] = await connection.db.select().from(operatorActionAuthorizations);
@@ -340,4 +366,42 @@ async function reset(connection: DatabaseConnection): Promise<void> {
   await connection.client.unsafe(
     "truncate table operator_action_authorizations, operator_action_decisions, operator_proposed_actions, operator_product_guardrails, operator_action_preview_revisions, operator_action_previews, operator_governance_receipts, operator_authority_policies, operator_processing_consents, operators, users restart identity cascade",
   );
+}
+
+async function insertPastDueEntitlement(connection: DatabaseConnection): Promise<void> {
+  const [correlation] = await connection.db
+    .insert(founderCheckoutCorrelations)
+    .values({
+      userId: OWNER_ID,
+      correlationDigest: `sha256:${"1".repeat(64)}`,
+      createdAt: NOW,
+      expiresAt: new Date("2100-01-01T00:00:00.000Z"),
+    })
+    .returning({ id: founderCheckoutCorrelations.id });
+  if (!correlation) throw new Error("entitlement correlation setup failed");
+  const [event] = await connection.db
+    .insert(founderCommerceEvents)
+    .values({
+      providerEventId: "proposed-action-deadline",
+      userId: OWNER_ID,
+      checkoutCorrelationId: correlation.id,
+      providerSubscriptionId: "subscription-proposed-action-deadline",
+      eventType: "subscription.past_due",
+      payloadDigest: `sha256:${"2".repeat(64)}`,
+      signatureVerified: true,
+      occurredAt: NOW,
+      recordedAt: NOW,
+    })
+    .returning({ id: founderCommerceEvents.id });
+  if (!event) throw new Error("entitlement event setup failed");
+  await connection.db.insert(founderProductEntitlements).values({
+    userId: OWNER_ID,
+    sourceEventId: event.id,
+    providerSubscriptionId: "subscription-proposed-action-deadline",
+    status: "past_due",
+    reconciledProviderStatus: "past_due",
+    reconciledAt: NOW,
+    retirementDueAt: CONTROLLED_DEADLINE,
+    updatedAt: NOW,
+  });
 }

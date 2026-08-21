@@ -76,7 +76,9 @@ Decisions, single-use Owner-bound Checkout Correlations, signature-verified and 
 Squeezy event receipts, reconciled Product Entitlements, 30-day restorable Recovery Archives,
 revoked runtime credentials, and exact-provider Infrastructure Retirement receipts. Provider
 subscription state applies bounded retirement deadlines and immediately pauses new work for unpaid,
-expired, and refunded entitlement. Verified archives that reach their 30-day expiry exercise a
+expired, and refunded entitlement. The Proposed Action claim and Gmail execution transactions pass
+their captured operation time into this entitlement guard, so the deadline controls the real effect
+path rather than only a policy helper. Verified archives that reach their 30-day expiry exercise a
 durable, idempotent deletion boundary that requires separate absence proof for the encrypted object
 and its recovery-only credential. Issue #372 does not schedule that destructive boundary in
 production; a later vertical slice must add the production worker and provider adapter. Delayed or
@@ -99,8 +101,11 @@ deleting a disposable lifecycle user cannot erase a failure. After each successf
 application commits a canonical scenario-execution receipt. Only the application can assemble and
 sign the complete exact-run ledger from those persisted receipts; the browser test copies that
 response to the producer's fixed artifact path without constructing results or using the signing
-authority. The ledger binds the
-canonical producer, source revision, workflow run ID, observation instant, results digest, and
+authority. The runner executes an isolated public provider-failure proof first, then one lifecycle
+producer under the candidate run identity, and finally the five-project browser and accessibility
+matrix without lifecycle mutations. Both the failed proof receipt and the candidate's four passing
+receipts survive disposable-user cleanup until the workflow database is destroyed. The ledger binds
+the canonical producer, source revision, workflow run ID, observation instant, results digest, and
 HMAC signature using the protected
 `BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET`; unsigned or caller-authored results are
 rejected. Cleanup is rebuilt from its five-field explicit allowlist before serialization. The contract

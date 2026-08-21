@@ -89,6 +89,7 @@ export const FOUNDER_PRODUCT_CONTRACT_UNIT_FILES = [
   "tests/unit/operator-access.test.ts",
   "tests/unit/founder-product-contract-application-evidence.test.ts",
   "tests/unit/founder-product-contract-candidate-history.test.ts",
+  "tests/unit/founder-product-contract-runner.test.ts",
   "tests/unit/founder-product-contract-evidence.test.ts",
   "tests/unit/founder-product-contract-workflow.test.ts",
   "tests/unit/founder-general-release-decision.test.ts",

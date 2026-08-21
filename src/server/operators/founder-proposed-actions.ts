@@ -763,7 +763,7 @@ export async function claimFounderActionAuthorizationForUser(
         throw new FounderProposedActionError("proposal_blocked", blockedReason, 409);
       }
       if (startsFounderExternalEffect(action)) {
-        await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id);
+        await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id, now);
       }
 
       const [claimed] = await tx

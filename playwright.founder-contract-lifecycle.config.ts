@@ -2,18 +2,18 @@ import { defineConfig, devices } from "@playwright/test";
 
 const port = Number(process.env.PORT ?? 3100);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${port}`;
-const resultPath =
-  process.env.BRUNO_FOUNDER_CONTRACT_BROWSER_RESULT ??
-  "founder-contract-artifacts/browser-results.json";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testMatch: ["founder-product-contract.spec.ts"],
+  testMatch: [
+    "founder-product-contract-lifecycle.spec.ts",
+    "founder-product-contract-failure.spec.ts",
+  ],
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,
   workers: 1,
-  reporter: [["list"], ["json", { outputFile: resultPath }]],
+  reporter: "list",
   use: {
     baseURL,
     screenshot: "off",
@@ -26,11 +26,5 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120_000,
   },
-  projects: [
-    { name: "desktop-chrome", use: { ...devices["Desktop Chrome"] } },
-    { name: "desktop-firefox", use: { ...devices["Desktop Firefox"] } },
-    { name: "desktop-safari", use: { ...devices["Desktop Safari"] } },
-    { name: "ios-safari", use: { ...devices["iPhone 13"] } },
-    { name: "android-chrome", use: { ...devices["Pixel 5"] } },
-  ],
+  projects: [{ name: "lifecycle-producer", use: { ...devices["Desktop Chrome"] } }],
 });
