@@ -993,10 +993,14 @@ export const founderRecoveryArchives = pgTable(
       .notNull()
       .references(() => operators.id),
     status: founderRecoveryArchiveStatusEnum("status").notNull(),
+    formatVersion: integer("format_version"),
     storageObjectKey: text("storage_object_key"),
+    recoveryCredentialObjectKey: text("recovery_credential_object_key"),
     ciphertextDigest: text("ciphertext_digest"),
     recoveryCredentialDigest: text("recovery_credential_digest"),
+    stateDigest: text("state_digest"),
     restorableVerified: boolean("restorable_verified").notNull(),
+    restoreVerifiedAt: timestamp("restore_verified_at", { withTimezone: true }),
     failureCode: text("failure_code"),
     observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -1006,7 +1010,7 @@ export const founderRecoveryArchives = pgTable(
   (table) => [
     check(
       "founder_recovery_archives_outcome_check",
-      sql`(${table.status} = 'pending' AND ${table.storageObjectKey} IS NULL AND ${table.ciphertextDigest} IS NULL AND ${table.recoveryCredentialDigest} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NULL) OR (${table.status} = 'verified' AND ${table.storageObjectKey} IS NOT NULL AND ${table.ciphertextDigest} IS NOT NULL AND ${table.recoveryCredentialDigest} IS NOT NULL AND ${table.restorableVerified} = true AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NULL) OR (${table.status} = 'failed' AND ${table.recoveryCredentialDigest} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NOT NULL AND ${table.deletedAt} IS NULL) OR (${table.status} = 'deleted' AND ${table.storageObjectKey} IS NULL AND ${table.recoveryCredentialDigest} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NOT NULL)`,
+      sql`(${table.status} = 'pending' AND ${table.ciphertextDigest} IS NULL AND ${table.recoveryCredentialDigest} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NULL AND ((${table.storageObjectKey} IS NULL AND ${table.recoveryCredentialObjectKey} IS NULL) OR (${table.storageObjectKey} IS NOT NULL AND ${table.recoveryCredentialObjectKey} IS NOT NULL))) OR (${table.status} = 'verified' AND ${table.storageObjectKey} IS NOT NULL AND ${table.ciphertextDigest} IS NOT NULL AND ${table.recoveryCredentialDigest} IS NOT NULL AND ${table.restorableVerified} = true AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NULL) OR (${table.status} = 'failed' AND ${table.recoveryCredentialDigest} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NOT NULL AND ${table.deletedAt} IS NULL) OR (${table.status} = 'deleted' AND ${table.storageObjectKey} IS NULL AND ${table.recoveryCredentialDigest} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NOT NULL)`,
     ),
     check(
       "founder_recovery_archives_ciphertext_digest_check",
@@ -1015,6 +1019,14 @@ export const founderRecoveryArchives = pgTable(
     check(
       "founder_recovery_archives_credential_digest_check",
       sql`${table.recoveryCredentialDigest} IS NULL OR ${table.recoveryCredentialDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_recovery_archives_state_digest_check",
+      sql`${table.stateDigest} IS NULL OR ${table.stateDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_recovery_archives_v1_verification_check",
+      sql`${table.formatVersion} IS NULL OR (${table.formatVersion} = 1 AND ${table.stateDigest} IS NOT NULL AND ${table.restoreVerifiedAt} IS NOT NULL AND ((${table.status} = 'verified' AND ${table.recoveryCredentialObjectKey} IS NOT NULL AND ${table.restorableVerified} = true) OR (${table.status} = 'deleted' AND ${table.recoveryCredentialObjectKey} IS NULL AND ${table.restorableVerified} = false)))`,
     ),
     check("founder_recovery_archives_expiry_check", sql`${table.expiresAt} > ${table.observedAt}`),
     index("founder_recovery_archives_user_observed_idx").on(table.userId, table.observedAt),

@@ -226,9 +226,9 @@ Additional validated tuning variables are documented inline in `.env.example` an
 ensure those images are available to the Droplet without relying on credentials that bootstrap
 does not install.
 
-### Backups
+### Object storage and Recovery Archives
 
-All five variables are required together to enable S3-compatible backup and restore:
+All five variables are required together to enable S3-compatible object storage:
 
 - `BRUNO_BACKUP_STORAGE_ENDPOINT_URL`
 - `BRUNO_BACKUP_STORAGE_BUCKET`
@@ -236,8 +236,29 @@ All five variables are required together to enable S3-compatible backup and rest
 - `BRUNO_BACKUP_STORAGE_ACCESS_KEY_ID`
 - `BRUNO_BACKUP_STORAGE_SECRET_ACCESS_KEY`
 
-Leaving all five unset disables object-backed backups without preventing the rest of the app from
-starting.
+Leaving all five unset disables object-backed manual backups without preventing the rest of the app
+from starting. Owner Preview and later Release Stages additionally require:
+
+- `BRUNO_RECOVERY_ARCHIVE_MASTER_KEY` — a dedicated, base64-encoded 32-byte key used only to wrap
+  per-archive recovery credentials.
+
+Configure the storage variables and master key together before admitting Owner Preview. Partial
+configuration fails closed. Do not reuse an Agent Secret, Connection Secret, cron secret, runner
+credential, or provider credential as this key.
+
+Recovery Archive buckets must have object versioning disabled. Bruno checks the live bucket
+versioning response before both creation and deletion and fails closed when permanent deletion
+cannot be proved; a delete marker over retained object versions does not satisfy the contract.
+
+Recovery Archives use the object store only as an off-Droplet transport. Their encrypted payload,
+separate wrapped recovery credential, authenticated restore check, 24-hour refresh boundary, and
+30-day deletion receipt are distinct from the manual backup manifest and from DigitalOcean
+snapshots. The protected `/api/internal/operator/recovery-archives` cron runs hourly, creates a new
+archive only when the current verified copy reaches 24 hours, and processes expiry even after a
+Release Hold or denied admission. Object identities are persisted before upload, so an interrupted
+or partially failed creation remains discoverable for bounded cleanup. A completed Infrastructure
+Retirement stops new daily copies while the final retained archive continues to its 30-day expiry;
+a later Release Decision can start protection again for a restored Operator.
 
 ## Deploy the control plane and runners
 
@@ -311,11 +332,23 @@ vercel env add BRUNO_AGENT_SECRET_KEYS_JSON production
 vercel env add CRON_SECRET production
 ```
 
-`vercel.json` schedules both `/api/internal/agent-deployments/reconcile` and
-`/api/internal/agent-runtime/reconcile` every minute. Each request must carry the exact cron secret
-as a bearer credential. Deployment recovery processes at most 25 due items under one shared
-40-second deadline; runtime convergence continues to claim at most one due row. Keep the value in
-Vercel; do not place it in a URL, log, or committed file.
+Before any Owner Preview admission, add all five object-storage variables plus the dedicated
+Recovery Archive master key through encrypted prompts:
+
+```sh
+vercel env add BRUNO_BACKUP_STORAGE_ENDPOINT_URL production
+vercel env add BRUNO_BACKUP_STORAGE_BUCKET production
+vercel env add BRUNO_BACKUP_STORAGE_REGION production
+vercel env add BRUNO_BACKUP_STORAGE_ACCESS_KEY_ID production
+vercel env add BRUNO_BACKUP_STORAGE_SECRET_ACCESS_KEY production
+vercel env add BRUNO_RECOVERY_ARCHIVE_MASTER_KEY production
+```
+
+`vercel.json` schedules deployment and runtime reconciliation every minute and Recovery Archive
+reconciliation hourly. Each request must carry the exact cron secret as a bearer credential.
+Deployment recovery processes at most 25 due items under one shared 40-second deadline; runtime
+convergence continues to claim at most one due row. Keep the value in Vercel; do not place it in a
+URL, log, or committed file.
 
 Leave `BRUNO_READY_AGENT_CREATION_ENABLED` unset during initial deployment. Add it with the exact
 value `true` only to the controlled environment after the authorized staging acceptance passes.

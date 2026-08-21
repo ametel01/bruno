@@ -2,6 +2,11 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import {
+  type BackupStorageUploadInput,
+  type DeletableBackupObjectStorage,
+  FakeBackupObjectStorage,
+} from "@/src/server/backups/backup-storage";
+import {
   DIGITALOCEAN_PROVIDER,
   FakeDigitalOceanProvider,
   type DigitalOceanOwnedSetExpectation,
@@ -11,7 +16,7 @@ import {
   type DigitalOceanOwnedSetDeleteResult,
 } from "@/src/server/runners/digitalocean-provider";
 import { digitalOceanRunnerFirewallName } from "@/src/server/runners/runner-provisioning";
-import { assertFounderRecoveryArchiveDeletionIdentity } from "./recovery-archive-provider";
+import { EncryptedFounderRecoveryArchiveProvider } from "./encrypted-recovery-archive-provider";
 import type { FounderCommerceStatus, FounderLifecycleProviderBoundary } from "./lifecycle";
 
 export type FounderLifecycleFailureOperation =
@@ -21,6 +26,7 @@ export type FounderLifecycleFailureOperation =
   | "google.verify_connection"
   | "lemonSqueezy.read_subscription"
   | "archive.create"
+  | "archive.corrupt"
   | "archive.delete"
   | "archive.delete_credentials"
   | "digitalOcean.observe_owned_resources"
@@ -30,6 +36,7 @@ export type FounderLifecycleFailureOperation =
 
 type ProviderState = {
   digitalOcean: FakeDigitalOceanProvider;
+  archiveStorage: FakeBackupObjectStorage;
   seededResourceIds: Set<string>;
 };
 
@@ -51,11 +58,24 @@ export function deterministicFounderLifecycleProviders(input: {
   const key = `${input.runId}:${input.userId}`;
   const state = registry.get(key) ?? {
     digitalOcean: new FakeDigitalOceanProvider({ now: () => input.now }),
+    archiveStorage: new FakeBackupObjectStorage("founder-product-contract-recovery"),
     seededResourceIds: new Set(),
   };
   registry.set(key, state);
   const calls: string[] = [];
   const failures = new Set(input.failures);
+  const archiveProvider = new EncryptedFounderRecoveryArchiveProvider({
+    storage: failures.has("archive.corrupt")
+      ? corruptingRecoveryArchiveStorage(state.archiveStorage, calls)
+      : state.archiveStorage,
+    masterKey: createHash("sha256").update(`founder-contract:${input.runId}`).digest(),
+    onOperation(operation) {
+      calls.push(operation);
+      if (operation === "archive.delete" || operation === "archive.delete_credentials") {
+        failIfConfigured(failures, operation);
+      }
+    },
+  });
 
   return {
     async authenticateIdentity({ userId }) {
@@ -80,29 +100,39 @@ export function deterministicFounderLifecycleProviders(input: {
       if (!subscriptionId) throw new Error("Subscription identity is required.");
       return { status: input.subscriptionStatus };
     },
-    async createRecoveryArchive({ archiveIntentId, userId, operatorId, observedAt }) {
+    async createRecoveryArchive(archiveInput) {
       calls.push("archive.create");
       failIfConfigured(failures, "archive.create");
-      const identity = `${archiveIntentId}:${input.runId}:${userId}:${operatorId}:${observedAt.toISOString()}`;
-      return {
-        storageObjectKey: `founder-recovery/${input.runId}/${archiveIntentId}.age`,
-        ciphertextDigest: `sha256:${createHash("sha256").update(identity).digest("hex")}`,
-        recoveryCredentialDigest: `sha256:${createHash("sha256")
-          .update(`recovery-credential:${identity}`)
-          .digest("hex")}`,
-        restorableVerified: true as const,
-      };
+      return archiveProvider.createRecoveryArchive(archiveInput);
     },
     async deleteRecoveryArchive(deletion) {
-      calls.push("archive.delete");
-      failIfConfigured(failures, "archive.delete");
-      assertFounderRecoveryArchiveDeletionIdentity(deletion);
-      calls.push("archive.delete_credentials");
-      failIfConfigured(failures, "archive.delete_credentials");
-      return { archiveAbsent: true, recoveryCredentialsAbsent: true };
+      return archiveProvider.deleteRecoveryArchive(deletion);
     },
     digitalOcean: ownedSetProvider(state, calls, failures, input.now),
     calls: () => [...calls],
+  };
+}
+
+function corruptingRecoveryArchiveStorage(
+  storage: FakeBackupObjectStorage,
+  calls: string[],
+): DeletableBackupObjectStorage {
+  return {
+    async upload(input: BackupStorageUploadInput) {
+      const result = await storage.upload(input);
+      if (result.ok && input.key.endsWith(".key")) {
+        calls.push("archive.corrupt");
+        await storage.upload({
+          key: input.key.replace(/\.key$/, ".age"),
+          body: new TextEncoder().encode("corrupt-recovery-archive"),
+        });
+      }
+      return result;
+    },
+    download: (input) => storage.download(input),
+    delete: (input) => storage.delete(input),
+    exists: (input) => storage.exists(input),
+    verifyDeletionSafety: () => storage.verifyDeletionSafety(),
   };
 }
 

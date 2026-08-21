@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   confirmTimezone: vi.fn(),
   ensureOperator: vi.fn(),
+  getRecoveryArchiveStatus: vi.fn(),
   prepareRuntime: vi.fn(),
   requireApplicationUser: vi.fn(),
 }));
@@ -45,6 +46,14 @@ describe("Founder Operator route", () => {
   beforeEach(() => {
     mocks.requireApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
     mocks.ensureOperator.mockResolvedValue(OPERATOR);
+    mocks.getRecoveryArchiveStatus.mockResolvedValue({
+      state: "current",
+      lastVerifiedAt: "2026-08-22T00:00:00.000Z",
+      restoreVerifiedAt: "2026-08-22T00:00:00.000Z",
+      nextArchiveDueAt: "2026-08-23T00:00:00.000Z",
+      retentionEndsAt: "2026-09-21T00:00:00.000Z",
+      deletion: null,
+    });
     mocks.confirmTimezone.mockResolvedValue({
       ...OPERATOR,
       preparation: {
@@ -95,6 +104,7 @@ describe("Founder Operator route", () => {
   afterEach(() => {
     mocks.confirmTimezone.mockReset();
     mocks.ensureOperator.mockReset();
+    mocks.getRecoveryArchiveStatus.mockReset();
     mocks.prepareRuntime.mockReset();
     mocks.requireApplicationUser.mockReset();
   });
@@ -102,13 +112,22 @@ describe("Founder Operator route", () => {
   it("returns the authenticated Owner's resumable Operator projection", async () => {
     const { GET } = await import("@/app/api/operator/route");
 
-    const response = await GET(new Request("http://localhost/api/operator"), undefined);
+    const response = await GET(new Request("http://localhost/api/operator"), undefined, {
+      getRecoveryArchiveStatus: mocks.getRecoveryArchiveStatus,
+    });
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(body).toEqual({ operator: OPERATOR });
+    expect(body).toEqual({
+      operator: OPERATOR,
+      recoveryArchive: expect.objectContaining({
+        state: "current",
+        restoreVerifiedAt: "2026-08-22T00:00:00.000Z",
+      }),
+    });
     expect(mocks.ensureOperator).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.getRecoveryArchiveStatus).toHaveBeenCalledWith(USER_ID, expect.any(Date));
   });
 
   it("confirms a plain-language timezone for the authenticated Owner", async () => {

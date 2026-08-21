@@ -24,7 +24,8 @@ describe("Founder Product Contract runner topology", () => {
   it("runs public provider-failure proof under an isolated identity and retains its receipt", () => {
     expect(runner).toContain("BRUNO_FOUNDER_CONTRACT_RUN_ID: providerFailureRunId");
     expect(runner.match(/founder-product-contract-failure\.spec\.ts/g)).toHaveLength(1);
-    expect(failureSpec).toContain('providerFailure: "clerk.authenticate"');
+    expect(failureSpec).toContain('providerFailure: "archive.create"');
+    expect(failureSpec).toContain('providerFailure: "archive.corrupt"');
     expect(failureSpec).toContain("retainScenarioExecutions: true");
     expect(failureSpec).toContain("exact candidate contains a failed lifecycle scenario");
   });

@@ -4,6 +4,7 @@ import {
   FounderOperatorTimezoneError,
 } from "@/src/server/operators/founder-operator";
 import { prepareFounderOperatorRuntimeForUser } from "@/src/server/operators/founder-operator-runtime";
+import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 type OperatorRouteDependencies = {
@@ -11,6 +12,7 @@ type OperatorRouteDependencies = {
   ensureOperator?: typeof ensureFounderOperatorForUser;
   confirmTimezone?: typeof confirmFounderTimezoneForUser;
   prepareRuntime?: typeof prepareFounderOperatorRuntimeForUser;
+  getRecoveryArchiveStatus?: typeof getFounderRecoveryArchiveStatusForUser;
 };
 
 type OperatorRouteContext = {
@@ -35,8 +37,11 @@ export async function GET(
   const operator = await (dependencies.ensureOperator ?? ensureFounderOperatorForUser)(
     applicationUser.userId,
   );
+  const recoveryArchive = await (
+    dependencies.getRecoveryArchiveStatus ?? getFounderRecoveryArchiveStatusForUser
+  )(applicationUser.userId, new Date());
 
-  return Response.json({ operator }, { headers: noStoreHeaders() });
+  return Response.json({ operator, recoveryArchive }, { headers: noStoreHeaders() });
 }
 
 export async function POST(

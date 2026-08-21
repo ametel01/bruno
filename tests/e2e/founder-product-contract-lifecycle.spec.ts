@@ -104,6 +104,29 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
               };
             };
             expect(body.outcome.providerCalls.length).toBeGreaterThan(0);
+            if (id === "release_stage_admission" || id === "recovery_archive_lifecycle") {
+              expect(body.outcome.providerCalls).toEqual(
+                expect.arrayContaining(["archive.encrypt", "archive.store", "archive.restore"]),
+              );
+              const statusResponse = await application.request({
+                method: "GET",
+                path: "/api/operator",
+              });
+              const statusBody = (await statusResponse.json()) as { recoveryArchive: unknown };
+              expect(statusResponse.status).toBe(200);
+              expect(statusBody.recoveryArchive).toMatchObject({
+                state: "current",
+                restoreVerifiedAt: clock.now().toISOString(),
+              });
+              expect(JSON.stringify(statusBody.recoveryArchive)).not.toMatch(
+                /objectKey|digest|credential|ciphertext/i,
+              );
+              if (id === "release_stage_admission") {
+                expect(body.outcome.providerCalls).toEqual(
+                  expect.arrayContaining(["archive.delete", "archive.delete_credentials"]),
+                );
+              }
+            }
             if (id === "infrastructure_retirement") {
               expect(body.outcome.cleanup).toMatchObject({
                 resourcesBefore: 2,

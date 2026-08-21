@@ -7,7 +7,7 @@ import {
   withPinnedFounderDevelopmentUser,
 } from "./founder-product-contract-fixture";
 
-test("a public provider failure remains a durable failed run after user cleanup", async ({
+test("unavailable Recovery Archive storage remains a durable failed run after user cleanup", async ({
   request,
 }) => {
   const clock = createFounderProductContractClock(
@@ -23,14 +23,14 @@ test("a public provider failure remains a durable failed run after user cleanup"
           action: "release_stage_admission",
           runId,
           now: clock.now().toISOString(),
-          providerFailure: "clerk.authenticate",
+          providerFailure: "archive.create",
         },
       });
       expect(failed.status()).toBe(409);
       await expect(failed.json()).resolves.toMatchObject({
         error: {
           code: "lifecycle_transition_failed",
-          message: "clerk.authenticate failed deterministically.",
+          message: "archive.create failed deterministically.",
         },
       });
 
@@ -55,6 +55,38 @@ test("a public provider failure remains a durable failed run after user cleanup"
       cleanup_verified: false,
     },
   ]);
+});
+
+test("a corrupt Recovery Archive fails admission before it can be certified", async ({
+  request,
+}) => {
+  const clock = createFounderProductContractClock(
+    requiredEnvironment("BRUNO_FOUNDER_CONTRACT_OBSERVED_AT"),
+  );
+  const runId = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID");
+  const fixture = await createFounderProductContractFixture(clock);
+
+  try {
+    await withPinnedFounderDevelopmentUser(fixture.userId, async () => {
+      const failed = await request.post("/api/operator/founder-product-contract/lifecycle", {
+        data: {
+          action: "release_stage_admission",
+          runId,
+          now: clock.now().toISOString(),
+          providerFailure: "archive.corrupt",
+        },
+      });
+      expect(failed.status()).toBe(409);
+      await expect(failed.json()).resolves.toMatchObject({
+        error: {
+          code: "lifecycle_transition_failed",
+          message: "Recovery Archive ciphertext digest did not match.",
+        },
+      });
+    });
+  } finally {
+    await deleteFounderProductContractFixture(fixture);
+  }
 });
 
 function requiredEnvironment(name: string): string {

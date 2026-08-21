@@ -18,9 +18,21 @@ export type BackupStorageDownloadResult =
   | { ok: true; storageUri: string; body: Uint8Array; contentType: string | null }
   | BackupStorageFailure;
 
+export type BackupStorageDeleteResult = { ok: true } | BackupStorageFailure;
+export type BackupStoragePresenceResult = { ok: true; exists: boolean } | BackupStorageFailure;
+export type BackupStorageDeletionSafetyResult =
+  | { ok: true; versioning: "disabled" }
+  | BackupStorageFailure;
+
 export type BackupObjectStorage = {
   upload(input: BackupStorageUploadInput): Promise<BackupStorageUploadResult>;
   download(input: BackupStorageDownloadInput): Promise<BackupStorageDownloadResult>;
+};
+
+export type DeletableBackupObjectStorage = BackupObjectStorage & {
+  delete(input: BackupStorageDownloadInput): Promise<BackupStorageDeleteResult>;
+  exists(input: BackupStorageDownloadInput): Promise<BackupStoragePresenceResult>;
+  verifyDeletionSafety(): Promise<BackupStorageDeletionSafetyResult>;
 };
 
 export type BackupStorageUploadInput = {
@@ -87,11 +99,13 @@ export function readBackupStorageConfig(
 
 export function createBackupObjectStorage(
   config = readBackupStorageConfig(),
-): BackupObjectStorage | null {
+): DeletableBackupObjectStorage | null {
   return config ? new S3CompatibleBackupObjectStorage(config) : null;
 }
 
-export function backupStorageFailure(operation: "upload" | "download"): BackupStorageFailure {
+export function backupStorageFailure(
+  operation: "upload" | "download" | "delete" | "exists" | "deletion_safety",
+): BackupStorageFailure {
   return {
     ok: false,
     status: "failed",
@@ -99,7 +113,7 @@ export function backupStorageFailure(operation: "upload" | "download"): BackupSt
   };
 }
 
-export class FakeBackupObjectStorage implements BackupObjectStorage {
+export class FakeBackupObjectStorage implements DeletableBackupObjectStorage {
   private readonly artifacts = new Map<string, StoredBackupArtifact>();
 
   constructor(private readonly bucket = "bruno-test-backups") {}
@@ -143,9 +157,26 @@ export class FakeBackupObjectStorage implements BackupObjectStorage {
       contentType: artifact.contentType,
     };
   }
+
+  async delete(input: BackupStorageDownloadInput): Promise<BackupStorageDeleteResult> {
+    const keyResult = validateBackupArtifactKey(input.key);
+    if (!keyResult.ok) return backupStorageFailure("delete");
+    this.artifacts.delete(keyResult.key);
+    return { ok: true };
+  }
+
+  async exists(input: BackupStorageDownloadInput): Promise<BackupStoragePresenceResult> {
+    const keyResult = validateBackupArtifactKey(input.key);
+    if (!keyResult.ok) return backupStorageFailure("exists");
+    return { ok: true, exists: this.artifacts.has(keyResult.key) };
+  }
+
+  async verifyDeletionSafety(): Promise<BackupStorageDeletionSafetyResult> {
+    return { ok: true, versioning: "disabled" };
+  }
 }
 
-export class S3CompatibleBackupObjectStorage implements BackupObjectStorage {
+export class S3CompatibleBackupObjectStorage implements DeletableBackupObjectStorage {
   private readonly endpoint: URL;
   private readonly fetchImplementation: FetchImplementation;
 
@@ -220,15 +251,64 @@ export class S3CompatibleBackupObjectStorage implements BackupObjectStorage {
     }
   }
 
+  async delete(input: BackupStorageDownloadInput): Promise<BackupStorageDeleteResult> {
+    const keyResult = validateBackupArtifactKey(input.key);
+    if (!keyResult.ok) return backupStorageFailure("delete");
+    try {
+      const response = await this.fetchImplementation(
+        this.createSignedRequest({ method: "DELETE", key: keyResult.key, body: new Uint8Array() }),
+      );
+      return response.ok ? { ok: true } : backupStorageFailure("delete");
+    } catch {
+      return backupStorageFailure("delete");
+    }
+  }
+
+  async exists(input: BackupStorageDownloadInput): Promise<BackupStoragePresenceResult> {
+    const keyResult = validateBackupArtifactKey(input.key);
+    if (!keyResult.ok) return backupStorageFailure("exists");
+    try {
+      const response = await this.fetchImplementation(
+        this.createSignedRequest({ method: "HEAD", key: keyResult.key, body: new Uint8Array() }),
+      );
+      if (response.status === 404) return { ok: true, exists: false };
+      return response.ok ? { ok: true, exists: true } : backupStorageFailure("exists");
+    } catch {
+      return backupStorageFailure("exists");
+    }
+  }
+
+  async verifyDeletionSafety(): Promise<BackupStorageDeletionSafetyResult> {
+    try {
+      const response = await this.fetchImplementation(
+        this.createSignedRequest({
+          method: "GET",
+          key: "",
+          query: "versioning=",
+          body: new Uint8Array(),
+        }),
+      );
+      if (!response.ok) return backupStorageFailure("deletion_safety");
+      const configuration = await response.text();
+      if (!isUnversionedBucketConfiguration(configuration)) {
+        return backupStorageFailure("deletion_safety");
+      }
+      return { ok: true, versioning: "disabled" };
+    } catch {
+      return backupStorageFailure("deletion_safety");
+    }
+  }
+
   private createSignedRequest(input: {
-    method: "GET" | "PUT";
+    method: "DELETE" | "GET" | "HEAD" | "PUT";
     key: string;
     body: Uint8Array;
     contentType?: string;
+    query?: string;
   }): Request {
     const url = new URL(this.endpoint);
     url.pathname = joinUrlPath(url.pathname, this.config.bucket, input.key);
-    url.search = "";
+    url.search = input.query ? `?${input.query}` : "";
 
     const now = new Date();
     const amzDate = toAmzDate(now);
@@ -253,7 +333,7 @@ export class S3CompatibleBackupObjectStorage implements BackupObjectStorage {
     const canonicalRequest = [
       input.method,
       url.pathname,
-      "",
+      input.query ?? "",
       canonicalHeaders,
       signedHeaders,
       payloadHash,
@@ -392,6 +472,15 @@ function isLoopbackHttp(url: URL): boolean {
   return (
     url.protocol === "http:" &&
     (url.hostname === "127.0.0.1" || url.hostname === "::1" || url.hostname === "localhost")
+  );
+}
+
+function isUnversionedBucketConfiguration(value: string): boolean {
+  const withoutDeclaration = value
+    .trim()
+    .replace(/^<\?xml\s+version="1\.0"(?:\s+encoding="UTF-8")?\s*\?>\s*/, "");
+  return /^<VersioningConfiguration(?: xmlns="http:\/\/s3\.amazonaws\.com\/doc\/2006-03-01\/")?\s*(?:\/>|>\s*<\/VersioningConfiguration>)$/.test(
+    withoutDeclaration,
   );
 }
 

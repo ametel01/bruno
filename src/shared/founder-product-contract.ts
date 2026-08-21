@@ -45,7 +45,12 @@ export const FOUNDER_PRODUCT_CONTRACT_INVARIANTS = [
   {
     id: "recovery_and_support",
     kind: "automated",
-    evidence: ["tests/unit/founder-recovery.test.ts", "tests/unit/founder-support.test.ts"],
+    evidence: [
+      "tests/unit/founder-recovery.test.ts",
+      "tests/unit/founder-recovery-archive-crypto.test.ts",
+      "tests/unit/founder-recovery-archive-lifecycle.test.ts",
+      "tests/unit/founder-support.test.ts",
+    ],
   },
   {
     id: "forbidden_technical_surfaces",
@@ -82,6 +87,9 @@ export const FOUNDER_PRODUCT_CONTRACT_UNIT_FILES = [
   "tests/unit/founder-deletion-db.test.ts",
   "tests/unit/founder-retention-db.test.ts",
   "tests/unit/founder-recovery-archive-provider.test.ts",
+  "tests/unit/founder-recovery-archive-crypto.test.ts",
+  "tests/unit/founder-recovery-archive-lifecycle.test.ts",
+  "tests/unit/founder-recovery-archive-route.test.ts",
   "tests/unit/founder-product-entitlement-policy-db.test.ts",
   "tests/unit/founder-product-entitlement-policy.test.ts",
   "tests/unit/founder-recovery.test.ts",

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import {
   founderRecoveryArchives,
@@ -14,7 +14,8 @@ export async function expireFounderRecoveryArchivesForUser(
   now: Date,
   providers: FounderRecoveryArchiveDeletionProvider,
   connection: DatabaseConnection,
-): Promise<void> {
+): Promise<number> {
+  let deletedCount = 0;
   while (true) {
     const work = await connection.db.transaction(async (tx) => {
       await tx.execute(
@@ -24,13 +25,14 @@ export async function expireFounderRecoveryArchivesForUser(
         .select({
           id: founderRecoveryArchives.id,
           storageObjectKey: founderRecoveryArchives.storageObjectKey,
-          recoveryCredentialDigest: founderRecoveryArchives.recoveryCredentialDigest,
+          recoveryCredentialObjectKey: founderRecoveryArchives.recoveryCredentialObjectKey,
         })
         .from(founderRecoveryArchives)
         .where(
           and(
             eq(founderRecoveryArchives.userId, userId),
-            eq(founderRecoveryArchives.status, "verified"),
+            inArray(founderRecoveryArchives.status, ["pending", "verified", "failed"]),
+            isNotNull(founderRecoveryArchives.storageObjectKey),
             lte(founderRecoveryArchives.expiresAt, now),
             isNull(founderRecoveryArchives.deletedAt),
           ),
@@ -38,7 +40,9 @@ export async function expireFounderRecoveryArchivesForUser(
         .orderBy(founderRecoveryArchives.expiresAt)
         .limit(1)
         .for("update");
-      if (!archive?.storageObjectKey || !archive.recoveryCredentialDigest) return null;
+      if (!archive?.storageObjectKey) return null;
+      const recoveryCredentialObjectKey =
+        archive.recoveryCredentialObjectKey ?? archive.storageObjectKey.replace(/\.age$/, ".key");
       const idempotencyKey = founderProductContractDigest(`recovery-archive-delete:${archive.id}`);
       const [existingDeletion] = await tx
         .select({
@@ -82,11 +86,11 @@ export async function expireFounderRecoveryArchivesForUser(
       return {
         archiveId: archive.id,
         storageObjectKey: archive.storageObjectKey,
-        recoveryCredentialDigest: archive.recoveryCredentialDigest,
+        recoveryCredentialObjectKey,
         idempotencyKey,
       };
     });
-    if (!work) return;
+    if (!work) return deletedCount;
     try {
       const deleted = await providers.deleteRecoveryArchive(work);
       if (!deleted.archiveAbsent || !deleted.recoveryCredentialsAbsent) {
@@ -98,6 +102,7 @@ export async function expireFounderRecoveryArchivesForUser(
           .set({
             status: "deleted",
             storageObjectKey: null,
+            recoveryCredentialObjectKey: null,
             recoveryCredentialDigest: null,
             restorableVerified: false,
             failureCode: null,
@@ -115,6 +120,7 @@ export async function expireFounderRecoveryArchivesForUser(
           })
           .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, work.archiveId));
       });
+      deletedCount += 1;
     } catch (error) {
       await connection.db
         .update(founderRecoveryArchiveDeletionReceipts)

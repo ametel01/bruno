@@ -75,14 +75,32 @@ state or authority. In deterministic mode the API installs stateful provider dou
 provider interfaces used by the lifecycle service. The service records immutable Release
 Decisions, single-use Owner-bound Checkout Correlations, signature-verified and idempotent Lemon
 Squeezy event receipts, reconciled Product Entitlements, 30-day restorable Recovery Archives,
-revoked runtime credentials, and exact-provider Infrastructure Retirement receipts. Provider
+revoked runtime credentials, and exact-provider Infrastructure Retirement receipts. A Recovery
+Archive is a strict v1 allowlist containing only the logical Operator identity, preparation
+timezone, non-secret runtime configuration revision, and an explicit restoration plan that requires
+provider reauthorization and contains zero reusable credentials. The payload is encrypted with a
+per-archive data key; that key is wrapped by the dedicated server-only master key and stored as a
+separate recovery-only object. The create operation downloads both objects immediately, verifies
+their digests and authenticated encryption, parses the strict allowlist, and rebuilds the eligible
+durable state before recording `restorable_verified`. A manifest or ciphertext-only check cannot
+satisfy this boundary. Provider
 subscription state applies bounded retirement deadlines and immediately pauses new work for unpaid,
 expired, and refunded entitlement. The Proposed Action claim and Gmail execution transactions pass
 their captured operation time into this entitlement guard, so the deadline controls the real effect
 path rather than only a policy helper. Verified archives that reach their 30-day expiry exercise a
 durable, idempotent deletion boundary that requires separate absence proof for the encrypted object
-and its recovery-only credential. Issue #372 does not schedule that destructive boundary in
-production; a later vertical slice must add the production worker and provider adapter. Delayed or
+and its recovery-only credential. The production adapter uses the configured S3-compatible object
+store under the reserved `founder-recovery/` namespace, while the hourly protected reconciler
+maintains at most one current verified archive per 24-hour window and processes expiry for retained
+archives even when the Owner is no longer eligible for new archives. Neither the manual backup
+manifest nor a DigitalOcean snapshot can enter the v1 archive state. Archive and recovery-credential
+deletion requires a live proof that bucket versioning is disabled, so a delete marker that leaves
+recoverable object versions cannot produce a completed receipt. Archive and recovery-credential
+object identities are persisted before provider upload, so interrupted, partial, and failed
+creations remain eligible for 30-day deletion and a bounded receipt rather than becoming orphaned
+objects. Completed Infrastructure Retirement ends daily replacement creation until later admission
+authority restores the Operator; the final retained archive still reaches the same expiry boundary.
+Delayed or
 reordered commerce events cannot replace newer authority or extend a retirement clock; reactivation
 requires a newly pending Owner-bound Checkout Correlation. DigitalOcean cleanup is derived from
 authoritative owned-set observations before and after firewall-first deletion. The in-progress

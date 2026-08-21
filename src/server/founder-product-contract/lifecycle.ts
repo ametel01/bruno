@@ -20,10 +20,7 @@ import { expireFounderRecoveryArchivesForUser } from "./archive-expiry";
 import { founderProductContractDigest } from "./digest";
 import { reconcileFounderCommerceEvent, requireRetirementDue } from "./entitlement";
 import { createDurableRecoveryArchive, fulfillRecoveryArchiveIntent } from "./recovery-archive";
-import type {
-  FounderRecoveryArchiveDeletionIdentity,
-  FounderRecoveryArchiveDeletionOutcome,
-} from "./recovery-archive-provider";
+import type { FounderRecoveryArchiveProvider } from "./recovery-archive-provider";
 
 export type FounderProductContractLifecycleAction =
   | "release_stage_admission"
@@ -49,7 +46,7 @@ export type FounderCommerceStatus =
   | "expired"
   | "refunded";
 
-export type FounderLifecycleProviderBoundary = {
+export type FounderLifecycleProviderBoundary = FounderRecoveryArchiveProvider & {
   authenticateIdentity(input: { userId: string }): Promise<{ subject: string }>;
   verifyCapabilityProviders(): Promise<{
     openAI: true;
@@ -57,20 +54,6 @@ export type FounderLifecycleProviderBoundary = {
     google: true;
   }>;
   readSubscription(input: { subscriptionId: string }): Promise<{ status: FounderCommerceStatus }>;
-  createRecoveryArchive(input: {
-    archiveIntentId: string;
-    userId: string;
-    operatorId: string;
-    observedAt: Date;
-  }): Promise<{
-    storageObjectKey: string;
-    ciphertextDigest: `sha256:${string}`;
-    recoveryCredentialDigest: `sha256:${string}`;
-    restorableVerified: true;
-  }>;
-  deleteRecoveryArchive(
-    input: FounderRecoveryArchiveDeletionIdentity,
-  ): Promise<FounderRecoveryArchiveDeletionOutcome>;
   digitalOcean: DigitalOceanOwnedSetProvider;
   calls(): readonly string[];
 };

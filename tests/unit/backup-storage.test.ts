@@ -59,6 +59,21 @@ describe("backup object storage boundary", () => {
     }
 
     expect(new TextDecoder().decode(downloadedAgain.body)).toBe("backup artifact");
+    await expect(storage.exists({ key: "agents/agent-1/backup.json" })).resolves.toEqual({
+      ok: true,
+      exists: true,
+    });
+    await expect(storage.delete({ key: "agents/agent-1/backup.json" })).resolves.toEqual({
+      ok: true,
+    });
+    await expect(storage.exists({ key: "agents/agent-1/backup.json" })).resolves.toEqual({
+      ok: true,
+      exists: false,
+    });
+    await expect(storage.verifyDeletionSafety()).resolves.toEqual({
+      ok: true,
+      versioning: "disabled",
+    });
   });
 
   it("maps missing artifacts and invalid keys to safe backup failures", async () => {
@@ -143,8 +158,20 @@ describe("backup object storage boundary", () => {
 
         requests.push(request);
 
+        if (new URL(request.url).searchParams.has("versioning")) {
+          return new Response("<VersioningConfiguration />", { status: 200 });
+        }
+
         if (request.method === "PUT") {
           return new Response(null, { status: 200 });
+        }
+
+        if (request.method === "HEAD") {
+          return new Response(null, { status: 200 });
+        }
+
+        if (request.method === "DELETE") {
+          return new Response(null, { status: 204 });
         }
 
         return new Response("stored artifact", {
@@ -152,6 +179,11 @@ describe("backup object storage boundary", () => {
           headers: { "content-type": "application/json" },
         });
       },
+    });
+
+    await expect(storage.verifyDeletionSafety()).resolves.toEqual({
+      ok: true,
+      versioning: "disabled",
     });
 
     await expect(
@@ -179,10 +211,20 @@ describe("backup object storage boundary", () => {
     }
 
     expect(new TextDecoder().decode(downloaded.body)).toBe("stored artifact");
-    expect(requests).toHaveLength(2);
+    await expect(storage.exists({ key: "agents/agent-1/backup.json" })).resolves.toEqual({
+      ok: true,
+      exists: true,
+    });
+    await expect(storage.delete({ key: "agents/agent-1/backup.json" })).resolves.toEqual({
+      ok: true,
+    });
+    expect(requests).toHaveLength(5);
     expect(requests.map((request) => [request.method, request.url])).toEqual([
+      ["GET", "https://nyc3.digitaloceanspaces.com/bruno-backups/?versioning="],
       ["PUT", "https://nyc3.digitaloceanspaces.com/bruno-backups/agents/agent-1/backup.json"],
       ["GET", "https://nyc3.digitaloceanspaces.com/bruno-backups/agents/agent-1/backup.json"],
+      ["HEAD", "https://nyc3.digitaloceanspaces.com/bruno-backups/agents/agent-1/backup.json"],
+      ["DELETE", "https://nyc3.digitaloceanspaces.com/bruno-backups/agents/agent-1/backup.json"],
     ]);
 
     const serializedRequests = JSON.stringify(
@@ -198,6 +240,25 @@ describe("backup object storage boundary", () => {
     expect(serializedRequests).not.toContain("backup-secret-key");
     expect(JSON.stringify([downloaded])).not.toContain("backup-access-key");
     expect(JSON.stringify([downloaded])).not.toContain("backup-secret-key");
+  });
+
+  it("rejects versioned buckets because object DELETE cannot prove permanent absence", async () => {
+    for (const unsafeResponse of [
+      "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>",
+      "<VersioningConfiguration><Status>Suspended</Status></VersioningConfiguration>",
+      "",
+      "<html>unexpected provider response</html>",
+      "<VersioningConfiguration>",
+      "<s3:VersioningConfiguration><s3:Status>Enabled</s3:Status></s3:VersioningConfiguration>",
+    ]) {
+      const storage = new S3CompatibleBackupObjectStorage(COMPLETE_ENV_CONFIG, {
+        fetchImplementation: async () => new Response(unsafeResponse, { status: 200 }),
+      });
+
+      await expect(storage.verifyDeletionSafety()).resolves.toEqual(
+        backupStorageFailure("deletion_safety"),
+      );
+    }
   });
 
   it("maps thrown S3-compatible storage failures to safe statuses and messages", async () => {

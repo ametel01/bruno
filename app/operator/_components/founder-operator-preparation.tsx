@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FounderMailConnectionDto } from "@/src/server/operators/founder-mail-connection";
 import type { FounderOnboardingDto } from "@/src/server/operators/founder-onboarding";
 import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
+import type { FounderRecoveryArchiveStatusDto } from "@/src/server/founder-product-contract/recovery-archive";
 import {
   DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
   type FounderTimezoneOption,
@@ -22,6 +23,7 @@ import { FounderRelationships } from "./founder-relationships";
 export function FounderOperatorPreparation({
   initialOperator,
   initialOnboarding,
+  initialRecoveryArchive,
   timezoneOptions = DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
   openAiReleased = false,
   calendarReadingReleased = false,
@@ -31,6 +33,7 @@ export function FounderOperatorPreparation({
 }: {
   initialOperator: FounderOperatorDto;
   initialOnboarding?: FounderOnboardingDto;
+  initialRecoveryArchive?: FounderRecoveryArchiveStatusDto;
   timezoneOptions?: ReadonlyArray<FounderTimezoneOption>;
   openAiReleased?: boolean;
   calendarReadingReleased?: boolean;
@@ -352,6 +355,45 @@ export function FounderOperatorPreparation({
 
       {runtimeReady ? <FounderRelationships /> : null}
 
+      {initialRecoveryArchive ? (
+        <section className={styles.card} aria-labelledby="protected-recovery-title">
+          <div className={styles.cardHeading}>
+            <div>
+              <p className={styles.kicker}>Protected recovery</p>
+              <h3 id="protected-recovery-title">
+                {recoveryArchiveHeading(initialRecoveryArchive.state)}
+              </h3>
+            </div>
+            <span className={styles.confirmed}>
+              {recoveryArchiveBadge(initialRecoveryArchive.state)}
+            </span>
+          </div>
+          <p className={styles.hint}>
+            {initialRecoveryArchive.state === "failed" ||
+            initialRecoveryArchive.state === "unavailable"
+              ? "Bruno could not verify current recovery protection. Connected provider access is never copied."
+              : "Bruno keeps a daily encrypted Recovery Archive outside the private workspace and proves it can rebuild the saved Operator state. Connected provider access is never copied and must be authorized again after a restore."}
+          </p>
+          {initialRecoveryArchive.restoreVerifiedAt ? (
+            <p className={styles.hint}>
+              Last restore check: {formatRecoveryDate(initialRecoveryArchive.restoreVerifiedAt)}.
+              Copies expire automatically after 30 days.
+            </p>
+          ) : null}
+          {initialRecoveryArchive.deletion?.status === "completed" ? (
+            <p className={styles.hint}>
+              The last expired Recovery Archive and its recovery access were safely deleted.
+            </p>
+          ) : null}
+          {initialRecoveryArchive.deletion?.status === "pending" ? (
+            <p className={styles.hint}>Expired Recovery Archive deletion is being verified.</p>
+          ) : null}
+          {initialRecoveryArchive.deletion?.status === "failed" ? (
+            <p className={styles.hint}>Expired Recovery Archive deletion needs attention.</p>
+          ) : null}
+        </section>
+      ) : null}
+
       <section className={styles.resume} aria-labelledby="resume-title">
         <p className={styles.kicker}>Safe to resume</p>
         <h3 id="resume-title">Your progress is saved</h3>
@@ -395,4 +437,25 @@ function capabilityLabel(state: FounderOnboardingDto["capabilities"]["ai"]): str
     deferred: "Deferred",
     not_offered: "Not offered",
   }[state];
+}
+
+function formatRecoveryDate(value: string): string {
+  return new Intl.DateTimeFormat("en", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(new Date(value));
+}
+
+function recoveryArchiveHeading(state: FounderRecoveryArchiveStatusDto["state"]): string {
+  return {
+    current: "Recovery Archive verified",
+    due: "Recovery Archive verification is due",
+    failed: "Recovery Archive needs attention",
+    unavailable: "Recovery Archive unavailable",
+  }[state];
+}
+
+function recoveryArchiveBadge(state: FounderRecoveryArchiveStatusDto["state"]): string {
+  return { current: "Current", due: "Due", failed: "Attention", unavailable: "Unavailable" }[state];
 }

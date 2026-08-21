@@ -11,6 +11,7 @@ import {
 } from "@/src/server/operators/founder-mail-connection";
 import { getFounderOnboardingForUser } from "@/src/server/operators/founder-onboarding";
 import { isFounderOpenAiReleased } from "@/src/server/operators/founder-openai-release";
+import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import { buildFounderTimezoneOptions } from "@/src/shared/founder-timezones";
@@ -32,7 +33,10 @@ export default async function FounderOperatorPage() {
   }
 
   const operator = await ensureFounderOperatorForUser(applicationUser.userId);
-  const onboarding = await getFounderOnboardingForUser(applicationUser.userId);
+  const [onboarding, recoveryArchive] = await Promise.all([
+    getFounderOnboardingForUser(applicationUser.userId),
+    getFounderRecoveryArchiveStatusForUser(applicationUser.userId, new Date()),
+  ]);
   const calendarReadingReleased = isFounderGoogleCalendarReleased();
   const mailReadingReleased = isFounderGoogleMailReadingReleased();
   const mailSendingReleased = isFounderGoogleMailSendingReleased();
@@ -43,6 +47,7 @@ export default async function FounderOperatorPage() {
       <FounderOperatorPreparation
         initialOperator={operator}
         initialOnboarding={onboarding}
+        initialRecoveryArchive={recoveryArchive}
         timezoneOptions={buildFounderTimezoneOptions()}
         openAiReleased={openAiReleased}
         calendarReadingReleased={calendarReadingReleased}

@@ -113,6 +113,57 @@ describe("Founder Operator preparation shell", () => {
     expect(html).toContain("Your progress is saved");
   });
 
+  it("shows restore verification without exposing archive mechanics or credentials", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: OPERATOR,
+        initialRecoveryArchive: {
+          state: "current",
+          lastVerifiedAt: "2026-08-22T00:00:00.000Z",
+          restoreVerifiedAt: "2026-08-22T00:00:00.000Z",
+          nextArchiveDueAt: "2026-08-23T00:00:00.000Z",
+          retentionEndsAt: "2026-09-21T00:00:00.000Z",
+          deletion: {
+            status: "completed",
+            attemptedAt: "2026-08-22T00:00:00.000Z",
+            completedAt: "2026-08-22T00:00:01.000Z",
+          },
+        },
+      }),
+    );
+
+    expect(html).toContain("Protected recovery");
+    expect(html).toContain("Recovery Archive verified");
+    expect(html).toContain("provider access is never copied");
+    expect(html).toContain("were safely deleted");
+    expect(html).not.toMatch(/object key|ciphertext|credential digest|storage bucket/i);
+  });
+
+  it("distinguishes unavailable protection and a failed expiry deletion", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: OPERATOR,
+        initialRecoveryArchive: {
+          state: "unavailable",
+          lastVerifiedAt: null,
+          restoreVerifiedAt: null,
+          nextArchiveDueAt: null,
+          retentionEndsAt: null,
+          deletion: {
+            status: "failed",
+            attemptedAt: "2026-08-22T00:00:00.000Z",
+            completedAt: null,
+          },
+        },
+      }),
+    );
+
+    expect(html).toContain("Recovery Archive unavailable");
+    expect(html).toContain("Unavailable");
+    expect(html).toContain("deletion needs attention");
+    expect(html).not.toContain("Recovery Archive is being prepared");
+  });
+
   it("anchors the next incomplete onboarding step in the Founder workspace", () => {
     const html = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {

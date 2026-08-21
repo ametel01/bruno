@@ -31,6 +31,7 @@ const FAILURE_OPERATIONS = new Set<FounderLifecycleFailureOperation>([
   "google.verify_connection",
   "lemonSqueezy.read_subscription",
   "archive.create",
+  "archive.corrupt",
   "archive.delete",
   "archive.delete_credentials",
   "digitalOcean.observe_owned_resources",
