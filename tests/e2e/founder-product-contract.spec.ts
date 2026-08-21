@@ -6,7 +6,7 @@ import {
   createFounderProductContractClock,
   createFounderProductContractHarness,
   createFounderProductContractProviderDoubles,
-  runFounderProductContractScenario,
+  runFounderProductContractPublicScenario,
   type FounderProductContractClock,
 } from "@/src/testing/founder-product-contract";
 
@@ -40,7 +40,7 @@ test("one persisted Operator scenario drives API, browser, keyboard, and accessi
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
   try {
-    await runFounderProductContractScenario(harness, async ({ application }) => {
+    await runFounderProductContractPublicScenario(harness, async ({ application }) => {
       await withPinnedDevelopmentUser(fixture.userId, async () => {
         const apiResponse = await application.request({ method: "GET", path: "/api/operator" });
         expect(apiResponse.status).toBe(200);

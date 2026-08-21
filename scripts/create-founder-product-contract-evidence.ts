@@ -8,7 +8,9 @@ import {
   FOUNDER_PRODUCT_CONTRACT_SCHEMA_VERSION,
 } from "@/src/shared/founder-product-contract";
 import {
-  type FounderProductContractScenarioResult,
+  type FounderProductContractScenarioLedger,
+  sanitizeFounderProductContractScenarioResult,
+  verifyFounderProductContractScenarioLedger,
   validateFounderProductContractScenarios,
 } from "@/src/testing/founder-product-contract";
 
@@ -49,8 +51,8 @@ export async function createFounderProductContractEvidence(input: {
   talkBackDigest?: string;
   talkBackOsVersion?: string;
   talkBackBrowserVersion?: string;
-  scenarioResults?: readonly FounderProductContractScenarioResult[];
-  scenarioMaxAgeMilliseconds?: number;
+  scenarioLedger: FounderProductContractScenarioLedger;
+  scenarioSigningSecret: string;
 }): Promise<FounderProductContractEvidence> {
   const browser = JSON.parse(await readFile(input.browserResultPath, "utf8")) as PlaywrightResult;
   const unit = JSON.parse(await readFile(input.unitResultPath, "utf8")) as VitestResult;
@@ -70,8 +72,8 @@ export function buildFounderProductContractEvidence(input: {
   talkBackDigest?: string;
   talkBackOsVersion?: string;
   talkBackBrowserVersion?: string;
-  scenarioResults?: readonly FounderProductContractScenarioResult[];
-  scenarioMaxAgeMilliseconds?: number;
+  scenarioLedger: FounderProductContractScenarioLedger;
+  scenarioSigningSecret: string;
 }) {
   requirePattern(input.sourceRevision, /^[a-f0-9]{40}$/, "source revision");
   requirePattern(input.runId, /^[A-Za-z0-9._:-]{1,128}$/, "run ID");
@@ -127,33 +129,31 @@ export function buildFounderProductContractEvidence(input: {
   if (input.mode === "release" && (!voiceOverEvidence || !talkBackEvidence)) {
     throw new Error("Release evidence requires bound VoiceOver and TalkBack evidence digests.");
   }
-  if (
-    input.mode === "release" &&
-    (!input.scenarioResults ||
-      input.scenarioResults.length !== FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS.length)
-  ) {
-    throw new Error("Release evidence requires every lifecycle scenario result.");
+  if (!input.scenarioLedger) {
+    throw new Error("Founder Product Contract evidence requires a signed lifecycle ledger.");
   }
-
-  const scenarioEvidence = input.scenarioResults
-    ? (() => {
-        validateFounderProductContractScenarios({
-          required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
-          results: input.scenarioResults,
-          sourceRevision: input.sourceRevision,
-          observedAt: input.observedAt,
-          ...(input.scenarioMaxAgeMilliseconds === undefined
-            ? {}
-            : { maxAgeMilliseconds: input.scenarioMaxAgeMilliseconds }),
-        });
-        return input.scenarioResults.map(({ id, status, attempts, cleanup }) => ({
-          id,
-          status,
-          attempts,
-          cleanup,
-        }));
-      })()
-    : undefined;
+  const scenarioLedger = verifyFounderProductContractScenarioLedger({
+    ledger: input.scenarioLedger,
+    sourceRevision: input.sourceRevision,
+    runId: input.runId,
+    observedAt: input.observedAt,
+    signingSecret: input.scenarioSigningSecret,
+  });
+  validateFounderProductContractScenarios({
+    required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
+    results: scenarioLedger.results,
+    sourceRevision: input.sourceRevision,
+    observedAt: input.observedAt,
+  });
+  const scenarioEvidence = scenarioLedger.results.map((result) => {
+    const sanitized = sanitizeFounderProductContractScenarioResult(result);
+    return {
+      id: sanitized.id,
+      status: sanitized.status,
+      attempts: sanitized.attempts,
+      cleanup: sanitized.cleanup,
+    };
+  });
 
   const invariantResults = FOUNDER_PRODUCT_CONTRACT_INVARIANTS.map((invariant) => {
     if (invariant.id === "voiceover_safari") {
@@ -184,9 +184,7 @@ export function buildFounderProductContractEvidence(input: {
     schemaVersion: FOUNDER_PRODUCT_CONTRACT_SCHEMA_VERSION,
     mode: input.mode,
     result: "passed",
-    releaseEligible: Boolean(
-      input.mode === "release" && voiceOverEvidence && talkBackEvidence && scenarioEvidence,
-    ),
+    releaseEligible: Boolean(input.mode === "release" && voiceOverEvidence && talkBackEvidence),
     releaseIdentity: {
       sourceRevision: input.sourceRevision,
       runId: input.runId,
@@ -205,6 +203,14 @@ export function buildFounderProductContractEvidence(input: {
     },
     invariants: invariantResults,
     ...(scenarioEvidence ? { scenarios: scenarioEvidence } : {}),
+    scenarioLedger: {
+      producer: scenarioLedger.producer,
+      sourceRevision: scenarioLedger.sourceRevision,
+      runId: scenarioLedger.runId,
+      observedAt: scenarioLedger.observedAt,
+      resultsDigest: scenarioLedger.resultsDigest,
+      signature: scenarioLedger.signature,
+    },
     ...(scenarioEvidence
       ? {
           cleanup: {

@@ -8,6 +8,7 @@
 export * from "./founder-product-contract/application";
 export * from "./founder-product-contract/clock";
 export * from "./founder-product-contract/harness";
+export * from "./founder-product-contract/ledger";
 export * from "./founder-product-contract/providers";
 export * from "./founder-product-contract/scenarios";
 export * from "./founder-product-contract/types";

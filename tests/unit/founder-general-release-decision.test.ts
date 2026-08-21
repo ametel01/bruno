@@ -9,9 +9,11 @@ import {
   FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS,
   FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
 } from "@/src/shared/founder-product-contract";
+import { createFounderProductContractScenarioLedger } from "@/src/testing/founder-product-contract";
 
 const REVISION = "a".repeat(40);
 const DIGEST = `sha256:${"b".repeat(64)}`;
+const SIGNING_SECRET = "founder-contract-test-secret";
 
 describe("Founder Initial General Release decision", () => {
   it("denies a CI artifact without attended usability, accessibility, or provider evidence", () => {
@@ -134,22 +136,16 @@ function productContract(mode: "ci" | "release") {
     runId: "release-370",
     mode,
     observedAt: "2026-08-20T12:00:00.000Z",
+    scenarioLedger: createFounderProductContractScenarioLedger({
+      sourceRevision: REVISION,
+      runId: "release-370",
+      observedAt: "2026-08-20T12:00:00.000Z",
+      results: lifecycleScenarioResults(),
+      signingSecret: SIGNING_SECRET,
+    }),
+    scenarioSigningSecret: SIGNING_SECRET,
     ...(mode === "release"
       ? {
-          scenarioResults: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS.map((id) => ({
-            id,
-            status: "passed" as const,
-            attempts: 1,
-            sourceRevision: REVISION,
-            observedAt: "2026-08-20T12:00:00.000Z",
-            cleanup: {
-              status: "passed" as const,
-              verified: true,
-              resourcesBefore: id === "infrastructure_retirement" ? 2 : 0,
-              resourcesAfter: 0,
-              observedAt: "2026-08-20T12:00:00.000Z",
-            },
-          })),
           voiceOverDigest: DIGEST,
           voiceOverOsVersion: "macOS 15.6",
           voiceOverBrowserVersion: "Safari 26.0",
@@ -159,6 +155,23 @@ function productContract(mode: "ci" | "release") {
         }
       : {}),
   });
+}
+
+function lifecycleScenarioResults() {
+  return FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS.map((id) => ({
+    id,
+    status: "passed" as const,
+    attempts: 1,
+    sourceRevision: REVISION,
+    observedAt: "2026-08-20T12:00:00.000Z",
+    cleanup: {
+      status: "passed" as const,
+      verified: true,
+      resourcesBefore: id === "infrastructure_retirement" ? 2 : 0,
+      resourcesAfter: 0,
+      observedAt: "2026-08-20T12:00:00.000Z",
+    },
+  }));
 }
 
 function moderatedSummary() {

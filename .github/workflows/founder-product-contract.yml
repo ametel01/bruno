@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: CI proves automated invariants; release also requires attended AT digests
+        description: Both modes require signed lifecycle evidence; release also requires attended AT digests
         required: true
         default: ci
         type: choice
@@ -46,8 +46,8 @@ on:
         description: Exact-revision provider outcomes and evidence digests
         required: false
         type: string
-      lifecycle_scenario_results_json:
-        description: Allowlisted results emitted by a real persisted Founder lifecycle contract run
+      lifecycle_scenario_ledger_json:
+        description: Signed ledger emitted by the real persisted Founder lifecycle contract run
         required: false
         type: string
 
@@ -65,6 +65,7 @@ jobs:
     name: Exact-release Founder contract
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: ${{ inputs.mode == 'release' && 'runner-release-canary' || 'ci' }}
 
     services:
       postgres:
@@ -98,7 +99,7 @@ jobs:
       BRUNO_FOUNDER_CONTRACT_TALKBACK_BROWSER_VERSION: ${{ inputs.talkback_browser_version }}
       BRUNO_FOUNDER_MODERATED_SUMMARY_JSON: ${{ inputs.moderated_founder_summary_json }}
       BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON: ${{ inputs.provider_decision_summary_json }}
-      BRUNO_FOUNDER_CONTRACT_SCENARIO_RESULTS_JSON: ${{ inputs.lifecycle_scenario_results_json }}
+      BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_JSON: ${{ inputs.lifecycle_scenario_ledger_json }}
 
     steps:
       - name: Check out exact release candidate
@@ -122,6 +123,8 @@ jobs:
         run: echo "BRUNO_FOUNDER_CONTRACT_OBSERVED_AT=$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" >> "$GITHUB_ENV"
 
       - name: Run all-or-nothing Founder Product Contract
+        env:
+          BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: ${{ inputs.mode == 'release' && secrets.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET || secrets.BRUNO_FOUNDER_CONTRACT_CI_SCENARIO_SIGNING_SECRET }}
         run: bun run founder:contract
 
       - name: Attest the allowlisted exact-release summary

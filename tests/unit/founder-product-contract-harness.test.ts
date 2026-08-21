@@ -4,7 +4,7 @@ import {
   createFounderProductContractHarness,
   createFounderProductContractProviderDoubles,
   providerFailure,
-  runRecordedFounderProductContractScenario,
+  runFounderProductContractPublicScenario,
   runFounderProductContractScenario,
   validateFounderProductContractScenarios,
 } from "@/src/testing/founder-product-contract";
@@ -94,7 +94,7 @@ describe("Founder Product Contract deterministic seam", () => {
       },
     });
 
-    await runFounderProductContractScenario(harness, async ({ application, clock }) => {
+    await runFounderProductContractPublicScenario(harness, async ({ application, clock }) => {
       const response = await application.request({ method: "GET", path: "/api/operator" });
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ state: "persisted" });
@@ -149,7 +149,7 @@ describe("Founder Product Contract deterministic seam", () => {
     });
 
     for (const id of FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS) {
-      await runRecordedFounderProductContractScenario(harness, id, async ({ application }) => {
+      await runFounderProductContractScenario(harness, id, async ({ application }) => {
         const response = await application.request({ method: "GET", path: "/api/operator" });
         expect(response.status).toBe(200);
         return {
@@ -209,6 +209,23 @@ describe("Founder Product Contract deterministic seam", () => {
         observedAt: "2026-01-01T00:00:00.000Z",
       }),
     ).toThrow("is stale");
+    expect(() =>
+      validateFounderProductContractScenarios({
+        required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
+        results: [
+          {
+            ...firstResult,
+            cleanup: {
+              ...firstResult.cleanup,
+              observedAt: "2025-12-31T00:00:00.000Z",
+            },
+          },
+          ...harness.scenarioResults.slice(1),
+        ],
+        sourceRevision,
+        observedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toThrow("cleanup was stale");
     expect(() =>
       validateFounderProductContractScenarios({
         required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,

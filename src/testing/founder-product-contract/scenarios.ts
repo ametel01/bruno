@@ -9,10 +9,12 @@ import type {
 
 export const FOUNDER_PRODUCT_CONTRACT_DEFAULT_SCENARIO_MAX_AGE_MILLISECONDS = 15 * 60 * 1000;
 
-export async function runFounderProductContractScenario<T>(
+export async function runFounderProductContractPublicScenario<T>(
   harness: FounderProductContractHarness,
   scenario: (harness: FounderProductContractHarness) => Promise<T> | T,
-): Promise<T>;
+): Promise<T> {
+  return scenario(harness);
+}
 
 export async function runFounderProductContractScenario(
   harness: FounderProductContractHarness,
@@ -22,25 +24,7 @@ export async function runFounderProductContractScenario(
   ) => Promise<FounderProductContractCleanupOutcome> | FounderProductContractCleanupOutcome,
 ): Promise<FounderProductContractScenarioResult>;
 
-export async function runFounderProductContractScenario<T>(
-  harness: FounderProductContractHarness,
-  idOrScenario:
-    | FounderProductContractLifecycleScenario
-    | ((harness: FounderProductContractHarness) => Promise<T> | T),
-  recordedScenario?: (
-    harness: FounderProductContractHarness,
-  ) => Promise<FounderProductContractCleanupOutcome> | FounderProductContractCleanupOutcome,
-): Promise<T | FounderProductContractScenarioResult> {
-  if (typeof idOrScenario !== "function") {
-    if (!recordedScenario) {
-      throw new Error("A Founder Product Contract scenario callback is required.");
-    }
-    return runRecordedFounderProductContractScenario(harness, idOrScenario, recordedScenario);
-  }
-  return idOrScenario(harness);
-}
-
-export async function runRecordedFounderProductContractScenario(
+export async function runFounderProductContractScenario(
   harness: FounderProductContractHarness,
   id: FounderProductContractLifecycleScenario,
   scenario: (
@@ -114,7 +98,7 @@ export function validateFounderProductContractScenarios(input: {
     if (result.attempts !== 1) {
       throw new Error(`Founder Product Contract scenario ${result.id} was retried.`);
     }
-    validateCleanupOutcome(result.cleanup);
+    validateCleanupOutcome(result.cleanup, expectedAt, maxAge);
     if (result.sourceRevision !== input.sourceRevision) {
       throw new Error(`Founder Product Contract scenario ${result.id} has a revision mismatch.`);
     }
@@ -143,6 +127,8 @@ function failedCleanup(clock: FounderProductContractClock): FounderProductContra
 
 function validateCleanupOutcome(
   cleanup: FounderProductContractCleanupOutcome,
+  expectedAt?: number,
+  maxAgeMilliseconds?: number,
 ): FounderProductContractCleanupOutcome {
   const observedAt = new Date(cleanup.observedAt);
   if (
@@ -156,6 +142,13 @@ function validateCleanupOutcome(
     observedAt.toISOString() !== cleanup.observedAt
   ) {
     throw new Error("Founder Product Contract cleanup was not verified.");
+  }
+  if (
+    expectedAt !== undefined &&
+    maxAgeMilliseconds !== undefined &&
+    (observedAt.getTime() > expectedAt || expectedAt - observedAt.getTime() > maxAgeMilliseconds)
+  ) {
+    throw new Error("Founder Product Contract cleanup was stale.");
   }
   return cleanup;
 }
