@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   buildFounderInitialGeneralReleaseDecision,
@@ -85,7 +85,7 @@ await run(
 );
 
 const scenarioLedger = parseFounderProductContractScenarioLedger({
-  value: requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_JSON"),
+  value: await readFile(requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH"), "utf8"),
   sourceRevision,
   runId,
   observedAt,

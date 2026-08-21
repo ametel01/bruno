@@ -46,10 +46,6 @@ on:
         description: Exact-revision provider outcomes and evidence digests
         required: false
         type: string
-      lifecycle_scenario_ledger_json:
-        description: Signed ledger emitted by the real persisted Founder lifecycle contract run
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -99,7 +95,7 @@ jobs:
       BRUNO_FOUNDER_CONTRACT_TALKBACK_BROWSER_VERSION: ${{ inputs.talkback_browser_version }}
       BRUNO_FOUNDER_MODERATED_SUMMARY_JSON: ${{ inputs.moderated_founder_summary_json }}
       BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON: ${{ inputs.provider_decision_summary_json }}
-      BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_JSON: ${{ inputs.lifecycle_scenario_ledger_json }}
+      BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH: founder-contract-artifacts/scenario-ledger.json
 
     steps:
       - name: Check out exact release candidate
@@ -122,9 +118,28 @@ jobs:
       - name: Bind the observation time
         run: echo "BRUNO_FOUNDER_CONTRACT_OBSERVED_AT=$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" >> "$GITHUB_ENV"
 
-      - name: Run all-or-nothing Founder Product Contract
+      - name: Produce the persisted lifecycle ledger (release)
+        if: inputs.mode == 'release'
         env:
-          BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: ${{ inputs.mode == 'release' && secrets.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET || secrets.BRUNO_FOUNDER_CONTRACT_CI_SCENARIO_SIGNING_SECRET }}
+          BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: ${{ secrets.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET }}
+        run: bun run founder:contract:produce-ledger
+
+      - name: Produce the persisted lifecycle ledger (ci)
+        if: inputs.mode != 'release'
+        env:
+          BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: ${{ secrets.BRUNO_FOUNDER_CONTRACT_CI_SCENARIO_SIGNING_SECRET }}
+        run: bun run founder:contract:produce-ledger
+
+      - name: Run all-or-nothing Founder Product Contract (release)
+        if: inputs.mode == 'release'
+        env:
+          BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: ${{ secrets.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET }}
+        run: bun run founder:contract
+
+      - name: Run all-or-nothing Founder Product Contract (ci)
+        if: inputs.mode != 'release'
+        env:
+          BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: ${{ secrets.BRUNO_FOUNDER_CONTRACT_CI_SCENARIO_SIGNING_SECRET }}
         run: bun run founder:contract
 
       - name: Attest the allowlisted exact-release summary

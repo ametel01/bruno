@@ -231,6 +231,25 @@ describe("Founder Product Contract evidence", () => {
         cleanup,
       })),
     );
+    expect(evidence.scenarioLedger).toEqual({
+      schemaVersion: "bruno.founder-product-contract.scenario-ledger.v1",
+      producer: "bruno.persisted-founder-application",
+      sourceRevision: REVISION,
+      runId: "local-365",
+      observedAt: "2026-08-20T00:00:00.000Z",
+      results: scenarioResults,
+      resultsDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      signature: expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/),
+    });
+    expect(
+      parseFounderProductContractScenarioLedger({
+        value: JSON.stringify(evidence.scenarioLedger),
+        sourceRevision: REVISION,
+        runId: "local-365",
+        observedAt: "2026-08-20T00:00:00.000Z",
+        signingSecret: SIGNING_SECRET,
+      }),
+    ).toEqual(evidence.scenarioLedger);
     expect(evidence.cleanup).toMatchObject({ status: "passed", verified: true });
     expect(() =>
       buildFounderProductContractEvidence({

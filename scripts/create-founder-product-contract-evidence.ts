@@ -154,6 +154,16 @@ export function buildFounderProductContractEvidence(input: {
       cleanup: sanitized.cleanup,
     };
   });
+  const retainedScenarioLedger = {
+    schemaVersion: scenarioLedger.schemaVersion,
+    producer: scenarioLedger.producer,
+    sourceRevision: scenarioLedger.sourceRevision,
+    runId: scenarioLedger.runId,
+    observedAt: scenarioLedger.observedAt,
+    results: scenarioLedger.results.map(sanitizeFounderProductContractScenarioResult),
+    resultsDigest: scenarioLedger.resultsDigest,
+    signature: scenarioLedger.signature,
+  } as const;
 
   const invariantResults = FOUNDER_PRODUCT_CONTRACT_INVARIANTS.map((invariant) => {
     if (invariant.id === "voiceover_safari") {
@@ -203,14 +213,7 @@ export function buildFounderProductContractEvidence(input: {
     },
     invariants: invariantResults,
     ...(scenarioEvidence ? { scenarios: scenarioEvidence } : {}),
-    scenarioLedger: {
-      producer: scenarioLedger.producer,
-      sourceRevision: scenarioLedger.sourceRevision,
-      runId: scenarioLedger.runId,
-      observedAt: scenarioLedger.observedAt,
-      resultsDigest: scenarioLedger.resultsDigest,
-      signature: scenarioLedger.signature,
-    },
+    scenarioLedger: retainedScenarioLedger,
     ...(scenarioEvidence
       ? {
           cleanup: {

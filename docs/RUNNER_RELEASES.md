@@ -54,7 +54,7 @@ Configure `runner-release-canary` with required reviewers and these scoped value
 | --- | --- | --- |
 | Secret | `RUNNER_RELEASE_BEARER_TOKEN` | Dedicated command bearer shared only with simulated release runners. |
 | Secret | `BRUNO_RELEASE_SIGNING_KEY_PEM` | Ed25519 private key used only while creating the canonical release bundle. |
-| Secret | `BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET` | Protected HMAC secret supplied only to the lifecycle-ledger verification step. |
+| Secret | `BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET` | Protected HMAC secret supplied only to the trusted lifecycle-ledger producer and verification steps. |
 | Variable | `BRUNO_RELEASE_SIGNING_KEY_ID` | Identifier carried by the release signature. |
 | Variable | `BRUNO_RELEASE_TRUST_SET` | JSON map of current and retained release key IDs to Ed25519 public keys. |
 | Variable | `BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE` | Exact digest-addressed Snapshot Attestation v2 OCI reference selected for the release. |

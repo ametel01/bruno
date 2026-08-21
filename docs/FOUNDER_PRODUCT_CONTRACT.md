@@ -7,14 +7,16 @@ interception.
 
 Run it after migrating a disposable local PostgreSQL database:
 
-The command requires a signed ledger emitted by the trusted persisted-application producer. It
-intentionally fails before writing evidence when either the ledger or signing secret is absent.
+The workflow first binds the exact run identity and observation instant, then invokes the trusted
+persisted-application producer. The runner reads only the producer's fixed artifact path; it does
+not accept a dispatch input or caller-authored JSON. It intentionally fails before writing evidence
+when the producer is absent, the ledger is missing, or the signing secret is absent.
 
 ```bash
 BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION="$(git rev-parse HEAD)" \
 BRUNO_FOUNDER_CONTRACT_RUN_ID="local-$(git rev-parse --short HEAD)" \
 BRUNO_FOUNDER_CONTRACT_OBSERVED_AT="2026-08-20T00:00:00.000Z" \
-BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_JSON="$(<founder-contract-scenario-ledger.json)" \
+BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH="founder-contract-scenario-ledger.json" \
 BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET="${BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET:?set the trusted producer secret}" \
 BRUNO_AUTH_MODE="development" \
 bun run founder:contract
@@ -72,11 +74,14 @@ never sleep, and record an allowlisted cleanup outcome without resource identifi
 canonical scenario must pass exactly once against the same revision and within the bounded
 observation window; missing, failed, skipped, retried, stale, mismatched, or unverified-cleanup
 results fail closed. Release evidence consumes a signed, exact-run ledger emitted by the real
-persisted application through `BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_JSON`. The ledger binds the
+persisted application at the producer's fixed artifact path. The ledger binds the
 canonical producer, source revision, workflow run ID, observation instant, results digest, and
 HMAC signature using the protected
 `BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET`; unsigned or caller-authored results are
 rejected. Cleanup is rebuilt from its five-field explicit allowlist before serialization. The contract
 runner never generates lifecycle results, and missing lifecycle evidence fails CI and release
 dispatches alike. Until the production lifecycle routes and trusted producer exist, the workflow
-is intentionally blocked rather than emitting a passing contract.
+is intentionally blocked rather than emitting a passing contract. The retained `scenarioLedger`
+contains the complete sanitized signed payload, including schema version and every result's source
+revision, observation time, cleanup outcome, digest, and signature, so its canonical signed input
+can be independently reconstructed.
