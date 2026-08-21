@@ -13,7 +13,7 @@ describe("Founder Product Contract workflow", () => {
     expect(workflow).toContain(
       "BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH: founder-contract-artifacts/scenario-ledger.json",
     );
-    expect(workflow).toContain("run: bun run founder:contract:produce-ledger");
+    expect(workflow).toContain("run: bun run founder:contract");
     expect(workflow).toContain("if: inputs.mode == 'release'");
     expect(workflow).toContain("if: inputs.mode != 'release'");
     expect(workflow).toContain(

@@ -102,7 +102,7 @@ export function parseFounderProductContractScenarioLedger(input: {
   try {
     parsed = JSON.parse(input.value);
   } catch {
-    throw new Error("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_JSON is invalid.");
+    throw new Error("Founder Product Contract scenario ledger is invalid.");
   }
   if (
     !isRecord(parsed) ||
@@ -117,7 +117,7 @@ export function parseFounderProductContractScenarioLedger(input: {
       "signature",
     ])
   ) {
-    throw new Error("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_JSON is invalid.");
+    throw new Error("Founder Product Contract scenario ledger is invalid.");
   }
   if (
     parsed.schemaVersion !== FOUNDER_PRODUCT_CONTRACT_SCENARIO_LEDGER_SCHEMA_VERSION ||
@@ -129,7 +129,7 @@ export function parseFounderProductContractScenarioLedger(input: {
     typeof parsed.resultsDigest !== "string" ||
     typeof parsed.signature !== "string"
   ) {
-    throw new Error("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_JSON is invalid.");
+    throw new Error("Founder Product Contract scenario ledger is invalid.");
   }
   const ledger: FounderProductContractScenarioLedger = {
     schemaVersion: parsed.schemaVersion,
@@ -154,7 +154,7 @@ function parseScenarioResult(value: unknown): FounderProductContractScenarioResu
     (typeof value.sourceRevision !== "string" && value.sourceRevision !== null) ||
     typeof value.observedAt !== "string"
   ) {
-    throw new Error("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_JSON is invalid.");
+    throw new Error("Founder Product Contract scenario ledger is invalid.");
   }
   return {
     id: value.id,
@@ -182,7 +182,7 @@ function parseCleanupOutcome(value: unknown): FounderProductContractCleanupOutco
     !Number.isSafeInteger(value.resourcesAfter) ||
     typeof value.observedAt !== "string"
   ) {
-    throw new Error("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_JSON is invalid.");
+    throw new Error("Founder Product Contract scenario ledger is invalid.");
   }
   return {
     status: value.status as FounderProductContractCleanupOutcome["status"],

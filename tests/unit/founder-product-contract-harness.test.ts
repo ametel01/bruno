@@ -246,9 +246,23 @@ describe("Founder Product Contract deterministic seam", () => {
       results: harness.scenarioResults.map((result) => ({
         ...result,
         observedAt: "2026-01-01T00:00:00.001Z",
+        cleanup: { ...result.cleanup, observedAt: "2026-01-01T00:00:00.001Z" },
       })),
       sourceRevision,
       observedAt: "2026-01-01T00:00:00.001Z",
     });
+
+    expect(() =>
+      validateFounderProductContractScenarios({
+        required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
+        results: harness.scenarioResults.map((result) => ({
+          ...result,
+          observedAt: "2026-01-01T00:00:00.001Z",
+          cleanup: { ...result.cleanup, observedAt: "2026-01-01T00:00:00.001Z" },
+        })),
+        sourceRevision,
+        observedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).not.toThrow();
   });
 });

@@ -118,18 +118,6 @@ jobs:
       - name: Bind the observation time
         run: echo "BRUNO_FOUNDER_CONTRACT_OBSERVED_AT=$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" >> "$GITHUB_ENV"
 
-      - name: Produce the persisted lifecycle ledger (release)
-        if: inputs.mode == 'release'
-        env:
-          BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: ${{ secrets.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET }}
-        run: bun run founder:contract:produce-ledger
-
-      - name: Produce the persisted lifecycle ledger (ci)
-        if: inputs.mode != 'release'
-        env:
-          BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: ${{ secrets.BRUNO_FOUNDER_CONTRACT_CI_SCENARIO_SIGNING_SECRET }}
-        run: bun run founder:contract:produce-ledger
-
       - name: Run all-or-nothing Founder Product Contract (release)
         if: inputs.mode == 'release'
         env:

@@ -7,10 +7,11 @@ interception.
 
 Run it after migrating a disposable local PostgreSQL database:
 
-The workflow first binds the exact run identity and observation instant, then invokes the trusted
-persisted-application producer. The runner reads only the producer's fixed artifact path; it does
-not accept a dispatch input or caller-authored JSON. It intentionally fails before writing evidence
-when the producer is absent, the ledger is missing, or the signing secret is absent.
+The workflow first binds the exact run identity and observation instant. The contract runner then
+executes the persisted lifecycle producer through the public API and writes the producer's fixed
+artifact path. It does not accept a dispatch input or caller-authored JSON. It intentionally fails
+before writing evidence when the producer is absent, the ledger is missing, or the signing secret is
+absent.
 
 ```bash
 BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION="$(git rev-parse HEAD)" \
@@ -80,8 +81,8 @@ HMAC signature using the protected
 `BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET`; unsigned or caller-authored results are
 rejected. Cleanup is rebuilt from its five-field explicit allowlist before serialization. The contract
 runner never generates lifecycle results, and missing lifecycle evidence fails CI and release
-dispatches alike. Until the production lifecycle routes and trusted producer exist, the workflow
-is intentionally blocked rather than emitting a passing contract. The retained `scenarioLedger`
+dispatches alike. A lifecycle/API/provider failure blocks the workflow rather than emitting a
+passing contract. The retained `scenarioLedger`
 contains the complete sanitized signed payload, including schema version and every result's source
 revision, observation time, cleanup outcome, digest, and signature, so its canonical signed input
 can be independently reconstructed.

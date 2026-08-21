@@ -103,7 +103,7 @@ export function validateFounderProductContractScenarios(input: {
       throw new Error(`Founder Product Contract scenario ${result.id} has a revision mismatch.`);
     }
     const observedAt = parseFounderProductContractInstant(result.observedAt).getTime();
-    if (observedAt > expectedAt || expectedAt - observedAt > maxAge) {
+    if (observedAt < expectedAt || observedAt - expectedAt > maxAge) {
       throw new Error(`Founder Product Contract scenario ${result.id} is stale.`);
     }
     resultsById.set(result.id, result);
@@ -146,7 +146,7 @@ function validateCleanupOutcome(
   if (
     expectedAt !== undefined &&
     maxAgeMilliseconds !== undefined &&
-    (observedAt.getTime() > expectedAt || expectedAt - observedAt.getTime() > maxAgeMilliseconds)
+    (observedAt.getTime() < expectedAt || observedAt.getTime() - expectedAt > maxAgeMilliseconds)
   ) {
     throw new Error("Founder Product Contract cleanup was stale.");
   }

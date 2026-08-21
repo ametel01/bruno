@@ -32,7 +32,6 @@
     "format:check": "biome ci --linter-enabled=false --assist-enabled=false app src scripts tests app/globals.css *.ts *.json",
     "lint": "biome lint app src scripts tests *.ts *.json",
     "founder:contract": "bun --conditions react-server scripts/run-founder-product-contract.ts",
-    "founder:contract:produce-ledger": "bun --conditions react-server scripts/produce-founder-product-contract-ledger.ts",
     "runner:bootstrap": "bun src/runner-service/bootstrap.ts",
     "runner:image:publish": "gh workflow run deploy-production.yml --repo ametel01/bruno --ref main --raw-field action=runner-image",
     "runner:release:smoke": "bun --conditions react-server scripts/smoke-runner-release.ts",

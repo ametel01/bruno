@@ -36,6 +36,7 @@ const runId = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID");
 const scenarioSigningSecret = requiredEnvironment(
   FOUNDER_PRODUCT_CONTRACT_SCENARIO_SIGNING_SECRET_ENV,
 );
+const scenarioLedgerPath = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH");
 const deterministicProviderEnvironment = {
   BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
     "calendar_reading",
@@ -54,6 +55,11 @@ const deterministicProviderEnvironment = {
     sourceRevision,
   ),
   VERCEL_GIT_COMMIT_SHA: sourceRevision,
+  BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: scenarioSigningSecret,
+  BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH: scenarioLedgerPath,
+  BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION: sourceRevision,
+  BRUNO_FOUNDER_CONTRACT_RUN_ID: runId,
+  BRUNO_FOUNDER_CONTRACT_OBSERVED_AT: observedAt,
 };
 
 await run(
