@@ -977,7 +977,7 @@ export const founderProductEntitlements = pgTable(
     ),
     check(
       "founder_product_entitlements_retirement_due_check",
-      sql`(${table.status} IN ('verified', 'past_due') AND ${table.retirementDueAt} IS NULL) OR (${table.status} IN ('unpaid', 'cancelled', 'expired', 'refunded') AND ${table.retirementDueAt} IS NOT NULL)`,
+      sql`(${table.status} = 'verified' AND ${table.retirementDueAt} IS NULL) OR (${table.status} IN ('past_due', 'unpaid', 'cancelled', 'expired', 'refunded') AND ${table.retirementDueAt} IS NOT NULL)`,
     ),
   ],
 );
@@ -995,6 +995,7 @@ export const founderRecoveryArchives = pgTable(
     status: founderRecoveryArchiveStatusEnum("status").notNull(),
     storageObjectKey: text("storage_object_key"),
     ciphertextDigest: text("ciphertext_digest"),
+    recoveryCredentialDigest: text("recovery_credential_digest"),
     restorableVerified: boolean("restorable_verified").notNull(),
     failureCode: text("failure_code"),
     observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
@@ -1005,11 +1006,15 @@ export const founderRecoveryArchives = pgTable(
   (table) => [
     check(
       "founder_recovery_archives_outcome_check",
-      sql`(${table.status} = 'pending' AND ${table.storageObjectKey} IS NULL AND ${table.ciphertextDigest} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NULL) OR (${table.status} = 'verified' AND ${table.storageObjectKey} IS NOT NULL AND ${table.ciphertextDigest} IS NOT NULL AND ${table.restorableVerified} = true AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NULL) OR (${table.status} = 'failed' AND ${table.restorableVerified} = false AND ${table.failureCode} IS NOT NULL AND ${table.deletedAt} IS NULL) OR (${table.status} = 'deleted' AND ${table.storageObjectKey} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NOT NULL)`,
+      sql`(${table.status} = 'pending' AND ${table.storageObjectKey} IS NULL AND ${table.ciphertextDigest} IS NULL AND ${table.recoveryCredentialDigest} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NULL) OR (${table.status} = 'verified' AND ${table.storageObjectKey} IS NOT NULL AND ${table.ciphertextDigest} IS NOT NULL AND ${table.recoveryCredentialDigest} IS NOT NULL AND ${table.restorableVerified} = true AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NULL) OR (${table.status} = 'failed' AND ${table.recoveryCredentialDigest} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NOT NULL AND ${table.deletedAt} IS NULL) OR (${table.status} = 'deleted' AND ${table.storageObjectKey} IS NULL AND ${table.recoveryCredentialDigest} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NOT NULL)`,
     ),
     check(
       "founder_recovery_archives_ciphertext_digest_check",
       sql`${table.ciphertextDigest} IS NULL OR ${table.ciphertextDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_recovery_archives_credential_digest_check",
+      sql`${table.recoveryCredentialDigest} IS NULL OR ${table.recoveryCredentialDigest} ~ '^sha256:[a-f0-9]{64}$'`,
     ),
     check("founder_recovery_archives_expiry_check", sql`${table.expiresAt} > ${table.observedAt}`),
     index("founder_recovery_archives_user_observed_idx").on(table.userId, table.observedAt),
@@ -1028,7 +1033,10 @@ export const founderRecoveryArchiveDeletionReceipts = pgTable(
       .references(() => users.id),
     idempotencyKey: text("idempotency_key").notNull(),
     status: text("status").notNull().default("pending"),
-    providerConfirmed: boolean("provider_confirmed").notNull().default(false),
+    archiveProviderConfirmed: boolean("archive_provider_confirmed").notNull().default(false),
+    recoveryCredentialsConfirmed: boolean("recovery_credentials_confirmed")
+      .notNull()
+      .default(false),
     attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     failureCode: text("failure_code"),
@@ -1042,7 +1050,7 @@ export const founderRecoveryArchiveDeletionReceipts = pgTable(
     ),
     check(
       "founder_recovery_archive_deletions_outcome_check",
-      sql`(${table.status} = 'pending' AND ${table.providerConfirmed} = false AND ${table.completedAt} IS NULL) OR (${table.status} = 'completed' AND ${table.providerConfirmed} = true AND ${table.completedAt} IS NOT NULL AND ${table.failureCode} IS NULL)`,
+      sql`(${table.status} = 'pending' AND ${table.archiveProviderConfirmed} = false AND ${table.recoveryCredentialsConfirmed} = false AND ${table.completedAt} IS NULL) OR (${table.status} = 'completed' AND ${table.archiveProviderConfirmed} = true AND ${table.recoveryCredentialsConfirmed} = true AND ${table.completedAt} IS NOT NULL AND ${table.failureCode} IS NULL)`,
     ),
   ],
 );

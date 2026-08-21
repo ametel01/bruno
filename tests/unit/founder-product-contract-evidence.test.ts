@@ -116,6 +116,12 @@ describe("Founder Product Contract evidence", () => {
     );
   });
 
+  it("refuses evidence from a rerun of the same workflow candidate", () => {
+    expect(() => buildFounderProductContractEvidence({ ...validInput(), runAttempt: 2 })).toThrow(
+      "Workflow reruns cannot authorize Founder Product Contract evidence.",
+    );
+  });
+
   it("refuses a missing lifecycle ledger in normal CI", () => {
     const input = validInput() as Record<string, unknown>;
     delete input.scenarioLedger;
@@ -272,6 +278,7 @@ function validInput() {
     unit: { numPassedTests: 64, numFailedTests: 0, numPendingTests: 0 },
     sourceRevision: REVISION,
     runId: "local-365",
+    runAttempt: 1,
     mode: "ci" as const,
     observedAt: "2026-08-20T00:00:00.000Z",
     scenarioLedger: signedScenarioLedger(),

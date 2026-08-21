@@ -13,6 +13,13 @@ describe("Founder Product Contract workflow", () => {
     expect(workflow).toContain(
       "BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH: founder-contract-artifacts/scenario-ledger.json",
     );
+    expect(workflow).toContain("BRUNO_FOUNDER_CONTRACT_RUN_ID: github-$" + "{{ github.run_id }}");
+    expect(workflow).not.toContain(
+      "github-$" + "{{ github.run_id }}-$" + "{{ github.run_attempt }}",
+    );
+    expect(workflow).toContain(
+      "BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT: $" + "{{ github.run_attempt }}",
+    );
     expect(workflow).toContain("run: bun run founder:contract");
     expect(workflow).toContain("if: inputs.mode == 'release'");
     expect(workflow).toContain("if: inputs.mode != 'release'");

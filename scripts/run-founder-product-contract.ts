@@ -33,6 +33,7 @@ await rm(generalReleaseDecisionPath, { force: true });
 const sourceRevision = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION");
 const observedAt = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_OBSERVED_AT");
 const runId = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID");
+const runAttempt = requiredPositiveIntegerEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT");
 const scenarioSigningSecret = requiredEnvironment(
   FOUNDER_PRODUCT_CONTRACT_SCENARIO_SIGNING_SECRET_ENV,
 );
@@ -111,6 +112,7 @@ const evidence = await createFounderProductContractEvidence({
   unitResultPath,
   sourceRevision,
   runId,
+  runAttempt,
   mode,
   observedAt,
   ...(voiceOverDigest ? { voiceOverDigest } : {}),
@@ -162,4 +164,12 @@ function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required.`);
   return value;
+}
+
+function requiredPositiveIntegerEnvironment(name: string): number {
+  const value = requiredEnvironment(name);
+  if (!/^[1-9][0-9]*$/.test(value)) throw new Error(`${name} must be a positive integer.`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new Error(`${name} must be a safe integer.`);
+  return parsed;
 }

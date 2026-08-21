@@ -11,6 +11,7 @@ import {
   type DigitalOceanOwnedSetDeleteResult,
 } from "@/src/server/runners/digitalocean-provider";
 import { digitalOceanRunnerFirewallName } from "@/src/server/runners/runner-provisioning";
+import { assertFounderRecoveryArchiveDeletionIdentity } from "./recovery-archive-provider";
 import type { FounderCommerceStatus, FounderLifecycleProviderBoundary } from "./lifecycle";
 
 export type FounderLifecycleFailureOperation =
@@ -21,6 +22,7 @@ export type FounderLifecycleFailureOperation =
   | "lemonSqueezy.read_subscription"
   | "archive.create"
   | "archive.delete"
+  | "archive.delete_credentials"
   | "digitalOcean.observe_owned_resources"
   | "digitalOcean.delete_firewall"
   | "digitalOcean.delete_droplet"
@@ -85,13 +87,19 @@ export function deterministicFounderLifecycleProviders(input: {
       return {
         storageObjectKey: `founder-recovery/${input.runId}/${archiveIntentId}.age`,
         ciphertextDigest: `sha256:${createHash("sha256").update(identity).digest("hex")}`,
+        recoveryCredentialDigest: `sha256:${createHash("sha256")
+          .update(`recovery-credential:${identity}`)
+          .digest("hex")}`,
         restorableVerified: true as const,
       };
     },
-    async deleteRecoveryArchive() {
+    async deleteRecoveryArchive(deletion) {
       calls.push("archive.delete");
       failIfConfigured(failures, "archive.delete");
-      return { absent: true };
+      assertFounderRecoveryArchiveDeletionIdentity(deletion);
+      calls.push("archive.delete_credentials");
+      failIfConfigured(failures, "archive.delete_credentials");
+      return { archiveAbsent: true, recoveryCredentialsAbsent: true };
     },
     digitalOcean: ownedSetProvider(state, calls, failures, input.now),
     calls: () => [...calls],

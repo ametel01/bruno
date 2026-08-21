@@ -134,6 +134,7 @@ function productContract(mode: "ci" | "release") {
     unit: { numPassedTests: 156, numFailedTests: 0, numPendingTests: 0 },
     sourceRevision: REVISION,
     runId: "release-370",
+    runAttempt: 1,
     mode,
     observedAt: "2026-08-20T12:00:00.000Z",
     scenarioLedger: createFounderProductContractScenarioLedger({

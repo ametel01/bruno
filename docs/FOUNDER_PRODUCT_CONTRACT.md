@@ -16,6 +16,7 @@ absent.
 ```bash
 BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION="$(git rev-parse HEAD)" \
 BRUNO_FOUNDER_CONTRACT_RUN_ID="local-$(git rev-parse --short HEAD)" \
+BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT="1" \
 BRUNO_FOUNDER_CONTRACT_OBSERVED_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" \
 BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH="founder-contract-scenario-ledger.json" \
 BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET="${BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET:?set the trusted producer secret}" \
@@ -72,9 +73,12 @@ provider interfaces used by the lifecycle service. The service records immutable
 Decisions, single-use Owner-bound Checkout Correlations, signature-verified and idempotent Lemon
 Squeezy event receipts, reconciled Product Entitlements, 30-day restorable Recovery Archives,
 revoked runtime credentials, and exact-provider Infrastructure Retirement receipts. Provider
-subscription state can make entitlement retirement due; verified archives that reach their
-30-day expiry are deleted through a durable, idempotent provider receipt by the protected hourly
-expiry worker. Delayed or reordered commerce events cannot replace newer authority; reactivation
+subscription state applies bounded retirement deadlines and immediately pauses new work for unpaid,
+expired, and refunded entitlement. Verified archives that reach their 30-day expiry exercise a
+durable, idempotent deletion boundary that requires separate absence proof for the encrypted object
+and its recovery-only credential. Issue #372 does not schedule that destructive boundary in
+production; a later vertical slice must add the production worker and provider adapter. Delayed or
+reordered commerce events cannot replace newer authority or extend a retirement clock; reactivation
 requires a newly pending Owner-bound Checkout Correlation. DigitalOcean cleanup is derived from
 authoritative owned-set observations before and after firewall-first deletion. The in-progress
 retirement receipt and credential revocation commit before destructive provider effects, so
@@ -86,7 +90,8 @@ time explicitly, never sleep, and record an allowlisted cleanup outcome without 
 identifiers. Every
 canonical scenario must pass exactly once against the same revision and within the bounded
 observation window; missing, failed, skipped, retried, stale, mismatched, or unverified-cleanup
-results fail closed. After each successful transition, the application commits a canonical
+results fail closed. Official GitHub workflow reruns are rejected rather than receiving a fresh
+evidence identity. After each successful transition, the application commits a canonical
 scenario-execution receipt. Only the application can assemble and sign the complete exact-run
 ledger from those persisted receipts; the browser test copies that response to the producer's
 fixed artifact path without constructing results or using the signing authority. The ledger binds the

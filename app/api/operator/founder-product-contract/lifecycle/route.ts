@@ -32,6 +32,7 @@ const FAILURE_OPERATIONS = new Set<FounderLifecycleFailureOperation>([
   "lemonSqueezy.read_subscription",
   "archive.create",
   "archive.delete",
+  "archive.delete_credentials",
   "digitalOcean.observe_owned_resources",
   "digitalOcean.delete_firewall",
   "digitalOcean.delete_droplet",
@@ -120,9 +121,6 @@ export async function POST(request: Request): Promise<Response> {
     failures: body.providerFailures,
     subscriptionStatus: body.providerSubscriptionStatus,
   });
-  const isFaultProbe = body.providerFailures.some(
-    (operation) => !(body.action === "infrastructure_retirement" && operation === "archive.create"),
-  );
   const evidenceIdentity = {
     runId: identity.runId,
     userId: applicationUser.userId,
@@ -132,10 +130,8 @@ export async function POST(request: Request): Promise<Response> {
   };
   let claimed = false;
   try {
-    if (!isFaultProbe) {
-      claimed = true;
-      await claimFounderProductContractScenarioExecution(evidenceIdentity);
-    }
+    claimed = true;
+    await claimFounderProductContractScenarioExecution(evidenceIdentity);
     const outcome = await executeFounderProductContractLifecycleAction(
       {
         action: body.action,
@@ -146,9 +142,6 @@ export async function POST(request: Request): Promise<Response> {
       },
       { providers, commerceWebhookSecret, applicationRevision: identity.sourceRevision },
     );
-    if (isFaultProbe) {
-      throw new Error("A deterministic fault probe unexpectedly completed its lifecycle action.");
-    }
     await completeFounderProductContractScenarioExecution({ identity: evidenceIdentity, outcome });
     return Response.json({ outcome }, { headers: { "cache-control": "no-store" } });
   } catch (error) {

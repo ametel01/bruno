@@ -43,6 +43,7 @@ export async function createFounderProductContractEvidence(input: {
   unitResultPath: string;
   sourceRevision: string;
   runId: string;
+  runAttempt: number;
   mode: ContractMode;
   observedAt: string;
   voiceOverDigest?: string;
@@ -64,6 +65,7 @@ export function buildFounderProductContractEvidence(input: {
   unit: VitestResult;
   sourceRevision: string;
   runId: string;
+  runAttempt: number;
   mode: ContractMode;
   observedAt: string;
   voiceOverDigest?: string;
@@ -77,6 +79,12 @@ export function buildFounderProductContractEvidence(input: {
 }) {
   requirePattern(input.sourceRevision, /^[a-f0-9]{40}$/, "source revision");
   requirePattern(input.runId, /^[A-Za-z0-9._:-]{1,128}$/, "run ID");
+  if (!Number.isSafeInteger(input.runAttempt) || input.runAttempt < 1) {
+    throw new Error("Workflow run attempt must be a positive integer.");
+  }
+  if (input.runAttempt > 1) {
+    throw new Error("Workflow reruns cannot authorize Founder Product Contract evidence.");
+  }
   const observedAt = new Date(input.observedAt);
   if (Number.isNaN(observedAt.valueOf()) || observedAt.toISOString() !== input.observedAt) {
     throw new Error("Observed time must be an exact ISO-8601 instant.");
@@ -201,7 +209,7 @@ export function buildFounderProductContractEvidence(input: {
     },
     observedAt: input.observedAt,
     execution: {
-      reruns: 0,
+      reruns: input.runAttempt - 1,
       unit: { passed: unitPassed, failed: 0, skipped: 0 },
       browser: {
         passed: browserStats.expected,

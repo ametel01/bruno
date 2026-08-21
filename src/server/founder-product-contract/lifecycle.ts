@@ -1,13 +1,9 @@
-import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
-  founderCommerceEvents,
-  founderCheckoutCorrelations,
   founderInfrastructureRetirements,
-  founderProductEntitlements,
   founderRecoveryArchives,
-  founderRecoveryArchiveDeletionReceipts,
   founderReleaseDecisions,
   operatorPreparations,
   operatorRuntimes,
@@ -20,7 +16,14 @@ import type {
   DigitalOceanOwnedSetProvider,
 } from "@/src/server/runners/digitalocean-provider";
 import { digitalOceanRunnerFirewallName } from "@/src/server/runners/runner-provisioning";
-import type { FounderRecoveryArchiveDeletionProvider } from "./recovery-archive-provider";
+import { expireFounderRecoveryArchivesForUser } from "./archive-expiry";
+import { founderProductContractDigest } from "./digest";
+import { reconcileFounderCommerceEvent, requireRetirementDue } from "./entitlement";
+import { createDurableRecoveryArchive, fulfillRecoveryArchiveIntent } from "./recovery-archive";
+import type {
+  FounderRecoveryArchiveDeletionIdentity,
+  FounderRecoveryArchiveDeletionOutcome,
+} from "./recovery-archive-provider";
 
 export type FounderProductContractLifecycleAction =
   | "release_stage_admission"
@@ -62,13 +65,12 @@ export type FounderLifecycleProviderBoundary = {
   }): Promise<{
     storageObjectKey: string;
     ciphertextDigest: `sha256:${string}`;
+    recoveryCredentialDigest: `sha256:${string}`;
     restorableVerified: true;
   }>;
-  deleteRecoveryArchive(input: {
-    archiveId: string;
-    storageObjectKey: string;
-    idempotencyKey: string;
-  }): Promise<{ absent: true }>;
+  deleteRecoveryArchive(
+    input: FounderRecoveryArchiveDeletionIdentity,
+  ): Promise<FounderRecoveryArchiveDeletionOutcome>;
   digitalOcean: DigitalOceanOwnedSetProvider;
   calls(): readonly string[];
 };
@@ -123,13 +125,13 @@ export async function executeFounderProductContractLifecycleAction(
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${input.userId}`}, 0))`,
         );
-        await reconcileCommerceEvent(tx, input, dependencies);
+        await reconcileFounderCommerceEvent(tx, input, dependencies);
       });
       return await executeInfrastructureRetirement(input, dependencies, connection);
     }
     const lifecycleArchiveId =
       input.action === "release_stage_admission" || input.action === "recovery_archive_lifecycle"
-        ? await createDurableArchive(input, dependencies, connection)
+        ? await createDurableRecoveryArchive(input, dependencies.providers, connection)
         : null;
     return await connection.db.transaction(async (tx) => {
       await tx.execute(
@@ -172,9 +174,9 @@ export async function executeFounderProductContractLifecycleAction(
             runtimeRevision,
             capabilityManifest: ["openai", "calendar_reading"],
             evidenceDigests: [
-              digest(`clerk:${identity.subject}`),
-              digest(JSON.stringify(capabilities)),
-              digest(`recovery-archive:${lifecycleArchiveId}`),
+              founderProductContractDigest(`clerk:${identity.subject}`),
+              founderProductContractDigest(JSON.stringify(capabilities)),
+              founderProductContractDigest(`recovery-archive:${lifecycleArchiveId}`),
             ],
             decidedAt: input.now,
             createdAt: input.now,
@@ -188,11 +190,10 @@ export async function executeFounderProductContractLifecycleAction(
             dependencies.applicationRevision,
             runtimeRevision,
           );
-          await reconcileCommerceEvent(tx, input, dependencies);
+          await reconcileFounderCommerceEvent(tx, input, dependencies);
           break;
         }
         case "recovery_archive_lifecycle": {
-          await requireVerifiedEntitlement(tx, input.userId);
           if (!lifecycleArchiveId) throw new Error("A verified Recovery Archive is required.");
           break;
         }
@@ -214,182 +215,6 @@ export async function executeFounderProductContractLifecycleAction(
 }
 
 type Transaction = Parameters<Parameters<DatabaseConnection["db"]["transaction"]>[0]>[0];
-
-async function reconcileCommerceEvent(
-  tx: Transaction,
-  input: LifecycleInput,
-  dependencies: LifecycleDependencies,
-): Promise<void> {
-  if (!input.commerceEvent) throw new Error("A signed commerce event is required.");
-  const event = input.commerceEvent;
-  const canonicalPayload = canonicalCommercePayload(event);
-  if (!verifyHmac(canonicalPayload, event.signature, dependencies.commerceWebhookSecret)) {
-    throw new Error("The Lemon Squeezy event signature is invalid.");
-  }
-  const payloadDigest = digest(canonicalPayload);
-  const [existingReceipt] = await tx
-    .select()
-    .from(founderCommerceEvents)
-    .where(eq(founderCommerceEvents.providerEventId, event.eventId))
-    .limit(1);
-  const [currentEntitlement] = await tx
-    .select({
-      sourceEventId: founderProductEntitlements.sourceEventId,
-      providerSubscriptionId: founderProductEntitlements.providerSubscriptionId,
-    })
-    .from(founderProductEntitlements)
-    .where(eq(founderProductEntitlements.userId, input.userId))
-    .limit(1)
-    .for("update");
-  const [currentSource] = currentEntitlement
-    ? await tx
-        .select({
-          id: founderCommerceEvents.id,
-          checkoutCorrelationId: founderCommerceEvents.checkoutCorrelationId,
-          occurredAt: founderCommerceEvents.occurredAt,
-        })
-        .from(founderCommerceEvents)
-        .where(eq(founderCommerceEvents.id, currentEntitlement.sourceEventId))
-        .limit(1)
-    : [];
-  const eventOccurredAt = new Date(event.occurredAt);
-  if (
-    Number.isNaN(eventOccurredAt.valueOf()) ||
-    eventOccurredAt.toISOString() !== event.occurredAt
-  ) {
-    throw new Error("The Lemon Squeezy event timestamp is invalid.");
-  }
-  if (
-    currentSource &&
-    ((existingReceipt && existingReceipt.id !== currentSource.id) ||
-      (!existingReceipt && eventOccurredAt <= currentSource.occurredAt))
-  ) {
-    throw new Error("A delayed or reordered commerce event cannot replace newer authority.");
-  }
-  let receipt = existingReceipt;
-  if (!receipt) {
-    let correlationId: string;
-    if (event.status === "active") {
-      const [correlation] = await tx
-        .select({ id: founderCheckoutCorrelations.id })
-        .from(founderCheckoutCorrelations)
-        .where(
-          and(
-            eq(founderCheckoutCorrelations.userId, input.userId),
-            eq(founderCheckoutCorrelations.correlationDigest, digest(event.checkoutCorrelation)),
-            eq(founderCheckoutCorrelations.status, "pending"),
-            gt(founderCheckoutCorrelations.expiresAt, input.now),
-          ),
-        )
-        .limit(1)
-        .for("update");
-      if (!correlation) {
-        throw new Error("A pending Owner-bound Checkout Correlation is required.");
-      }
-      correlationId = correlation.id;
-      await tx
-        .update(founderCheckoutCorrelations)
-        .set({ status: "consumed", consumedAt: input.now })
-        .where(eq(founderCheckoutCorrelations.id, correlation.id));
-    } else {
-      if (
-        !currentEntitlement ||
-        currentEntitlement.providerSubscriptionId !== event.subscriptionId
-      ) {
-        throw new Error("The commerce event does not match the Owner's Product Entitlement.");
-      }
-      const [correlation] = currentSource
-        ? await tx
-            .select({ id: founderCheckoutCorrelations.id })
-            .from(founderCheckoutCorrelations)
-            .where(
-              and(
-                eq(founderCheckoutCorrelations.id, currentSource.checkoutCorrelationId),
-                eq(founderCheckoutCorrelations.userId, input.userId),
-                eq(
-                  founderCheckoutCorrelations.correlationDigest,
-                  digest(event.checkoutCorrelation),
-                ),
-              ),
-            )
-            .limit(1)
-        : [];
-      if (!correlation) throw new Error("The commerce event Checkout Correlation is invalid.");
-      correlationId = correlation.id;
-    }
-    [receipt] = await tx
-      .insert(founderCommerceEvents)
-      .values({
-        providerEventId: event.eventId,
-        userId: input.userId,
-        checkoutCorrelationId: correlationId,
-        providerSubscriptionId: event.subscriptionId,
-        eventType: `subscription_${event.status}`,
-        payloadDigest,
-        signatureVerified: true,
-        occurredAt: eventOccurredAt,
-        recordedAt: input.now,
-      })
-      .returning();
-  }
-  if (
-    !receipt ||
-    receipt.userId !== input.userId ||
-    receipt.payloadDigest !== payloadDigest ||
-    receipt.providerSubscriptionId !== event.subscriptionId
-  ) {
-    throw new Error("The Lemon Squeezy event ID was previously recorded differently.");
-  }
-  const subscription = await dependencies.providers.readSubscription({
-    subscriptionId: event.subscriptionId,
-  });
-  if (subscription.status !== event.status) {
-    throw new Error("The current Lemon Squeezy subscription state does not match the event.");
-  }
-  const status = subscription.status === "active" ? "verified" : subscription.status;
-  const retirementDueAt = entitlementRetirementDueAt(event);
-  await tx
-    .insert(founderProductEntitlements)
-    .values({
-      userId: input.userId,
-      sourceEventId: receipt.id,
-      providerSubscriptionId: event.subscriptionId,
-      status,
-      reconciledProviderStatus: subscription.status,
-      reconciledAt: input.now,
-      retirementDueAt,
-      updatedAt: input.now,
-    })
-    .onConflictDoUpdate({
-      target: founderProductEntitlements.userId,
-      set: {
-        sourceEventId: receipt.id,
-        providerSubscriptionId: event.subscriptionId,
-        status,
-        reconciledProviderStatus: subscription.status,
-        reconciledAt: input.now,
-        retirementDueAt,
-        updatedAt: input.now,
-      },
-    });
-}
-
-function entitlementRetirementDueAt(event: FounderCommerceEvent): Date | null {
-  const occurredAt = new Date(event.occurredAt);
-  switch (event.status) {
-    case "active":
-    case "past_due":
-      return null;
-    case "unpaid":
-    case "refunded":
-      return new Date(occurredAt.valueOf() + 24 * 60 * 60 * 1_000);
-    case "expired":
-      return new Date(occurredAt.valueOf() + 60 * 60 * 1_000);
-    case "cancelled":
-      if (!event.endsAt) throw new Error("Cancelled entitlement requires its paid ends_at.");
-      return new Date(event.endsAt);
-  }
-}
 
 async function requireReleaseDecision(
   tx: Transaction,
@@ -425,226 +250,6 @@ async function requireReadyRuntimeRevision(tx: Transaction, operatorId: string):
   return runtime.configRevision;
 }
 
-async function requireVerifiedEntitlement(tx: Transaction, userId: string): Promise<void> {
-  const [entitlement] = await tx
-    .select({ id: founderProductEntitlements.id })
-    .from(founderProductEntitlements)
-    .where(
-      and(
-        eq(founderProductEntitlements.userId, userId),
-        eq(founderProductEntitlements.status, "verified"),
-      ),
-    )
-    .limit(1);
-  if (!entitlement) throw new Error("Verified Product Entitlement is required.");
-}
-
-async function requireRetirementDue(tx: Transaction, userId: string, now: Date): Promise<void> {
-  const [entitlement] = await tx
-    .select({ id: founderProductEntitlements.id })
-    .from(founderProductEntitlements)
-    .where(
-      and(
-        eq(founderProductEntitlements.userId, userId),
-        inArray(founderProductEntitlements.status, ["unpaid", "cancelled", "expired", "refunded"]),
-        lte(founderProductEntitlements.retirementDueAt, now),
-      ),
-    )
-    .limit(1);
-  if (!entitlement) throw new Error("Product Entitlement retirement is not due.");
-}
-
-export async function expireFounderRecoveryArchivesForUser(
-  userId: string,
-  now: Date,
-  providers: FounderRecoveryArchiveDeletionProvider,
-  connection: DatabaseConnection,
-): Promise<void> {
-  while (true) {
-    const work = await connection.db.transaction(async (tx) => {
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${userId}`}, 0))`,
-      );
-      const [archive] = await tx
-        .select({
-          id: founderRecoveryArchives.id,
-          storageObjectKey: founderRecoveryArchives.storageObjectKey,
-        })
-        .from(founderRecoveryArchives)
-        .where(
-          and(
-            eq(founderRecoveryArchives.userId, userId),
-            eq(founderRecoveryArchives.status, "verified"),
-            lte(founderRecoveryArchives.expiresAt, now),
-            isNull(founderRecoveryArchives.deletedAt),
-          ),
-        )
-        .orderBy(founderRecoveryArchives.expiresAt)
-        .limit(1)
-        .for("update");
-      if (!archive?.storageObjectKey) return null;
-      const idempotencyKey = digest(`recovery-archive-delete:${archive.id}`);
-      const [existingDeletion] = await tx
-        .select({
-          status: founderRecoveryArchiveDeletionReceipts.status,
-          attemptedAt: founderRecoveryArchiveDeletionReceipts.attemptedAt,
-          failureCode: founderRecoveryArchiveDeletionReceipts.failureCode,
-        })
-        .from(founderRecoveryArchiveDeletionReceipts)
-        .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, archive.id))
-        .limit(1)
-        .for("update");
-      if (
-        existingDeletion?.status === "pending" &&
-        existingDeletion.failureCode === null &&
-        existingDeletion.attemptedAt > new Date(now.valueOf() - 5 * 60 * 1_000)
-      ) {
-        throw new Error("Recovery Archive deletion is already in progress.");
-      }
-      await tx
-        .insert(founderRecoveryArchiveDeletionReceipts)
-        .values({
-          archiveId: archive.id,
-          userId,
-          idempotencyKey,
-          status: "pending",
-          providerConfirmed: false,
-          attemptedAt: now,
-          completedAt: null,
-          failureCode: null,
-        })
-        .onConflictDoUpdate({
-          target: founderRecoveryArchiveDeletionReceipts.archiveId,
-          set: { attemptedAt: now, failureCode: null },
-        });
-      return { archiveId: archive.id, storageObjectKey: archive.storageObjectKey, idempotencyKey };
-    });
-    if (!work) return;
-    try {
-      const deleted = await providers.deleteRecoveryArchive(work);
-      if (!deleted.absent) throw new Error("Recovery Archive absence was not confirmed.");
-      await connection.db.transaction(async (tx) => {
-        await tx
-          .update(founderRecoveryArchives)
-          .set({
-            status: "deleted",
-            storageObjectKey: null,
-            restorableVerified: false,
-            failureCode: null,
-            deletedAt: now,
-          })
-          .where(eq(founderRecoveryArchives.id, work.archiveId));
-        await tx
-          .update(founderRecoveryArchiveDeletionReceipts)
-          .set({
-            status: "completed",
-            providerConfirmed: true,
-            completedAt: now,
-            failureCode: null,
-          })
-          .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, work.archiveId));
-      });
-    } catch (error) {
-      await connection.db
-        .update(founderRecoveryArchiveDeletionReceipts)
-        .set({ failureCode: "archive_delete_failed", attemptedAt: now })
-        .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, work.archiveId));
-      throw error;
-    }
-  }
-}
-
-async function createDurableArchive(
-  input: LifecycleInput,
-  dependencies: LifecycleDependencies,
-  connection: DatabaseConnection,
-): Promise<string> {
-  const intent = await connection.db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${input.userId}`}, 0))`,
-    );
-    const [operator] = await tx
-      .select({ id: operators.id })
-      .from(operators)
-      .where(and(eq(operators.userId, input.userId), eq(operators.status, "active")))
-      .limit(1)
-      .for("update");
-    if (!operator) throw new Error("An active persisted Operator is required.");
-    const [preparation] = await tx
-      .select({ status: operatorPreparations.status })
-      .from(operatorPreparations)
-      .where(eq(operatorPreparations.operatorId, operator.id))
-      .limit(1);
-    if (preparation?.status !== "ready") {
-      throw new Error("A ready persisted Operator preparation is required.");
-    }
-    if (input.action === "recovery_archive_lifecycle") {
-      await requireVerifiedEntitlement(tx, input.userId);
-    }
-    const [record] = await tx
-      .insert(founderRecoveryArchives)
-      .values({
-        userId: input.userId,
-        operatorId: operator.id,
-        status: "pending",
-        storageObjectKey: null,
-        ciphertextDigest: null,
-        restorableVerified: false,
-        failureCode: null,
-        observedAt: input.now,
-        expiresAt: new Date(input.now.valueOf() + 30 * 24 * 60 * 60 * 1_000),
-        createdAt: input.now,
-      })
-      .returning({ id: founderRecoveryArchives.id });
-    if (!record) throw new Error("Recovery Archive intent was not persisted.");
-    return { archiveId: record.id, operatorId: operator.id };
-  });
-
-  await fulfillArchiveIntent(
-    input,
-    dependencies.providers,
-    connection,
-    intent.archiveId,
-    intent.operatorId,
-    true,
-  );
-  return intent.archiveId;
-}
-
-async function fulfillArchiveIntent(
-  input: LifecycleInput,
-  providers: FounderLifecycleProviderBoundary,
-  connection: DatabaseConnection,
-  archiveId: string,
-  operatorId: string,
-  failClosed: boolean,
-): Promise<void> {
-  try {
-    const archive = await providers.createRecoveryArchive({
-      archiveIntentId: archiveId,
-      userId: input.userId,
-      operatorId,
-      observedAt: input.now,
-    });
-    await connection.db
-      .update(founderRecoveryArchives)
-      .set({
-        status: "verified",
-        storageObjectKey: archive.storageObjectKey,
-        ciphertextDigest: archive.ciphertextDigest,
-        restorableVerified: archive.restorableVerified,
-        failureCode: null,
-      })
-      .where(eq(founderRecoveryArchives.id, archiveId));
-  } catch (error) {
-    await connection.db
-      .update(founderRecoveryArchives)
-      .set({ status: "failed", restorableVerified: false, failureCode: "archive_create_failed" })
-      .where(eq(founderRecoveryArchives.id, archiveId));
-    if (failClosed) throw error;
-  }
-}
-
 type RetirementWork = {
   receiptId: string;
   leaseToken: string;
@@ -667,7 +272,7 @@ async function executeInfrastructureRetirement(
   }
 
   if (prepared.archiveNeedsExecution) {
-    await fulfillArchiveIntent(
+    await fulfillRecoveryArchiveIntent(
       input,
       dependencies.providers,
       connection,
@@ -872,7 +477,7 @@ async function prepareInfrastructureRetirement(
         userId: input.userId,
         runnerId: runner.id,
         recoveryArchiveId: archiveIntent.id,
-        idempotencyKey: digest(`${input.userId}:${runner.id}`),
+        idempotencyKey: founderProductContractDigest(`${input.userId}:${runner.id}`),
         providerResourceId: runner.providerResourceId,
         providerFirewallId: runner.providerFirewallId,
         status: "in_progress",
@@ -1020,31 +625,6 @@ function lifecycleOutcome(
     providerCalls: providers.calls(),
     cleanup,
   };
-}
-
-function canonicalCommercePayload(event: FounderCommerceEvent): string {
-  return JSON.stringify({
-    eventId: event.eventId,
-    checkoutCorrelation: event.checkoutCorrelation,
-    subscriptionId: event.subscriptionId,
-    status: event.status,
-    endsAt: event.endsAt,
-    occurredAt: event.occurredAt,
-  });
-}
-
-function verifyHmac(payload: string, signature: string, secret: string): boolean {
-  if (!secret) return false;
-  const expected = `hmac-sha256:${createHmac("sha256", secret).update(payload).digest("hex")}`;
-  const actualBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expected);
-  return (
-    actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer)
-  );
-}
-
-function digest(value: string): `sha256:${string}` {
-  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
 function emptyCleanup(now: Date): FounderLifecycleCleanup {

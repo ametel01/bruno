@@ -9,6 +9,7 @@ import {
   createFounderProductContractHarness,
   runFounderProductContractPublicScenario,
   runFounderProductContractScenario,
+  type FounderProductContractApplication,
   type FounderProductContractClock,
 } from "@/src/testing/founder-product-contract";
 
@@ -47,6 +48,11 @@ test("four persisted lifecycle scenarios drive API, browser, keyboard, and acces
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
   try {
+    await assertFailedScenarioPoisonsExactCandidate({
+      application: harness.application,
+      clock,
+      runId,
+    });
     await runFounderProductContractPublicScenario(harness, async ({ application }) => {
       await withPinnedDevelopmentUser(fixture.userId, async () => {
         const apiResponse = await application.request({ method: "GET", path: "/api/operator" });
@@ -92,85 +98,6 @@ test("four persisted lifecycle scenarios drive API, browser, keyboard, and acces
                   }
                 : {}),
             };
-            if (id === "release_stage_admission") {
-              const archiveDeletionFailed = await application.request({
-                method: "POST",
-                path: "/api/operator/founder-product-contract/lifecycle",
-                body: { ...requestBody, providerFailure: "archive.delete" },
-              });
-              expect(archiveDeletionFailed.status).toBe(409);
-              await assertArchiveDeletionRemainsPending(fixture);
-              const failed = await application.request({
-                method: "POST",
-                path: "/api/operator/founder-product-contract/lifecycle",
-                body: { ...requestBody, providerFailure: "openAI.verify_connection" },
-              });
-              expect(failed.status).toBe(409);
-            }
-            if (id === "product_entitlement_lifecycle") {
-              const failed = await application.request({
-                method: "POST",
-                path: "/api/operator/founder-product-contract/lifecycle",
-                body: {
-                  ...requestBody,
-                  commerceEvent: signedCommerceEvent(runId, "wrong-owner-correlation", clock.now()),
-                  providerFailure: "lemonSqueezy.read_subscription",
-                },
-              });
-              expect(failed.status).toBe(409);
-            }
-            if (id === "recovery_archive_lifecycle") {
-              const failed = await application.request({
-                method: "POST",
-                path: "/api/operator/founder-product-contract/lifecycle",
-                body: { ...requestBody, providerFailure: "archive.create" },
-              });
-              expect(failed.status).toBe(409);
-            }
-            if (id === "infrastructure_retirement") {
-              const ambiguousRunnerId = await createAdditionalLiveRunner(fixture, clock);
-              const ambiguousIdentity = await application.request({
-                method: "POST",
-                path: "/api/operator/founder-product-contract/lifecycle",
-                body: { ...requestBody, providerFailure: "digitalOcean.observe_owned_resources" },
-              });
-              expect(ambiguousIdentity.status).toBe(409);
-              expect(await ambiguousIdentity.json()).toMatchObject({
-                error: { message: "Infrastructure Retirement runner identity is ambiguous." },
-              });
-              await deleteAdditionalRunner(ambiguousRunnerId);
-              const observationFailed = await application.request({
-                method: "POST",
-                path: "/api/operator/founder-product-contract/lifecycle",
-                body: { ...requestBody, providerFailure: "digitalOcean.observe_owned_resources" },
-              });
-              expect(observationFailed.status).toBe(409);
-              await assertTerminalEntitlementAuthority(fixture);
-              const reordered = await application.request({
-                method: "POST",
-                path: "/api/operator/founder-product-contract/lifecycle",
-                body: {
-                  ...requestBody,
-                  commerceEvent: admittedCommerceEvent,
-                  providerSubscriptionStatus: "active",
-                  providerFailure: "lemonSqueezy.read_subscription",
-                },
-              });
-              expect(reordered.status).toBe(409);
-              const deletionFailed = await application.request({
-                method: "POST",
-                path: "/api/operator/founder-product-contract/lifecycle",
-                body: {
-                  ...requestBody,
-                  providerFailures: ["archive.create", "digitalOcean.delete_firewall"],
-                },
-              });
-              expect(deletionFailed.status).toBe(409);
-              expect(await deletionFailed.json()).toMatchObject({
-                error: { message: "DigitalOcean deletion failed deterministically." },
-              });
-              await assertRetirementRemainsInProgress(fixture);
-            }
             const responses = await Promise.all(
               Array.from({ length: 1 }, () =>
                 application.request({
@@ -324,31 +251,45 @@ async function createFixture(clock: FounderProductContractClock): Promise<{
     await sql`insert into runners (id, user_id, name, kind, status, provider, provider_resource_id, provider_firewall_id, region, size_slug, image, provisioning_status, provisioning_operation_key, provisioning_started_at, provisioning_completed_at, created_at, updated_at) values (${runnerId}, ${userId}, ${`founder-${runnerId}`}, 'digitalocean', 'online', 'digitalocean', ${`droplet-${runnerId}`}, ${`firewall-${runnerId}`}, 'sfo3', 's-1vcpu-1gb', 'ubuntu-24-04-x64', 'ready', ${`bruno-deploy-${runnerId.replaceAll("-", "")}`}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
     await sql`insert into runner_credentials (id, runner_id, credential_hash, credential_prefix, status, created_at, updated_at) values (${credentialId}, ${runnerId}, ${`sha256:${runnerId.replaceAll("-", "")}`}, 'fpct', 'active', ${createdAt}, ${readyAt})`;
     await sql`insert into founder_checkout_correlations (user_id, correlation_digest, status, created_at, expires_at) values (${userId}, ${`sha256:${createHash("sha256").update(checkoutCorrelation).digest("hex")}`}, 'pending', ${createdAt}, ${new Date(clock.now().valueOf() + 60 * 60 * 1_000).toISOString()})`;
-    await sql`insert into founder_recovery_archives (id, user_id, operator_id, status, storage_object_key, ciphertext_digest, restorable_verified, failure_code, observed_at, expires_at, created_at, deleted_at) values (${expiredArchiveId}, ${userId}, ${operatorId}, 'verified', ${`founder-recovery/expired/${expiredArchiveId}.age`}, ${`sha256:${createHash("sha256").update(`expired:${userId}`).digest("hex")}`}, true, null, ${expiredArchiveObservedAt.toISOString()}, ${expiredArchiveExpiresAt.toISOString()}, ${expiredArchiveObservedAt.toISOString()}, null)`;
+    await sql`insert into founder_recovery_archives (id, user_id, operator_id, status, storage_object_key, ciphertext_digest, recovery_credential_digest, restorable_verified, failure_code, observed_at, expires_at, created_at, deleted_at) values (${expiredArchiveId}, ${userId}, ${operatorId}, 'verified', ${`founder-recovery/expired/${expiredArchiveId}.age`}, ${`sha256:${createHash("sha256").update(`expired:${userId}`).digest("hex")}`}, ${`sha256:${createHash("sha256").update(`expired-credential:${userId}`).digest("hex")}`}, true, null, ${expiredArchiveObservedAt.toISOString()}, ${expiredArchiveExpiresAt.toISOString()}, ${expiredArchiveObservedAt.toISOString()}, null)`;
   });
 
   return { userId, operatorId, runnerId, checkoutCorrelation };
 }
 
-async function createAdditionalLiveRunner(
-  fixture: { userId: string },
-  clock: FounderProductContractClock,
-): Promise<string> {
-  const runnerId = randomUUID();
-  const credentialId = randomUUID();
-  const observedAt = clock.now().toISOString();
-  await withDatabase(async (sql) => {
-    await sql`insert into runners (id, user_id, name, kind, status, provider, provider_resource_id, provider_firewall_id, region, size_slug, image, provisioning_status, provisioning_operation_key, provisioning_started_at, provisioning_completed_at, created_at, updated_at) values (${runnerId}, ${fixture.userId}, ${`ambiguous-${runnerId}`}, 'digitalocean', 'online', 'digitalocean', ${`droplet-${runnerId}`}, ${`firewall-${runnerId}`}, 'sfo3', 's-1vcpu-1gb', 'ubuntu-24-04-x64', 'ready', ${`bruno-deploy-${runnerId.replaceAll("-", "")}`}, ${observedAt}, ${observedAt}, ${observedAt}, ${observedAt})`;
-    await sql`insert into runner_credentials (id, runner_id, credential_hash, credential_prefix, status, created_at, updated_at) values (${credentialId}, ${runnerId}, ${`sha256:${runnerId.replaceAll("-", "")}`}, 'fpct', 'active', ${observedAt}, ${observedAt})`;
-  });
-  return runnerId;
-}
+async function assertFailedScenarioPoisonsExactCandidate(input: {
+  application: FounderProductContractApplication;
+  clock: FounderProductContractClock;
+  runId: string;
+}): Promise<void> {
+  const fixture = await createFixture(input.clock);
+  try {
+    await withPinnedDevelopmentUser(fixture.userId, async () => {
+      const failed = await input.application.request({
+        method: "POST",
+        path: "/api/operator/founder-product-contract/lifecycle",
+        body: {
+          action: "release_stage_admission",
+          runId: input.runId,
+          now: input.clock.now().toISOString(),
+          providerFailure: "archive.delete_credentials",
+        },
+      });
+      expect(failed.status).toBe(409);
+      await assertArchiveAndCredentialDeletionRemainUnconfirmed(fixture);
 
-async function deleteAdditionalRunner(runnerId: string): Promise<void> {
-  await withDatabase(async (sql) => {
-    await sql`delete from runner_credentials where runner_id = ${runnerId}`;
-    await sql`delete from runners where id = ${runnerId}`;
-  });
+      const ledger = await input.application.request({
+        method: "GET",
+        path: "/api/operator/founder-product-contract/lifecycle",
+      });
+      expect(ledger.status).toBe(409);
+      expect(await ledger.json()).toMatchObject({
+        error: { message: expect.stringContaining("did not execute exactly once") },
+      });
+    });
+  } finally {
+    await deleteFixture(fixture);
+  }
 }
 
 async function deleteFixture(fixture: {
@@ -411,7 +352,7 @@ async function assertPersistedLifecycleAuthority(fixture: {
       (select count(*)::int from founder_recovery_archives where user_id = ${fixture.userId} and status = 'verified') as archives,
       (select count(*)::int from founder_recovery_archives where user_id = ${fixture.userId} and status = 'failed') as failed_archives,
       (select count(*)::int from founder_recovery_archives where user_id = ${fixture.userId} and status = 'deleted' and deleted_at is not null) as deleted_archives,
-      (select count(*)::int from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId} and status = 'completed' and provider_confirmed = true) as archive_deletions,
+      (select count(*)::int from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId} and status = 'completed' and archive_provider_confirmed = true and recovery_credentials_confirmed = true) as archive_deletions,
       (select count(*)::int from founder_infrastructure_retirements where user_id = ${fixture.userId} and status = 'completed') as retirements,
       (select status from runners where id = ${fixture.runnerId}) as runner_status,
       (select count(*)::int from runner_credentials where runner_id in (select id from runners where user_id = ${fixture.userId}) and status = 'active') as active_credentials,
@@ -424,8 +365,8 @@ async function assertPersistedLifecycleAuthority(fixture: {
       terminal_entitlements: 1,
       consumed_correlations: 1,
       safe_release_decisions: 1,
-      archives: 3,
-      failed_archives: 2,
+      archives: 2,
+      failed_archives: 1,
       deleted_archives: 1,
       archive_deletions: 1,
       retirements: 1,
@@ -437,54 +378,22 @@ async function assertPersistedLifecycleAuthority(fixture: {
   });
 }
 
-async function assertRetirementRemainsInProgress(fixture: {
+async function assertArchiveAndCredentialDeletionRemainUnconfirmed(fixture: {
   userId: string;
-  operatorId: string;
-  runnerId: string;
-  checkoutCorrelation: string;
 }): Promise<void> {
   await withDatabase(async (sql) => {
     const [state] = await sql<
-      { status: string; failure_code: string; credential_status: string; paused: boolean }[]
-    >`select
-      (select status from founder_infrastructure_retirements where user_id = ${fixture.userId}) as status,
-      (select failure_code from founder_infrastructure_retirements where user_id = ${fixture.userId}) as failure_code,
-      (select status from runner_credentials where runner_id = ${fixture.runnerId}) as credential_status,
-      (select external_action_pause from operators where id = ${fixture.operatorId}) as paused`;
-    expect(state).toEqual({
-      status: "in_progress",
-      failure_code: "provider_effect_failed",
-      credential_status: "revoked",
-      paused: true,
-    });
-  });
-}
-
-async function assertTerminalEntitlementAuthority(fixture: { userId: string }): Promise<void> {
-  await withDatabase(async (sql) => {
-    const [state] = await sql<
-      { status: string; event_type: string; terminal_events: number }[]
-    >`select entitlement.status, event.event_type,
-      (select count(*)::int from founder_commerce_events where user_id = ${fixture.userId} and event_type = 'subscription_cancelled') as terminal_events
-      from founder_product_entitlements entitlement
-      join founder_commerce_events event on event.id = entitlement.source_event_id
-      where entitlement.user_id = ${fixture.userId}`;
-    expect(state).toEqual({
-      status: "cancelled",
-      event_type: "subscription_cancelled",
-      terminal_events: 1,
-    });
-  });
-}
-
-async function assertArchiveDeletionRemainsPending(fixture: { userId: string }): Promise<void> {
-  await withDatabase(async (sql) => {
-    const [state] = await sql<
-      { status: string; provider_confirmed: boolean; failure_code: string }[]
-    >`select status, provider_confirmed, failure_code from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId}`;
+      {
+        status: string;
+        archive_provider_confirmed: boolean;
+        recovery_credentials_confirmed: boolean;
+        failure_code: string;
+      }[]
+    >`select status, archive_provider_confirmed, recovery_credentials_confirmed, failure_code from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId}`;
     expect(state).toEqual({
       status: "pending",
-      provider_confirmed: false,
+      archive_provider_confirmed: false,
+      recovery_credentials_confirmed: false,
       failure_code: "archive_delete_failed",
     });
   });

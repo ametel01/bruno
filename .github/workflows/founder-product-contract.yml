@@ -85,7 +85,8 @@ jobs:
       PORT: "3100"
       PLAYWRIGHT_BASE_URL: http://localhost:3100
       BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION: ${{ github.sha }}
-      BRUNO_FOUNDER_CONTRACT_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
+      BRUNO_FOUNDER_CONTRACT_RUN_ID: github-${{ github.run_id }}
+      BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT: ${{ github.run_attempt }}
       BRUNO_FOUNDER_CONTRACT_MODE: ${{ inputs.mode || 'ci' }}
       BRUNO_FOUNDER_CONTRACT_VOICEOVER_DIGEST: ${{ inputs.voiceover_evidence_digest }}
       BRUNO_FOUNDER_CONTRACT_VOICEOVER_OS_VERSION: ${{ inputs.voiceover_os_version }}

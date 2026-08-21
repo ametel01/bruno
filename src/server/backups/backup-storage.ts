@@ -18,10 +18,6 @@ export type BackupStorageDownloadResult =
   | { ok: true; storageUri: string; body: Uint8Array; contentType: string | null }
   | BackupStorageFailure;
 
-export type BackupStorageDeleteResult =
-  | { ok: true; storageUri: string; absent: true }
-  | BackupStorageFailure;
-
 export type BackupObjectStorage = {
   upload(input: BackupStorageUploadInput): Promise<BackupStorageUploadResult>;
   download(input: BackupStorageDownloadInput): Promise<BackupStorageDownloadResult>;
@@ -147,17 +143,6 @@ export class FakeBackupObjectStorage implements BackupObjectStorage {
       contentType: artifact.contentType,
     };
   }
-
-  async delete(input: BackupStorageDownloadInput): Promise<BackupStorageDeleteResult> {
-    const keyResult = validateBackupArtifactKey(input.key);
-    if (!keyResult.ok) return backupStorageFailure("download");
-    this.artifacts.delete(keyResult.key);
-    return {
-      ok: true,
-      storageUri: buildBackupStorageUri(this.bucket, keyResult.key),
-      absent: true,
-    };
-  }
 }
 
 export class S3CompatibleBackupObjectStorage implements BackupObjectStorage {
@@ -235,29 +220,8 @@ export class S3CompatibleBackupObjectStorage implements BackupObjectStorage {
     }
   }
 
-  async delete(input: BackupStorageDownloadInput): Promise<BackupStorageDeleteResult> {
-    const keyResult = validateBackupArtifactKey(input.key);
-    if (!keyResult.ok) return backupStorageFailure("download");
-    const request = this.createSignedRequest({
-      method: "DELETE",
-      key: keyResult.key,
-      body: new Uint8Array(),
-    });
-    try {
-      const response = await this.fetchImplementation(request);
-      if (!response.ok) return backupStorageFailure("download");
-      return {
-        ok: true,
-        storageUri: buildBackupStorageUri(this.config.bucket, keyResult.key),
-        absent: true,
-      };
-    } catch {
-      return backupStorageFailure("download");
-    }
-  }
-
   private createSignedRequest(input: {
-    method: "DELETE" | "GET" | "PUT";
+    method: "GET" | "PUT";
     key: string;
     body: Uint8Array;
     contentType?: string;

@@ -610,6 +610,13 @@
       "when": 1787290069089,
       "tag": "0086_redundant_golden_guardian",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1787291997918,
+      "tag": "0087_founder_contract_policy_completion",
+      "breakpoints": true
     }
   ]
 }
