@@ -17,6 +17,7 @@ export function resolvePlaywrightArtifactPolicy(env: Record<string, string | und
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  testIgnore: ["founder-product-contract.spec.ts"],
   fullyParallel: false,
   reporter: "list",
   workers: 1,

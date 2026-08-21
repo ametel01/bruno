@@ -135,7 +135,7 @@ describe("backup object storage boundary", () => {
     });
   });
 
-  it("uploads and downloads through the S3-compatible adapter without leaking credentials", async () => {
+  it("uploads, downloads, and deletes through the S3-compatible adapter without leaking credentials", async () => {
     const requests: Request[] = [];
     const storage = new S3CompatibleBackupObjectStorage(COMPLETE_ENV_CONFIG, {
       fetchImplementation: async (input) => {
@@ -179,10 +179,16 @@ describe("backup object storage boundary", () => {
     }
 
     expect(new TextDecoder().decode(downloaded.body)).toBe("stored artifact");
-    expect(requests).toHaveLength(2);
+    await expect(storage.delete({ key: "agents/agent-1/backup.json" })).resolves.toEqual({
+      ok: true,
+      storageUri: "s3://bruno-backups/agents/agent-1/backup.json",
+      absent: true,
+    });
+    expect(requests).toHaveLength(3);
     expect(requests.map((request) => [request.method, request.url])).toEqual([
       ["PUT", "https://nyc3.digitaloceanspaces.com/bruno-backups/agents/agent-1/backup.json"],
       ["GET", "https://nyc3.digitaloceanspaces.com/bruno-backups/agents/agent-1/backup.json"],
+      ["DELETE", "https://nyc3.digitaloceanspaces.com/bruno-backups/agents/agent-1/backup.json"],
     ]);
 
     const serializedRequests = JSON.stringify(

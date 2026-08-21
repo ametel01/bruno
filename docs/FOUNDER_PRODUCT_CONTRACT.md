@@ -16,7 +16,7 @@ absent.
 ```bash
 BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION="$(git rev-parse HEAD)" \
 BRUNO_FOUNDER_CONTRACT_RUN_ID="local-$(git rev-parse --short HEAD)" \
-BRUNO_FOUNDER_CONTRACT_OBSERVED_AT="2026-08-20T00:00:00.000Z" \
+BRUNO_FOUNDER_CONTRACT_OBSERVED_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" \
 BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH="founder-contract-scenario-ledger.json" \
 BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET="${BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET:?set the trusted producer secret}" \
 BRUNO_AUTH_MODE="development" \
@@ -65,17 +65,31 @@ used by either mode.
 ## Deterministic lifecycle seam
 
 Lifecycle scenarios use the public seam in `src/testing/founder-product-contract.ts`. The seam is
-split into clock, provider-boundary, application-adapter, harness, and evidence-ledger modules.
-The application adapter must point at the persisted Founder application and public API; the seam
-does not emulate lifecycle state or authority. Deterministic doubles for Clerk, Lemon Squeezy,
-DigitalOcean, OpenAI, Anthropic, and Google are passed to that same adapter boundary for contract
-tests, while production lifecycle code remains authoritative for Release Stage, Product
-Entitlement, Recovery Archive, and Infrastructure Retirement. Scenarios advance time explicitly,
-never sleep, and record an allowlisted cleanup outcome without resource identifiers. Every
+split into clock, application adapter, harness, and evidence-ledger modules. The application
+adapter calls Bruno's persisted Founder application and public API; it does not emulate lifecycle
+state or authority. In deterministic mode the API installs stateful provider doubles at the same
+provider interfaces used by the lifecycle service. The service records immutable Release
+Decisions, single-use Owner-bound Checkout Correlations, signature-verified and idempotent Lemon
+Squeezy event receipts, reconciled Product Entitlements, 30-day restorable Recovery Archives,
+revoked runtime credentials, and exact-provider Infrastructure Retirement receipts. Provider
+subscription state can make entitlement retirement due; verified archives that reach their
+30-day expiry are deleted through a durable, idempotent provider receipt by the protected hourly
+expiry worker. Delayed or reordered commerce events cannot replace newer authority; reactivation
+requires a newly pending Owner-bound Checkout Correlation. DigitalOcean cleanup is derived from
+authoritative owned-set observations before and after firewall-first deletion. The in-progress
+retirement receipt and credential revocation commit before destructive provider effects, so
+failures remain retryable against the same resource identity. Archive creation or expiry failure is
+recorded but does not block infrastructure destruction. These deterministic provider results prove
+Bruno's application behavior only; they never substitute for separately
+bound live-provider or moderated Founder evidence required for General Release. Scenarios advance
+time explicitly, never sleep, and record an allowlisted cleanup outcome without resource
+identifiers. Every
 canonical scenario must pass exactly once against the same revision and within the bounded
 observation window; missing, failed, skipped, retried, stale, mismatched, or unverified-cleanup
-results fail closed. Release evidence consumes a signed, exact-run ledger emitted by the real
-persisted application at the producer's fixed artifact path. The ledger binds the
+results fail closed. After each successful transition, the application commits a canonical
+scenario-execution receipt. Only the application can assemble and sign the complete exact-run
+ledger from those persisted receipts; the browser test copies that response to the producer's
+fixed artifact path without constructing results or using the signing authority. The ledger binds the
 canonical producer, source revision, workflow run ID, observation instant, results digest, and
 HMAC signature using the protected
 `BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET`; unsigned or caller-authored results are

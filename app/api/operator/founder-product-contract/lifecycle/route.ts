@@ -1,6 +1,17 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import {
-  applyFounderProductContractLifecycleAction,
+  deterministicFounderLifecycleProviders,
+  type FounderLifecycleFailureOperation,
+} from "@/src/server/founder-product-contract/deterministic-providers";
+import {
+  claimFounderProductContractScenarioExecution,
+  completeFounderProductContractScenarioExecution,
+  failFounderProductContractScenarioExecution,
+  issueFounderProductContractScenarioLedger,
+} from "@/src/server/founder-product-contract/evidence";
+import {
+  executeFounderProductContractLifecycleAction,
+  type FounderCommerceEvent,
+  type FounderCommerceStatus,
   type FounderProductContractLifecycleAction,
 } from "@/src/server/founder-product-contract/lifecycle";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
@@ -13,64 +24,141 @@ const ACTIONS = new Set<FounderProductContractLifecycleAction>([
   "recovery_archive_lifecycle",
   "infrastructure_retirement",
 ]);
+const FAILURE_OPERATIONS = new Set<FounderLifecycleFailureOperation>([
+  "clerk.authenticate",
+  "openAI.verify_connection",
+  "anthropic.verify_connection",
+  "google.verify_connection",
+  "lemonSqueezy.read_subscription",
+  "archive.create",
+  "archive.delete",
+  "digitalOcean.observe_owned_resources",
+  "digitalOcean.delete_firewall",
+  "digitalOcean.delete_droplet",
+  "digitalOcean.observe_owned_resources_absent",
+]);
+const COMMERCE_STATUSES = new Set<FounderCommerceStatus>([
+  "active",
+  "past_due",
+  "unpaid",
+  "cancelled",
+  "expired",
+  "refunded",
+]);
+
+export async function GET(request: Request): Promise<Response> {
+  const applicationUser = await requireConfiguredApplicationUser();
+  if (!applicationUser.ok) {
+    return Response.json({ error: { code: "authentication_required" } }, { status: 401 });
+  }
+  if (!deterministicBoundaryAvailable()) {
+    return Response.json({ error: { code: "provider_boundary_unavailable" } }, { status: 503 });
+  }
+  if (new URL(request.url).search.length > 0 || request.body !== null) {
+    return Response.json({ error: { code: "invalid_ledger_request" } }, { status: 400 });
+  }
+  const identity = contractIdentity();
+  const signingSecret = process.env.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET ?? "";
+  if (!identity || !signingSecret) {
+    return Response.json({ error: { code: "ledger_authority_unavailable" } }, { status: 503 });
+  }
+  try {
+    const ledger = await issueFounderProductContractScenarioLedger({
+      ...identity,
+      userId: applicationUser.userId,
+      signingSecret,
+    });
+    return Response.json({ ledger }, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    return Response.json(
+      {
+        error: {
+          code: "ledger_incomplete",
+          message: error instanceof Error ? error.message : "Lifecycle ledger is incomplete.",
+        },
+      },
+      { status: 409, headers: { "cache-control": "no-store" } },
+    );
+  }
+}
 
 export async function POST(request: Request): Promise<Response> {
   const applicationUser = await requireConfiguredApplicationUser();
   if (!applicationUser.ok) {
     return Response.json({ error: { code: "authentication_required" } }, { status: 401 });
   }
-
-  const body = await readBody(request);
-  if (!body || !ACTIONS.has(body.action)) {
-    return Response.json({ error: { code: "invalid_lifecycle_action" } }, { status: 400 });
-  }
-  if (!/^[a-f0-9]{40}$/.test(body.sourceRevision) || !/^[A-Za-z0-9._:-]{1,128}$/.test(body.runId)) {
-    return Response.json({ error: { code: "invalid_lifecycle_identity" } }, { status: 400 });
-  }
-
-  if (body.action === "product_entitlement_lifecycle") {
-    const secret =
-      process.env.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET ??
-      (process.env.BRUNO_AUTH_MODE === "development" ? "founder-contract-development-secret" : "");
-    if (!secret || !body.commerceEvent || !verifyCommerceEvent(body.commerceEvent, secret)) {
-      return Response.json({ error: { code: "invalid_commerce_event" } }, { status: 400 });
-    }
-  }
-
-  if (
-    process.env.BRUNO_AUTH_MODE !== "development" &&
-    process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE !== "deterministic"
-  ) {
+  if (!deterministicBoundaryAvailable()) {
     return Response.json({ error: { code: "provider_boundary_unavailable" } }, { status: 503 });
   }
 
-  const calls: string[] = [];
-  const provider = async (name: string) => {
-    calls.push(name);
+  const body = await readBody(request);
+  if (!body || !ACTIONS.has(body.action)) {
+    return Response.json({ error: { code: "invalid_lifecycle_request" } }, { status: 400 });
+  }
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(body.runId)) {
+    return Response.json({ error: { code: "invalid_lifecycle_identity" } }, { status: 400 });
+  }
+  const identity = contractIdentity();
+  if (!identity) {
+    return Response.json({ error: { code: "application_revision_unavailable" } }, { status: 503 });
+  }
+  if (body.runId !== identity.runId) {
+    return Response.json({ error: { code: "lifecycle_identity_mismatch" } }, { status: 409 });
+  }
+  const commerceWebhookSecret =
+    process.env.BRUNO_FOUNDER_CONTRACT_COMMERCE_WEBHOOK_SECRET ??
+    (process.env.BRUNO_AUTH_MODE === "development" ? "founder-contract-lemon-test-secret-v1" : "");
+  if (!commerceWebhookSecret) {
+    return Response.json({ error: { code: "commerce_boundary_unavailable" } }, { status: 503 });
+  }
+
+  const now = new Date(body.now);
+  const providers = deterministicFounderLifecycleProviders({
+    runId: body.runId,
+    userId: applicationUser.userId,
+    now,
+    failures: body.providerFailures,
+    subscriptionStatus: body.providerSubscriptionStatus,
+  });
+  const isFaultProbe = body.providerFailures.some(
+    (operation) => !(body.action === "infrastructure_retirement" && operation === "archive.create"),
+  );
+  const evidenceIdentity = {
+    runId: identity.runId,
+    userId: applicationUser.userId,
+    sourceRevision: identity.sourceRevision,
+    scenarioId: body.action,
+    observedAt: now,
   };
+  let claimed = false;
   try {
-    const state = await applyFounderProductContractLifecycleAction({
-      action: body.action,
-      runId: body.runId,
-      sourceRevision: body.sourceRevision,
-      userId: applicationUser.userId,
-      now: new Date(body.now),
-      providers: {
-        clerkAuthenticate: () => provider("clerk.authenticate"),
-        reconcileEntitlement: () => provider("lemonSqueezy.receive_webhook"),
-        verifyArchive: () => provider("application.verify_recovery_archive"),
-        observeResources: () => provider("digitalOcean.observe_owned_resources"),
-        disableCredentials: () => provider("digitalOcean.disable_runtime_credentials"),
-        deleteFirewall: () => provider("digitalOcean.delete_firewall"),
-        deleteDroplet: () => provider("digitalOcean.delete_droplet"),
-        verifyResourcesAbsent: () => provider("digitalOcean.observe_owned_resources_absent"),
+    if (!isFaultProbe) {
+      claimed = true;
+      await claimFounderProductContractScenarioExecution(evidenceIdentity);
+    }
+    const outcome = await executeFounderProductContractLifecycleAction(
+      {
+        action: body.action,
+        runId: body.runId,
+        userId: applicationUser.userId,
+        now,
+        ...(body.commerceEvent ? { commerceEvent: body.commerceEvent } : {}),
       },
-    });
-    return Response.json(
-      { state, providerCalls: calls },
-      { headers: { "cache-control": "no-store" } },
+      { providers, commerceWebhookSecret, applicationRevision: identity.sourceRevision },
     );
+    if (isFaultProbe) {
+      throw new Error("A deterministic fault probe unexpectedly completed its lifecycle action.");
+    }
+    await completeFounderProductContractScenarioExecution({ identity: evidenceIdentity, outcome });
+    return Response.json({ outcome }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
+    if (claimed) {
+      try {
+        await failFounderProductContractScenarioExecution(evidenceIdentity);
+      } catch {
+        // The original lifecycle failure remains authoritative; ledger issuance still fails closed.
+      }
+    }
     return Response.json(
       {
         error: {
@@ -78,65 +166,111 @@ export async function POST(request: Request): Promise<Response> {
           message: error instanceof Error ? error.message : "Lifecycle transition failed.",
         },
       },
-      { status: 409 },
+      { status: 409, headers: { "cache-control": "no-store" } },
     );
   }
+}
+
+function deterministicBoundaryAvailable(): boolean {
+  return (
+    process.env.BRUNO_AUTH_MODE === "development" &&
+    process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE === "deterministic"
+  );
+}
+
+function contractIdentity(): {
+  sourceRevision: string;
+  runId: string;
+  observedAt: string;
+} | null {
+  const sourceRevision =
+    process.env.BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION ?? process.env.VERCEL_GIT_COMMIT_SHA ?? "";
+  const runId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID ?? "";
+  const observedAt = process.env.BRUNO_FOUNDER_CONTRACT_OBSERVED_AT ?? "";
+  if (
+    !/^[a-f0-9]{40}$/.test(sourceRevision) ||
+    !/^[A-Za-z0-9._:-]{1,128}$/.test(runId) ||
+    Number.isNaN(new Date(observedAt).valueOf()) ||
+    new Date(observedAt).toISOString() !== observedAt
+  ) {
+    return null;
+  }
+  return { sourceRevision, runId, observedAt };
 }
 
 async function readBody(request: Request): Promise<{
   action: FounderProductContractLifecycleAction;
   runId: string;
-  sourceRevision: string;
   now: string;
-  commerceEvent?: { eventId: string; status: "active"; signature: string };
+  commerceEvent?: FounderCommerceEvent;
+  providerSubscriptionStatus: FounderCommerceStatus;
+  providerFailures: readonly FounderLifecycleFailureOperation[];
 } | null> {
   try {
     const value = (await request.json()) as Record<string, unknown>;
     if (
       typeof value.action !== "string" ||
       typeof value.runId !== "string" ||
-      typeof value.sourceRevision !== "string" ||
       typeof value.now !== "string" ||
-      Number.isNaN(new Date(value.now).valueOf())
+      Number.isNaN(new Date(value.now).valueOf()) ||
+      (value.providerSubscriptionStatus !== undefined &&
+        (typeof value.providerSubscriptionStatus !== "string" ||
+          !COMMERCE_STATUSES.has(value.providerSubscriptionStatus as FounderCommerceStatus))) ||
+      (value.providerFailure !== undefined &&
+        (typeof value.providerFailure !== "string" ||
+          !FAILURE_OPERATIONS.has(value.providerFailure as FounderLifecycleFailureOperation))) ||
+      (value.providerFailures !== undefined &&
+        (!Array.isArray(value.providerFailures) ||
+          !value.providerFailures.every(
+            (operation) =>
+              typeof operation === "string" &&
+              FAILURE_OPERATIONS.has(operation as FounderLifecycleFailureOperation),
+          )))
     ) {
       return null;
     }
+    const commerceEvent = isCommerceEvent(value.commerceEvent) ? value.commerceEvent : undefined;
+    if (value.action === "product_entitlement_lifecycle" && !commerceEvent) return null;
+    if (value.action === "infrastructure_retirement" && !commerceEvent) return null;
     return {
       action: value.action as FounderProductContractLifecycleAction,
       runId: value.runId,
-      sourceRevision: value.sourceRevision,
       now: value.now,
-      ...(isCommerceEvent(value.commerceEvent) ? { commerceEvent: value.commerceEvent } : {}),
+      ...(commerceEvent ? { commerceEvent } : {}),
+      providerSubscriptionStatus:
+        (value.providerSubscriptionStatus as FounderCommerceStatus | undefined) ?? "active",
+      providerFailures: [
+        ...((value.providerFailures as FounderLifecycleFailureOperation[] | undefined) ?? []),
+        ...((value.providerFailure as FounderLifecycleFailureOperation | undefined)
+          ? [value.providerFailure as FounderLifecycleFailureOperation]
+          : []),
+      ],
     };
   } catch {
     return null;
   }
 }
 
-function isCommerceEvent(value: unknown): value is {
-  eventId: string;
-  status: "active";
-  signature: string;
-} {
+function isCommerceEvent(value: unknown): value is FounderCommerceEvent {
   return (
     typeof value === "object" &&
     value !== null &&
     "eventId" in value &&
     typeof value.eventId === "string" &&
+    "checkoutCorrelation" in value &&
+    typeof value.checkoutCorrelation === "string" &&
+    "subscriptionId" in value &&
+    typeof value.subscriptionId === "string" &&
     "status" in value &&
-    value.status === "active" &&
+    typeof value.status === "string" &&
+    COMMERCE_STATUSES.has(value.status as FounderCommerceStatus) &&
+    "endsAt" in value &&
+    (value.endsAt === null ||
+      (typeof value.endsAt === "string" && !Number.isNaN(new Date(value.endsAt).valueOf()))) &&
+    "occurredAt" in value &&
+    typeof value.occurredAt === "string" &&
+    !Number.isNaN(new Date(value.occurredAt).valueOf()) &&
     "signature" in value &&
     typeof value.signature === "string"
   );
-}
-
-function verifyCommerceEvent(
-  event: { eventId: string; status: "active"; signature: string },
-  secret: string,
-): boolean {
-  const payload = JSON.stringify({ eventId: event.eventId, status: event.status });
-  const expected = `hmac-sha256:${createHmac("sha256", secret).update(payload).digest("hex")}`;
-  const left = Buffer.from(event.signature);
-  const right = Buffer.from(expected);
-  return left.length === right.length && timingSafeEqual(left, right);
 }

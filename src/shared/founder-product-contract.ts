@@ -81,12 +81,16 @@ export const FOUNDER_PRODUCT_CONTRACT_UNIT_FILES = [
   "tests/unit/founder-data-export.test.ts",
   "tests/unit/founder-deletion-db.test.ts",
   "tests/unit/founder-retention-db.test.ts",
+  "tests/unit/founder-recovery-archive-expiry-route.test.ts",
+  "tests/unit/founder-recovery-archive-provider.test.ts",
   "tests/unit/founder-recovery.test.ts",
   "tests/unit/founder-support.test.ts",
   "tests/unit/operator-access.test.ts",
+  "tests/unit/founder-product-contract-application-evidence.test.ts",
   "tests/unit/founder-product-contract-evidence.test.ts",
   "tests/unit/founder-general-release-decision.test.ts",
   "tests/unit/founder-product-contract-harness.test.ts",
+  "tests/unit/backup-storage.test.ts",
 ] as const;
 
 export const FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS = [

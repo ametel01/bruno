@@ -30,6 +30,10 @@
     {
       "path": "/api/internal/operator/deletion",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/internal/operator/founder-recovery-archive-expiry",
+      "schedule": "15 * * * *"
     }
   ]
 }

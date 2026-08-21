@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
@@ -7,11 +7,8 @@ import postgres from "postgres";
 import {
   createFounderProductContractClock,
   createFounderProductContractHarness,
-  createFounderProductContractProviderDoubles,
-  createFounderProductContractScenarioLedger,
   runFounderProductContractPublicScenario,
   runFounderProductContractScenario,
-  type FounderProductContractApplicationContext,
   type FounderProductContractClock,
 } from "@/src/testing/founder-product-contract";
 
@@ -21,30 +18,18 @@ test("four persisted lifecycle scenarios drive API, browser, keyboard, and acces
   page,
   request,
 }, testInfo) => {
-  const clock = createFounderProductContractClock("2026-08-20T00:00:00.000Z");
-  const providers = createFounderProductContractProviderDoubles({ clock });
-  providers.clerk.setResponse("authenticate", { ok: true, value: { subject: "founder-contract" } });
-  providers.lemonSqueezy.setResponse("receive_webhook", { ok: true, value: { accepted: true } });
-  providers.lemonSqueezy.setResponse("read_subscription", {
-    ok: true,
-    value: { status: "active" },
-  });
-  providers.digitalOcean.setResponse("observe_owned_resources", {
-    ok: true,
-    value: { resources: ["droplet", "firewall"] },
-  });
-  providers.digitalOcean.setResponse("delete_firewall", { ok: true, value: { deleted: true } });
-  providers.digitalOcean.setResponse("delete_droplet", { ok: true, value: { deleted: true } });
+  const clock = createFounderProductContractClock(
+    process.env.BRUNO_FOUNDER_CONTRACT_OBSERVED_AT ?? new Date().toISOString(),
+  );
   const fixture = await createFixture(clock);
   const contractSourceRevision =
     process.env.BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION ?? "a".repeat(40);
+  const runId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID ?? "local-founder-contract";
   const harness = createFounderProductContractHarness({
     clock,
-    providers,
+    sourceRevision: contractSourceRevision,
     application: {
-      request: async ({ method, path, body }, context) => {
-        const providerFailure = await gateLifecycleRequest(body, path, context);
-        if (providerFailure) return providerFailure;
+      request: async ({ method, path, body }) => {
         const response = await request.fetch(path, {
           method,
           ...(body === undefined ? {} : { data: body as object }),
@@ -58,6 +43,7 @@ test("four persisted lifecycle scenarios drive API, browser, keyboard, and acces
     },
   });
   const pageErrors: string[] = [];
+  let admittedCommerceEvent: ReturnType<typeof signedCommerceEvent> | undefined;
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
   try {
@@ -76,49 +62,162 @@ test("four persisted lifecycle scenarios drive API, browser, keyboard, and acces
           "infrastructure_retirement",
         ] as const) {
           await runFounderProductContractScenario(harness, id, async ({ application, clock }) => {
-            const response = await application.request({
-              method: "POST",
-              path: "/api/operator/founder-product-contract/lifecycle",
-              body: {
-                action: id,
-                runId: process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID ?? "local-founder-contract",
-                sourceRevision: contractSourceRevision,
-                now: clock.now().toISOString(),
-                ...(id === "product_entitlement_lifecycle"
-                  ? {
-                      commerceEvent: signedCommerceEvent(
-                        process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID ?? "local-founder-contract",
-                      ),
-                    }
-                  : {}),
-              },
-            });
-            expect(response.status).toBe(200);
-            const body = (await response.json()) as {
-              state: {
-                infrastructure: string;
-                releaseStage: string | null;
-                entitlement: string | null;
-              };
-              providerCalls: string[];
+            if (id === "product_entitlement_lifecycle") {
+              admittedCommerceEvent ??= signedCommerceEvent(
+                runId,
+                fixture.checkoutCorrelation,
+                clock.now(),
+              );
+            }
+            const requestBody = {
+              action: id,
+              runId,
+              now: clock.now().toISOString(),
+              ...(id === "product_entitlement_lifecycle"
+                ? {
+                    commerceEvent: admittedCommerceEvent,
+                    providerSubscriptionStatus: "active",
+                  }
+                : {}),
+              ...(id === "infrastructure_retirement"
+                ? {
+                    commerceEvent: signedCommerceEvent(
+                      runId,
+                      fixture.checkoutCorrelation,
+                      clock.now(),
+                      "cancelled",
+                    ),
+                    providerSubscriptionStatus: "cancelled",
+                    providerFailure: "archive.create",
+                  }
+                : {}),
             };
-            expect(body.providerCalls.length).toBeGreaterThan(0);
-            if (id === "release_stage_admission")
-              expect(body.state.releaseStage).toBe("owner_preview");
-            if (id === "product_entitlement_lifecycle")
-              expect(body.state.entitlement).toBe("verified");
-            if (id === "infrastructure_retirement")
-              expect(body.state.infrastructure).toBe("retired");
+            if (id === "release_stage_admission") {
+              const archiveDeletionFailed = await application.request({
+                method: "POST",
+                path: "/api/operator/founder-product-contract/lifecycle",
+                body: { ...requestBody, providerFailure: "archive.delete" },
+              });
+              expect(archiveDeletionFailed.status).toBe(409);
+              await assertArchiveDeletionRemainsPending(fixture);
+              const failed = await application.request({
+                method: "POST",
+                path: "/api/operator/founder-product-contract/lifecycle",
+                body: { ...requestBody, providerFailure: "openAI.verify_connection" },
+              });
+              expect(failed.status).toBe(409);
+            }
+            if (id === "product_entitlement_lifecycle") {
+              const failed = await application.request({
+                method: "POST",
+                path: "/api/operator/founder-product-contract/lifecycle",
+                body: {
+                  ...requestBody,
+                  commerceEvent: signedCommerceEvent(runId, "wrong-owner-correlation", clock.now()),
+                  providerFailure: "lemonSqueezy.read_subscription",
+                },
+              });
+              expect(failed.status).toBe(409);
+            }
+            if (id === "recovery_archive_lifecycle") {
+              const failed = await application.request({
+                method: "POST",
+                path: "/api/operator/founder-product-contract/lifecycle",
+                body: { ...requestBody, providerFailure: "archive.create" },
+              });
+              expect(failed.status).toBe(409);
+            }
+            if (id === "infrastructure_retirement") {
+              const ambiguousRunnerId = await createAdditionalLiveRunner(fixture, clock);
+              const ambiguousIdentity = await application.request({
+                method: "POST",
+                path: "/api/operator/founder-product-contract/lifecycle",
+                body: { ...requestBody, providerFailure: "digitalOcean.observe_owned_resources" },
+              });
+              expect(ambiguousIdentity.status).toBe(409);
+              expect(await ambiguousIdentity.json()).toMatchObject({
+                error: { message: "Infrastructure Retirement runner identity is ambiguous." },
+              });
+              await deleteAdditionalRunner(ambiguousRunnerId);
+              const observationFailed = await application.request({
+                method: "POST",
+                path: "/api/operator/founder-product-contract/lifecycle",
+                body: { ...requestBody, providerFailure: "digitalOcean.observe_owned_resources" },
+              });
+              expect(observationFailed.status).toBe(409);
+              await assertTerminalEntitlementAuthority(fixture);
+              const reordered = await application.request({
+                method: "POST",
+                path: "/api/operator/founder-product-contract/lifecycle",
+                body: {
+                  ...requestBody,
+                  commerceEvent: admittedCommerceEvent,
+                  providerSubscriptionStatus: "active",
+                  providerFailure: "lemonSqueezy.read_subscription",
+                },
+              });
+              expect(reordered.status).toBe(409);
+              const deletionFailed = await application.request({
+                method: "POST",
+                path: "/api/operator/founder-product-contract/lifecycle",
+                body: {
+                  ...requestBody,
+                  providerFailures: ["archive.create", "digitalOcean.delete_firewall"],
+                },
+              });
+              expect(deletionFailed.status).toBe(409);
+              expect(await deletionFailed.json()).toMatchObject({
+                error: { message: "DigitalOcean deletion failed deterministically." },
+              });
+              await assertRetirementRemainsInProgress(fixture);
+            }
+            const responses = await Promise.all(
+              Array.from({ length: 1 }, () =>
+                application.request({
+                  method: "POST",
+                  path: "/api/operator/founder-product-contract/lifecycle",
+                  body: requestBody,
+                }),
+              ),
+            );
+            const responseStatuses = responses.map((response) => response.status);
+            if (!responseStatuses.includes(200)) {
+              throw new Error(
+                `Founder lifecycle ${id} failed: ${JSON.stringify(await responses[0]?.json())}`,
+              );
+            }
+            expect(responseStatuses.every((status) => status === 200)).toBe(true);
+            const successfulResponse = responses.find((response) => response.status === 200);
+            if (!successfulResponse) throw new Error("Founder lifecycle response was missing.");
+            const body = (await successfulResponse.json()) as {
+              outcome: {
+                providerCalls: string[];
+                cleanup: {
+                  resourcesBefore: number;
+                  resourcesAfter: number;
+                  verified: boolean;
+                  observedAt: string;
+                };
+              };
+            };
+            expect(body.outcome.providerCalls.length).toBeGreaterThan(0);
+            const cleanup = body.outcome.cleanup;
+            if (id === "infrastructure_retirement") {
+              expect(cleanup).toMatchObject({
+                resourcesBefore: 2,
+                resourcesAfter: 0,
+                verified: true,
+              });
+            }
             clock.advance(1);
             return {
               status: "passed",
-              verified: true,
-              resourcesBefore: id === "infrastructure_retirement" ? 2 : 0,
-              resourcesAfter: 0,
-              observedAt: clock.now().toISOString(),
+              ...cleanup,
             };
           });
         }
+
+        await assertPersistedLifecycleAuthority(fixture);
 
         await page.goto("/operator");
         await expect(page.getByRole("heading", { name: "Bruno.Ai Operator" })).toBeVisible();
@@ -152,36 +251,44 @@ test("four persisted lifecycle scenarios drive API, browser, keyboard, and acces
         await page.waitForLoadState("networkidle");
         expect(pageErrors).toEqual([]);
         await page.close();
+
+        if (testInfo.project.name === "desktop-chrome") {
+          const ledgerPath = process.env.BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH;
+          if (ledgerPath) {
+            const ledgerResponse = await application.request({
+              method: "GET",
+              path: "/api/operator/founder-product-contract/lifecycle",
+            });
+            expect(ledgerResponse.status).toBe(200);
+            const { ledger } = (await ledgerResponse.json()) as { ledger: unknown };
+            await mkdir(dirname(ledgerPath), { recursive: true });
+            await writeFile(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`);
+          }
+        }
       });
     });
-    if (testInfo.project.name === "desktop-chrome") {
-      const sourceRevision = process.env.BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION;
-      const runId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID;
-      const observedAt = process.env.BRUNO_FOUNDER_CONTRACT_OBSERVED_AT;
-      const signingSecret = process.env.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET;
-      const ledgerPath = process.env.BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH;
-      if (sourceRevision && runId && observedAt && signingSecret && ledgerPath) {
-        await mkdir(dirname(ledgerPath), { recursive: true });
-        const ledger = createFounderProductContractScenarioLedger({
-          sourceRevision,
-          runId,
-          observedAt,
-          results: harness.scenarioResults,
-          signingSecret,
-        });
-        await writeFile(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`);
-      }
-    }
   } finally {
     await deleteFixture(fixture);
   }
 });
 
-function signedCommerceEvent(runId: string) {
-  const event = { eventId: `${runId}:entitlement`, status: "active" as const };
+function signedCommerceEvent(
+  runId: string,
+  checkoutCorrelation: string,
+  now: Date,
+  status: "active" | "past_due" | "unpaid" | "cancelled" | "expired" | "refunded" = "active",
+) {
+  const event = {
+    eventId: `${runId}:entitlement:${status}`,
+    checkoutCorrelation,
+    subscriptionId: `${runId}:subscription`,
+    status,
+    endsAt: status === "cancelled" ? now.toISOString() : null,
+    occurredAt: now.toISOString(),
+  };
   const secret =
-    process.env.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET ??
-    "founder-contract-development-secret";
+    process.env.BRUNO_FOUNDER_CONTRACT_COMMERCE_WEBHOOK_SECRET ??
+    "founder-contract-lemon-test-secret-v1";
   return {
     ...event,
     signature: `hmac-sha256:${createHmac("sha256", secret)
@@ -193,67 +300,193 @@ function signedCommerceEvent(runId: string) {
 async function createFixture(clock: FounderProductContractClock): Promise<{
   userId: string;
   operatorId: string;
+  runnerId: string;
+  checkoutCorrelation: string;
 }> {
   const userId = randomUUID();
   const operatorId = randomUUID();
   const preparationId = randomUUID();
   const runtimeId = randomUUID();
+  const runnerId = randomUUID();
+  const credentialId = randomUUID();
+  const expiredArchiveId = randomUUID();
+  const checkoutCorrelation = `${randomUUID()}.${randomUUID()}`;
   const createdAt = clock.now().toISOString();
   const readyAt = clock.advance(1_000).toISOString();
+  const expiredArchiveObservedAt = new Date(clock.now().valueOf() - 31 * 24 * 60 * 60 * 1_000);
+  const expiredArchiveExpiresAt = new Date(clock.now().valueOf() - 24 * 60 * 60 * 1_000);
 
   await withDatabase(async (sql) => {
     await sql`insert into users (id, created_at, updated_at) values (${userId}, ${createdAt}, ${readyAt})`;
     await sql`insert into operators (id, user_id, status, created_at, updated_at) values (${operatorId}, ${userId}, 'active', ${createdAt}, ${readyAt})`;
     await sql`insert into operator_preparations (id, operator_id, status, timezone, timezone_confirmed_at, started_at, completed_at, created_at, updated_at) values (${preparationId}, ${operatorId}, 'ready', 'Asia/Manila', ${createdAt}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
     await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${runtimeId}, ${operatorId}, 'ready', 'connected', 'verified', 'founder-contract-v1', 'founder-contract-runtime', 1, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
+    await sql`insert into runners (id, user_id, name, kind, status, provider, provider_resource_id, provider_firewall_id, region, size_slug, image, provisioning_status, provisioning_operation_key, provisioning_started_at, provisioning_completed_at, created_at, updated_at) values (${runnerId}, ${userId}, ${`founder-${runnerId}`}, 'digitalocean', 'online', 'digitalocean', ${`droplet-${runnerId}`}, ${`firewall-${runnerId}`}, 'sfo3', 's-1vcpu-1gb', 'ubuntu-24-04-x64', 'ready', ${`bruno-deploy-${runnerId.replaceAll("-", "")}`}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
+    await sql`insert into runner_credentials (id, runner_id, credential_hash, credential_prefix, status, created_at, updated_at) values (${credentialId}, ${runnerId}, ${`sha256:${runnerId.replaceAll("-", "")}`}, 'fpct', 'active', ${createdAt}, ${readyAt})`;
+    await sql`insert into founder_checkout_correlations (user_id, correlation_digest, status, created_at, expires_at) values (${userId}, ${`sha256:${createHash("sha256").update(checkoutCorrelation).digest("hex")}`}, 'pending', ${createdAt}, ${new Date(clock.now().valueOf() + 60 * 60 * 1_000).toISOString()})`;
+    await sql`insert into founder_recovery_archives (id, user_id, operator_id, status, storage_object_key, ciphertext_digest, restorable_verified, failure_code, observed_at, expires_at, created_at, deleted_at) values (${expiredArchiveId}, ${userId}, ${operatorId}, 'verified', ${`founder-recovery/expired/${expiredArchiveId}.age`}, ${`sha256:${createHash("sha256").update(`expired:${userId}`).digest("hex")}`}, true, null, ${expiredArchiveObservedAt.toISOString()}, ${expiredArchiveExpiresAt.toISOString()}, ${expiredArchiveObservedAt.toISOString()}, null)`;
   });
 
-  return { userId, operatorId };
+  return { userId, operatorId, runnerId, checkoutCorrelation };
 }
 
-async function gateLifecycleRequest(
-  body: unknown,
-  path: string,
-  context: FounderProductContractApplicationContext | undefined,
-): Promise<{
-  status: number;
-  headers: Record<string, string>;
-  json: () => Promise<unknown>;
-} | null> {
-  if (
-    path !== "/api/operator/founder-product-contract/lifecycle" ||
-    !body ||
-    typeof body !== "object"
-  ) {
-    return null;
-  }
-  const action = (body as { action?: unknown }).action;
-  const providerResult =
-    action === "release_stage_admission"
-      ? await context?.providers.clerk.request("authenticate")
-      : action === "product_entitlement_lifecycle"
-        ? await context?.providers.lemonSqueezy.request("receive_webhook")
-        : action === "infrastructure_retirement"
-          ? await context?.providers.digitalOcean.request("observe_owned_resources")
-          : null;
-  if (providerResult && !providerResult.ok) {
-    return {
-      status: 503,
-      headers: { "cache-control": "no-store" },
-      json: async () => ({ error: { code: providerResult.code } }),
-    };
-  }
-  return null;
-}
-
-async function deleteFixture(fixture: { userId: string; operatorId: string }): Promise<void> {
+async function createAdditionalLiveRunner(
+  fixture: { userId: string },
+  clock: FounderProductContractClock,
+): Promise<string> {
+  const runnerId = randomUUID();
+  const credentialId = randomUUID();
+  const observedAt = clock.now().toISOString();
   await withDatabase(async (sql) => {
-    await sql`delete from app_metadata where key like ${`founder_product_contract_lifecycle:%:${fixture.userId}`}`;
+    await sql`insert into runners (id, user_id, name, kind, status, provider, provider_resource_id, provider_firewall_id, region, size_slug, image, provisioning_status, provisioning_operation_key, provisioning_started_at, provisioning_completed_at, created_at, updated_at) values (${runnerId}, ${fixture.userId}, ${`ambiguous-${runnerId}`}, 'digitalocean', 'online', 'digitalocean', ${`droplet-${runnerId}`}, ${`firewall-${runnerId}`}, 'sfo3', 's-1vcpu-1gb', 'ubuntu-24-04-x64', 'ready', ${`bruno-deploy-${runnerId.replaceAll("-", "")}`}, ${observedAt}, ${observedAt}, ${observedAt}, ${observedAt})`;
+    await sql`insert into runner_credentials (id, runner_id, credential_hash, credential_prefix, status, created_at, updated_at) values (${credentialId}, ${runnerId}, ${`sha256:${runnerId.replaceAll("-", "")}`}, 'fpct', 'active', ${observedAt}, ${observedAt})`;
+  });
+  return runnerId;
+}
+
+async function deleteAdditionalRunner(runnerId: string): Promise<void> {
+  await withDatabase(async (sql) => {
+    await sql`delete from runner_credentials where runner_id = ${runnerId}`;
+    await sql`delete from runners where id = ${runnerId}`;
+  });
+}
+
+async function deleteFixture(fixture: {
+  userId: string;
+  operatorId: string;
+  runnerId: string;
+  checkoutCorrelation: string;
+}): Promise<void> {
+  await withDatabase(async (sql) => {
+    await sql`delete from founder_product_contract_scenario_executions where user_id = ${fixture.userId}`;
+    await sql`delete from founder_infrastructure_retirements where user_id = ${fixture.userId}`;
+    await sql`delete from founder_product_entitlements where user_id = ${fixture.userId}`;
+    await sql`delete from founder_commerce_events where user_id = ${fixture.userId}`;
+    await sql`delete from founder_checkout_correlations where user_id = ${fixture.userId}`;
+    await sql`delete from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId}`;
+    await sql`delete from founder_recovery_archives where user_id = ${fixture.userId}`;
+    await sql`delete from founder_release_decisions where user_id = ${fixture.userId}`;
+    await sql`delete from runner_credentials where runner_id in (select id from runners where user_id = ${fixture.userId})`;
+    await sql`delete from runners where user_id = ${fixture.userId}`;
     await sql`delete from operator_conversations where operator_id = ${fixture.operatorId}`;
     await sql`delete from operator_runtimes where operator_id = ${fixture.operatorId}`;
     await sql`delete from operator_preparations where operator_id = ${fixture.operatorId}`;
     await sql`delete from operators where id = ${fixture.operatorId}`;
     await sql`delete from users where id = ${fixture.userId}`;
+  });
+}
+
+async function assertPersistedLifecycleAuthority(fixture: {
+  userId: string;
+  operatorId: string;
+  runnerId: string;
+  checkoutCorrelation: string;
+}): Promise<void> {
+  await withDatabase(async (sql) => {
+    const [authority] = await sql<
+      {
+        release_decisions: number;
+        scenario_executions: number;
+        commerce_events: number;
+        terminal_entitlements: number;
+        consumed_correlations: number;
+        safe_release_decisions: number;
+        archives: number;
+        failed_archives: number;
+        deleted_archives: number;
+        archive_deletions: number;
+        retirements: number;
+        runner_status: string;
+        active_credentials: number;
+        active_runners: number;
+        paused: boolean;
+      }[]
+    >`select
+      (select count(*)::int from founder_release_decisions where user_id = ${fixture.userId}) as release_decisions,
+      (select count(*)::int from founder_product_contract_scenario_executions where user_id = ${fixture.userId}) as scenario_executions,
+      (select count(*)::int from founder_commerce_events where user_id = ${fixture.userId}) as commerce_events,
+      (select count(*)::int from founder_product_entitlements where user_id = ${fixture.userId} and status = 'cancelled' and retirement_due_at is not null) as terminal_entitlements,
+      (select count(*)::int from founder_checkout_correlations where user_id = ${fixture.userId} and status = 'consumed') as consumed_correlations,
+      (select count(*)::int from founder_release_decisions where user_id = ${fixture.userId} and application_revision = ${process.env.BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION ?? "a".repeat(40)} and runtime_revision = 'founder-contract-v1' and capability_manifest = '["openai", "calendar_reading"]'::jsonb) as safe_release_decisions,
+      (select count(*)::int from founder_recovery_archives where user_id = ${fixture.userId} and status = 'verified') as archives,
+      (select count(*)::int from founder_recovery_archives where user_id = ${fixture.userId} and status = 'failed') as failed_archives,
+      (select count(*)::int from founder_recovery_archives where user_id = ${fixture.userId} and status = 'deleted' and deleted_at is not null) as deleted_archives,
+      (select count(*)::int from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId} and status = 'completed' and provider_confirmed = true) as archive_deletions,
+      (select count(*)::int from founder_infrastructure_retirements where user_id = ${fixture.userId} and status = 'completed') as retirements,
+      (select status from runners where id = ${fixture.runnerId}) as runner_status,
+      (select count(*)::int from runner_credentials where runner_id in (select id from runners where user_id = ${fixture.userId}) and status = 'active') as active_credentials,
+      (select count(*)::int from runners where user_id = ${fixture.userId} and deleted_at is null) as active_runners,
+      (select external_action_pause from operators where id = ${fixture.operatorId}) as paused`;
+    expect(authority).toMatchObject({
+      release_decisions: 1,
+      scenario_executions: 4,
+      commerce_events: 2,
+      terminal_entitlements: 1,
+      consumed_correlations: 1,
+      safe_release_decisions: 1,
+      archives: 3,
+      failed_archives: 2,
+      deleted_archives: 1,
+      archive_deletions: 1,
+      retirements: 1,
+      runner_status: "deleted",
+      active_credentials: 0,
+      active_runners: 0,
+      paused: true,
+    });
+  });
+}
+
+async function assertRetirementRemainsInProgress(fixture: {
+  userId: string;
+  operatorId: string;
+  runnerId: string;
+  checkoutCorrelation: string;
+}): Promise<void> {
+  await withDatabase(async (sql) => {
+    const [state] = await sql<
+      { status: string; failure_code: string; credential_status: string; paused: boolean }[]
+    >`select
+      (select status from founder_infrastructure_retirements where user_id = ${fixture.userId}) as status,
+      (select failure_code from founder_infrastructure_retirements where user_id = ${fixture.userId}) as failure_code,
+      (select status from runner_credentials where runner_id = ${fixture.runnerId}) as credential_status,
+      (select external_action_pause from operators where id = ${fixture.operatorId}) as paused`;
+    expect(state).toEqual({
+      status: "in_progress",
+      failure_code: "provider_effect_failed",
+      credential_status: "revoked",
+      paused: true,
+    });
+  });
+}
+
+async function assertTerminalEntitlementAuthority(fixture: { userId: string }): Promise<void> {
+  await withDatabase(async (sql) => {
+    const [state] = await sql<
+      { status: string; event_type: string; terminal_events: number }[]
+    >`select entitlement.status, event.event_type,
+      (select count(*)::int from founder_commerce_events where user_id = ${fixture.userId} and event_type = 'subscription_cancelled') as terminal_events
+      from founder_product_entitlements entitlement
+      join founder_commerce_events event on event.id = entitlement.source_event_id
+      where entitlement.user_id = ${fixture.userId}`;
+    expect(state).toEqual({
+      status: "cancelled",
+      event_type: "subscription_cancelled",
+      terminal_events: 1,
+    });
+  });
+}
+
+async function assertArchiveDeletionRemainsPending(fixture: { userId: string }): Promise<void> {
+  await withDatabase(async (sql) => {
+    const [state] = await sql<
+      { status: string; provider_confirmed: boolean; failure_code: string }[]
+    >`select status, provider_confirmed, failure_code from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId}`;
+    expect(state).toEqual({
+      status: "pending",
+      provider_confirmed: false,
+      failure_code: "archive_delete_failed",
+    });
   });
 }
 

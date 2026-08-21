@@ -38,6 +38,8 @@ const scenarioSigningSecret = requiredEnvironment(
 );
 const scenarioLedgerPath = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH");
 const deterministicProviderEnvironment = {
+  BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE: "deterministic",
+  BRUNO_FOUNDER_CONTRACT_COMMERCE_WEBHOOK_SECRET: "founder-contract-lemon-test-secret-v1",
   BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
     "calendar_reading",
     new Date(),

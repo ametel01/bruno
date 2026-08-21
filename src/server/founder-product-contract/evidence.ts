@@ -1,0 +1,180 @@
+import "server-only";
+
+import { and, eq, sql } from "drizzle-orm";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import { founderProductContractScenarioExecutions } from "@/src/server/db/schema";
+import { FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS } from "@/src/shared/founder-product-contract";
+import { createFounderProductContractScenarioLedger } from "@/src/testing/founder-product-contract/ledger";
+import type { FounderProductContractScenarioResult } from "@/src/testing/founder-product-contract/types";
+import type { FounderLifecycleOutcome } from "./lifecycle";
+
+type ScenarioExecutionIdentity = {
+  runId: string;
+  userId: string;
+  sourceRevision: string;
+  scenarioId: FounderLifecycleOutcome["action"];
+  observedAt: Date;
+  createConnection?: () => DatabaseConnection;
+};
+
+export async function claimFounderProductContractScenarioExecution(
+  input: ScenarioExecutionIdentity,
+): Promise<void> {
+  const connection = input.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !input.createConnection;
+  try {
+    const [claim] = await connection.db
+      .insert(founderProductContractScenarioExecutions)
+      .values({
+        runId: input.runId,
+        userId: input.userId,
+        scenarioId: input.scenarioId,
+        sourceRevision: input.sourceRevision,
+        status: "in_progress",
+        attempts: 1,
+        resourcesBefore: 0,
+        resourcesAfter: 0,
+        cleanupVerified: false,
+        observedAt: input.observedAt,
+        createdAt: input.observedAt,
+        updatedAt: input.observedAt,
+      })
+      .onConflictDoUpdate({
+        target: [
+          founderProductContractScenarioExecutions.runId,
+          founderProductContractScenarioExecutions.userId,
+          founderProductContractScenarioExecutions.scenarioId,
+        ],
+        set: {
+          status: "failed",
+          attempts: sql`${founderProductContractScenarioExecutions.attempts} + 1`,
+          cleanupVerified: false,
+          updatedAt: input.observedAt,
+        },
+      })
+      .returning({ attempts: founderProductContractScenarioExecutions.attempts });
+    if (claim?.attempts !== 1) {
+      throw new Error("Founder Product Contract scenario execution was retried.");
+    }
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
+export async function completeFounderProductContractScenarioExecution(input: {
+  identity: ScenarioExecutionIdentity;
+  outcome: FounderLifecycleOutcome;
+}): Promise<void> {
+  const connection = input.identity.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !input.identity.createConnection;
+  const observedAt = new Date(input.outcome.cleanup.observedAt);
+  try {
+    const [completed] = await connection.db
+      .update(founderProductContractScenarioExecutions)
+      .set({
+        status: "passed",
+        resourcesBefore: input.outcome.cleanup.resourcesBefore,
+        resourcesAfter: input.outcome.cleanup.resourcesAfter,
+        cleanupVerified: input.outcome.cleanup.verified,
+        observedAt,
+        updatedAt: observedAt,
+      })
+      .where(
+        and(
+          eq(founderProductContractScenarioExecutions.runId, input.identity.runId),
+          eq(founderProductContractScenarioExecutions.userId, input.identity.userId),
+          eq(founderProductContractScenarioExecutions.scenarioId, input.identity.scenarioId),
+          eq(
+            founderProductContractScenarioExecutions.sourceRevision,
+            input.identity.sourceRevision,
+          ),
+          eq(founderProductContractScenarioExecutions.status, "in_progress"),
+          eq(founderProductContractScenarioExecutions.attempts, 1),
+        ),
+      )
+      .returning({ id: founderProductContractScenarioExecutions.id });
+    if (!completed) throw new Error("Founder Product Contract scenario claim was not finalizable.");
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
+export async function failFounderProductContractScenarioExecution(
+  input: ScenarioExecutionIdentity,
+): Promise<void> {
+  const connection = input.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !input.createConnection;
+  try {
+    await connection.db
+      .update(founderProductContractScenarioExecutions)
+      .set({ status: "failed", cleanupVerified: false, updatedAt: input.observedAt })
+      .where(
+        and(
+          eq(founderProductContractScenarioExecutions.runId, input.runId),
+          eq(founderProductContractScenarioExecutions.userId, input.userId),
+          eq(founderProductContractScenarioExecutions.scenarioId, input.scenarioId),
+          eq(founderProductContractScenarioExecutions.sourceRevision, input.sourceRevision),
+        ),
+      );
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
+export async function issueFounderProductContractScenarioLedger(input: {
+  runId: string;
+  userId: string;
+  sourceRevision: string;
+  observedAt: string;
+  signingSecret: string;
+  createConnection?: () => DatabaseConnection;
+}) {
+  const connection = input.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !input.createConnection;
+  try {
+    const rows = await connection.db
+      .select()
+      .from(founderProductContractScenarioExecutions)
+      .where(
+        and(
+          eq(founderProductContractScenarioExecutions.runId, input.runId),
+          eq(founderProductContractScenarioExecutions.userId, input.userId),
+          eq(founderProductContractScenarioExecutions.sourceRevision, input.sourceRevision),
+        ),
+      );
+    const byScenario = new Map(rows.map((row) => [row.scenarioId, row]));
+    const results: FounderProductContractScenarioResult[] =
+      FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS.map((scenarioId) => {
+        const row = byScenario.get(scenarioId);
+        if (!row) throw new Error(`Persisted lifecycle scenario ${scenarioId} is missing.`);
+        if (row.status !== "passed" || row.attempts !== 1 || !row.cleanupVerified) {
+          throw new Error(
+            `Persisted lifecycle scenario ${scenarioId} did not execute exactly once.`,
+          );
+        }
+        return {
+          id: scenarioId,
+          status: row.status === "passed" ? "passed" : "failed",
+          attempts: row.attempts,
+          sourceRevision: row.sourceRevision,
+          observedAt: row.observedAt.toISOString(),
+          cleanup: {
+            status: row.status === "passed" ? "passed" : "failed",
+            verified: row.cleanupVerified,
+            resourcesBefore: row.resourcesBefore,
+            resourcesAfter: row.resourcesAfter,
+            observedAt: row.observedAt.toISOString(),
+          },
+        };
+      });
+    return createFounderProductContractScenarioLedger({
+      sourceRevision: input.sourceRevision,
+      runId: input.runId,
+      observedAt: input.observedAt,
+      results,
+      signingSecret: input.signingSecret,
+    });
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
