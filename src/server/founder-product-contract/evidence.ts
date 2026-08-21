@@ -135,13 +135,19 @@ export async function issueFounderProductContractScenarioLedger(input: {
     const rows = await connection.db
       .select()
       .from(founderProductContractScenarioExecutions)
-      .where(
-        and(
-          eq(founderProductContractScenarioExecutions.runId, input.runId),
-          eq(founderProductContractScenarioExecutions.userId, input.userId),
-          eq(founderProductContractScenarioExecutions.sourceRevision, input.sourceRevision),
-        ),
-      );
+      .where(eq(founderProductContractScenarioExecutions.runId, input.runId));
+    if (
+      rows.some(
+        (row) =>
+          row.sourceRevision !== input.sourceRevision ||
+          row.userId !== input.userId ||
+          row.status !== "passed" ||
+          row.attempts !== 1 ||
+          !row.cleanupVerified,
+      )
+    ) {
+      throw new Error("The exact candidate contains a failed lifecycle scenario.");
+    }
     const byScenario = new Map(rows.map((row) => [row.scenarioId, row]));
     const results: FounderProductContractScenarioResult[] =
       FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS.map((scenarioId) => {

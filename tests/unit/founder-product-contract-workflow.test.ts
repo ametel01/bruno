@@ -8,6 +8,7 @@ describe("Founder Product Contract workflow", () => {
   );
 
   it("binds ledger production to the exact run and keeps release signing isolated", () => {
+    expect(workflow).toContain("actions: read");
     expect(workflow).not.toContain("lifecycle_scenario_ledger_json:");
     expect(workflow).not.toContain("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_JSON:");
     expect(workflow).toContain(
@@ -21,6 +22,10 @@ describe("Founder Product Contract workflow", () => {
       "BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT: $" + "{{ github.run_attempt }}",
     );
     expect(workflow).toContain("run: bun run founder:contract");
+    expect(workflow).toContain(
+      "run: bun scripts/check-founder-product-contract-candidate-history.ts",
+    );
+    expect(workflow).toContain("BRUNO_FOUNDER_CONTRACT_GITHUB_TOKEN: $" + "{{ github.token }}");
     expect(workflow).toContain("if: inputs.mode == 'release'");
     expect(workflow).toContain("if: inputs.mode != 'release'");
     expect(workflow).toContain(

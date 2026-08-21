@@ -60,8 +60,10 @@ and the attended summaries are complete. Anthropic is included only when its own
 credentials, prompts, and provider responses.
 
 The workflow runs in automated mode for every push to `main`. A release candidate uses the manual
-`release` mode only after attended assistive-technology evidence exists. No provider credential is
-used by either mode.
+`release` mode only after attended assistive-technology evidence exists. Before either mode runs,
+the workflow queries its GitHub Actions history for the exact source revision and fails closed when
+an earlier run for that revision was unsuccessful or remains unresolved. A successful automated run
+does not block the later attended release dispatch. No provider credential is used by either mode.
 
 ## Deterministic lifecycle seam
 
@@ -91,10 +93,13 @@ identifiers. Every
 canonical scenario must pass exactly once against the same revision and within the bounded
 observation window; missing, failed, skipped, retried, stale, mismatched, or unverified-cleanup
 results fail closed. Official GitHub workflow reruns are rejected rather than receiving a fresh
-evidence identity. After each successful transition, the application commits a canonical
-scenario-execution receipt. Only the application can assemble and sign the complete exact-run
-ledger from those persisted receipts; the browser test copies that response to the producer's
-fixed artifact path without constructing results or using the signing authority. The ledger binds the
+evidence identity, and a fresh dispatch cannot erase an earlier failed run for the same source
+revision. Scenario execution history is candidate evidence rather than user-owned fixture state, so
+deleting a disposable lifecycle user cannot erase a failure. After each successful transition, the
+application commits a canonical scenario-execution receipt. Only the application can assemble and
+sign the complete exact-run ledger from those persisted receipts; the browser test copies that
+response to the producer's fixed artifact path without constructing results or using the signing
+authority. The ledger binds the
 canonical producer, source revision, workflow run ID, observation instant, results digest, and
 HMAC signature using the protected
 `BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET`; unsigned or caller-authored results are

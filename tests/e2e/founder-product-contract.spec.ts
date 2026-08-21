@@ -9,7 +9,6 @@ import {
   createFounderProductContractHarness,
   runFounderProductContractPublicScenario,
   runFounderProductContractScenario,
-  type FounderProductContractApplication,
   type FounderProductContractClock,
 } from "@/src/testing/founder-product-contract";
 
@@ -48,11 +47,6 @@ test("four persisted lifecycle scenarios drive API, browser, keyboard, and acces
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
   try {
-    await assertFailedScenarioPoisonsExactCandidate({
-      application: harness.application,
-      clock,
-      runId,
-    });
     await runFounderProductContractPublicScenario(harness, async ({ application }) => {
       await withPinnedDevelopmentUser(fixture.userId, async () => {
         const apiResponse = await application.request({ method: "GET", path: "/api/operator" });
@@ -257,41 +251,6 @@ async function createFixture(clock: FounderProductContractClock): Promise<{
   return { userId, operatorId, runnerId, checkoutCorrelation };
 }
 
-async function assertFailedScenarioPoisonsExactCandidate(input: {
-  application: FounderProductContractApplication;
-  clock: FounderProductContractClock;
-  runId: string;
-}): Promise<void> {
-  const fixture = await createFixture(input.clock);
-  try {
-    await withPinnedDevelopmentUser(fixture.userId, async () => {
-      const failed = await input.application.request({
-        method: "POST",
-        path: "/api/operator/founder-product-contract/lifecycle",
-        body: {
-          action: "release_stage_admission",
-          runId: input.runId,
-          now: input.clock.now().toISOString(),
-          providerFailure: "archive.delete_credentials",
-        },
-      });
-      expect(failed.status).toBe(409);
-      await assertArchiveAndCredentialDeletionRemainUnconfirmed(fixture);
-
-      const ledger = await input.application.request({
-        method: "GET",
-        path: "/api/operator/founder-product-contract/lifecycle",
-      });
-      expect(ledger.status).toBe(409);
-      expect(await ledger.json()).toMatchObject({
-        error: { message: expect.stringContaining("did not execute exactly once") },
-      });
-    });
-  } finally {
-    await deleteFixture(fixture);
-  }
-}
-
 async function deleteFixture(fixture: {
   userId: string;
   operatorId: string;
@@ -374,27 +333,6 @@ async function assertPersistedLifecycleAuthority(fixture: {
       active_credentials: 0,
       active_runners: 0,
       paused: true,
-    });
-  });
-}
-
-async function assertArchiveAndCredentialDeletionRemainUnconfirmed(fixture: {
-  userId: string;
-}): Promise<void> {
-  await withDatabase(async (sql) => {
-    const [state] = await sql<
-      {
-        status: string;
-        archive_provider_confirmed: boolean;
-        recovery_credentials_confirmed: boolean;
-        failure_code: string;
-      }[]
-    >`select status, archive_provider_confirmed, recovery_credentials_confirmed, failure_code from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId}`;
-    expect(state).toEqual({
-      status: "pending",
-      archive_provider_confirmed: false,
-      recovery_credentials_confirmed: false,
-      failure_code: "archive_delete_failed",
     });
   });
 }

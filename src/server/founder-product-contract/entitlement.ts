@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { and, eq, gt, inArray, lte, or } from "drizzle-orm";
+import { and, eq, gt, inArray, lte } from "drizzle-orm";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import {
   founderCommerceEvents,
@@ -204,28 +204,38 @@ export function founderEntitlementPolicy(input: {
   return { retirementDueAt: proposedDueAt, stopNewWork };
 }
 
+export type FounderProductEntitlementAuthority = {
+  status: "verified" | Exclude<FounderCommerceStatus, "active">;
+  retirementDueAt: Date | null;
+};
+
+export function founderProductEntitlementAuthorizesWork(
+  entitlement: FounderProductEntitlementAuthority,
+  now: Date,
+): boolean {
+  if (entitlement.status === "verified") return true;
+  if (entitlement.status === "past_due" || entitlement.status === "cancelled") {
+    return entitlement.retirementDueAt !== null && entitlement.retirementDueAt > now;
+  }
+  return false;
+}
+
 export async function requireOperationalEntitlement(
   tx: Transaction,
   userId: string,
   now: Date,
 ): Promise<void> {
   const [entitlement] = await tx
-    .select({ id: founderProductEntitlements.id })
+    .select({
+      status: founderProductEntitlements.status,
+      retirementDueAt: founderProductEntitlements.retirementDueAt,
+    })
     .from(founderProductEntitlements)
-    .where(
-      and(
-        eq(founderProductEntitlements.userId, userId),
-        or(
-          eq(founderProductEntitlements.status, "verified"),
-          and(
-            inArray(founderProductEntitlements.status, ["past_due", "cancelled"]),
-            gt(founderProductEntitlements.retirementDueAt, now),
-          ),
-        ),
-      ),
-    )
+    .where(eq(founderProductEntitlements.userId, userId))
     .limit(1);
-  if (!entitlement) throw new Error("Operational Product Entitlement is required.");
+  if (!entitlement || !founderProductEntitlementAuthorizesWork(entitlement, now)) {
+    throw new Error("Operational Product Entitlement is required.");
+  }
 }
 
 export async function requireRetirementDue(

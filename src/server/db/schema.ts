@@ -1060,9 +1060,9 @@ export const founderProductContractScenarioExecutions = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     runId: text("run_id").notNull(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id),
+    // Contract execution history is candidate evidence. It intentionally outlives
+    // disposable lifecycle users so a failed attempt cannot be erased by cleanup.
+    userId: uuid("user_id").notNull(),
     scenarioId: founderProductContractScenarioEnum("scenario_id").notNull(),
     sourceRevision: text("source_revision").notNull(),
     status: text("status").notNull().default("in_progress"),

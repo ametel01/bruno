@@ -11,6 +11,10 @@ import {
   reconcileFounderCommerceEvent,
   requireOperationalEntitlement,
 } from "@/src/server/founder-product-contract/entitlement";
+import {
+  assertFounderExternalActionsNotPaused,
+  assertFounderExternalActionsNotPausedInTransaction,
+} from "@/src/server/operators/founder-ai-work";
 import type {
   FounderCommerceEvent,
   FounderCommerceStatus,
@@ -80,6 +84,49 @@ describe("persisted Founder Product Entitlement policy", () => {
         requireOperationalEntitlement(tx, USER_ID, new Date("2026-08-28T08:02:00.000Z")),
       ),
     ).rejects.toThrow("Operational Product Entitlement is required");
+
+    const [operator] = await connection.db.select().from(operators);
+    expect(operator?.externalActionPause).toBe(false);
+    await expect(
+      assertFounderExternalActionsNotPaused(USER_ID, {
+        createConnection: () => connection,
+        now: () => new Date("2026-08-28T08:01:59.999Z"),
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertFounderExternalActionsNotPaused(USER_ID, {
+        createConnection: () => connection,
+        now: () => new Date("2026-08-28T08:02:00.000Z"),
+      }),
+    ).rejects.toMatchObject({ code: "external_action_paused", status: 409 });
+    await expect(
+      connection.db.transaction((tx) =>
+        assertFounderExternalActionsNotPausedInTransaction(
+          tx,
+          operator?.id ?? "missing-operator",
+          new Date("2026-08-28T08:02:00.000Z"),
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "external_action_paused", status: 409 });
+  });
+
+  it("stops external work at the paid cancellation boundary", async () => {
+    await reconcile(event("active", "2026-08-21T08:01:00.000Z"));
+    providerStatus = "cancelled";
+    await reconcile(event("cancelled", "2026-08-21T08:02:00.000Z", "2026-09-01T00:00:00.000Z"));
+
+    await expect(
+      assertFounderExternalActionsNotPaused(USER_ID, {
+        createConnection: () => connection,
+        now: () => new Date("2026-08-31T23:59:59.999Z"),
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertFounderExternalActionsNotPaused(USER_ID, {
+        createConnection: () => connection,
+        now: () => new Date("2026-09-01T00:00:00.000Z"),
+      }),
+    ).rejects.toMatchObject({ code: "external_action_paused", status: 409 });
   });
 
   async function reconcile(commerceEvent: FounderCommerceEvent): Promise<void> {
@@ -96,13 +143,17 @@ describe("persisted Founder Product Entitlement policy", () => {
   }
 });
 
-function event(status: FounderCommerceStatus, occurredAt: string): FounderCommerceEvent {
+function event(
+  status: FounderCommerceStatus,
+  occurredAt: string,
+  endsAt: string | null = null,
+): FounderCommerceEvent {
   const payload = {
     eventId: `event-${status}`,
     checkoutCorrelation: CORRELATION,
     subscriptionId: SUBSCRIPTION_ID,
     status,
-    endsAt: null,
+    endsAt,
     occurredAt,
   };
   return {

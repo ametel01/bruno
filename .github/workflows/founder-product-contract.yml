@@ -48,6 +48,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
   id-token: write
   attestations: write
@@ -109,6 +110,11 @@ jobs:
 
       - name: Install frozen dependencies
         run: bun install --frozen-lockfile
+
+      - name: Reject previously failed exact candidate
+        env:
+          BRUNO_FOUNDER_CONTRACT_GITHUB_TOKEN: ${{ github.token }}
+        run: bun scripts/check-founder-product-contract-candidate-history.ts
 
       - name: Install exact browser engines
         run: bunx playwright install --with-deps chromium firefox webkit
