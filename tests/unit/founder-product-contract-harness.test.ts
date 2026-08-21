@@ -2,11 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   createFounderProductContractClock,
   createFounderProductContractHarness,
-  createFounderProductContractLifecycleApplication,
   createFounderProductContractProviderDoubles,
   providerFailure,
+  runRecordedFounderProductContractScenario,
   runFounderProductContractScenario,
-  runFounderProductContractLifecycleScenarios,
   validateFounderProductContractScenarios,
 } from "@/src/testing/founder-product-contract";
 import { FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS } from "@/src/shared/founder-product-contract";
@@ -107,19 +106,25 @@ describe("Founder Product Contract deterministic seam", () => {
     expect(harness.clock.now().toISOString()).toBe("2026-01-01T00:01:00.000Z");
   });
 
-  it("makes configured provider failures observable through the lifecycle application", async () => {
+  it("passes configured provider boundaries to the application adapter", async () => {
     const clock = createFounderProductContractClock();
     const providers = createFounderProductContractProviderDoubles({ clock });
-    const application = createFounderProductContractLifecycleApplication({ clock, providers });
     providers.clerk.setFailure("authenticate", providerFailure("provider_unavailable", true));
-
-    const response = await application.request({
-      method: "POST",
-      path: "/api/founder-contract/release/admit",
+    let response: unknown;
+    const harness = createFounderProductContractHarness({
+      clock,
+      providers,
+      application: {
+        request: async (_request, context) => {
+          response = await context?.providers.clerk.request("authenticate");
+          return { status: 200, headers: {}, json: async () => response };
+        },
+      },
     });
 
-    expect(response.status).toBe(502);
-    expect(await response.json()).toEqual({
+    await harness.application.request({ method: "GET", path: "/api/operator" });
+
+    expect(response).toEqual({
       ok: false,
       code: "provider_unavailable",
       retryable: true,
@@ -134,10 +139,28 @@ describe("Founder Product Contract deterministic seam", () => {
       sourceRevision,
       clock,
       providers,
-      application: createFounderProductContractLifecycleApplication({ clock, providers }),
+      application: {
+        request: async () => ({
+          status: 200,
+          headers: {},
+          json: async () => ({ persisted: true }),
+        }),
+      },
     });
 
-    await runFounderProductContractLifecycleScenarios(harness);
+    for (const id of FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS) {
+      await runRecordedFounderProductContractScenario(harness, id, async ({ application }) => {
+        const response = await application.request({ method: "GET", path: "/api/operator" });
+        expect(response.status).toBe(200);
+        return {
+          status: "passed",
+          verified: true,
+          resourcesBefore: 0,
+          resourcesAfter: 0,
+          observedAt: clock.now().toISOString(),
+        };
+      });
+    }
     const firstResult = harness.scenarioResults[0];
     if (!firstResult) throw new Error("Expected a recorded scenario result.");
 
@@ -178,7 +201,7 @@ describe("Founder Product Contract deterministic seam", () => {
         results: [
           {
             ...firstResult,
-            observedAt: "2025-12-31T23:59:59.000Z",
+            observedAt: "2025-12-31T00:00:00.000Z",
           },
           ...harness.scenarioResults.slice(1),
         ],
@@ -200,5 +223,15 @@ describe("Founder Product Contract deterministic seam", () => {
         observedAt: "2026-01-01T00:00:00.000Z",
       }),
     ).toThrow("revision mismatch");
+
+    validateFounderProductContractScenarios({
+      required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
+      results: harness.scenarioResults.map((result) => ({
+        ...result,
+        observedAt: "2026-01-01T00:00:00.001Z",
+      })),
+      sourceRevision,
+      observedAt: "2026-01-01T00:00:00.001Z",
+    });
   });
 });

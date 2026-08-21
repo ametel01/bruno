@@ -8,12 +8,10 @@ import {
 } from "@/scripts/create-founder-general-release-decision";
 import { createFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
 import { FOUNDER_PRODUCT_CONTRACT_UNIT_FILES } from "@/src/shared/founder-product-contract";
-import {
-  createFounderProductContractClock,
-  createFounderProductContractHarness,
-  createFounderProductContractLifecycleApplication,
-  createFounderProductContractProviderDoubles,
-  runFounderProductContractLifecycleScenarios,
+import type {
+  FounderProductContractCleanupOutcome,
+  FounderProductContractLifecycleScenario,
+  FounderProductContractScenarioResult,
 } from "@/src/testing/founder-product-contract";
 import { buildTestGoogleMailSendingAcceptanceRelease } from "./founder-google-mail-sending-test-release";
 import { buildTestGoogleConnectedAcceptanceRelease } from "./founder-google-test-release";
@@ -83,18 +81,12 @@ await run(
   },
 );
 
-const lifecycleClock = createFounderProductContractClock(observedAt);
-const lifecycleProviders = createFounderProductContractProviderDoubles({ clock: lifecycleClock });
-const lifecycleHarness = createFounderProductContractHarness({
-  sourceRevision,
-  clock: lifecycleClock,
-  providers: lifecycleProviders,
-  application: createFounderProductContractLifecycleApplication({
-    clock: lifecycleClock,
-    providers: lifecycleProviders,
-  }),
-});
-const scenarioResults = await runFounderProductContractLifecycleScenarios(lifecycleHarness);
+const scenarioResults = parseScenarioResults(
+  process.env.BRUNO_FOUNDER_CONTRACT_SCENARIO_RESULTS_JSON,
+);
+const scenarioMaxAgeMilliseconds = parseScenarioMaxAge(
+  process.env.BRUNO_FOUNDER_CONTRACT_SCENARIO_MAX_AGE_MILLISECONDS,
+);
 
 const voiceOverDigest = process.env.BRUNO_FOUNDER_CONTRACT_VOICEOVER_DIGEST;
 const voiceOverOsVersion = process.env.BRUNO_FOUNDER_CONTRACT_VOICEOVER_OS_VERSION;
@@ -115,7 +107,8 @@ const evidence = await createFounderProductContractEvidence({
   ...(talkBackDigest ? { talkBackDigest } : {}),
   ...(talkBackOsVersion ? { talkBackOsVersion } : {}),
   ...(talkBackBrowserVersion ? { talkBackBrowserVersion } : {}),
-  scenarioResults,
+  ...(scenarioResults ? { scenarioResults } : {}),
+  ...(scenarioMaxAgeMilliseconds === undefined ? {} : { scenarioMaxAgeMilliseconds }),
 });
 
 await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
@@ -157,4 +150,69 @@ function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required.`);
   return value;
+}
+
+function parseScenarioResults(
+  value: string | undefined,
+): FounderProductContractScenarioResult[] | undefined {
+  if (!value?.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) throw new Error();
+    return parsed.map((entry) => {
+      if (!isRecord(entry) || !isLifecycleScenario(entry.id)) throw new Error();
+      if (
+        !["passed", "failed", "skipped"].includes(String(entry.status)) ||
+        !Number.isSafeInteger(entry.attempts) ||
+        (typeof entry.sourceRevision !== "string" && entry.sourceRevision !== null) ||
+        typeof entry.observedAt !== "string" ||
+        !isCleanupOutcome(entry.cleanup)
+      ) {
+        throw new Error();
+      }
+      return {
+        id: entry.id,
+        status: entry.status as FounderProductContractScenarioResult["status"],
+        attempts: entry.attempts as number,
+        sourceRevision: entry.sourceRevision,
+        observedAt: entry.observedAt,
+        cleanup: entry.cleanup,
+      };
+    });
+  } catch {
+    throw new Error("BRUNO_FOUNDER_CONTRACT_SCENARIO_RESULTS_JSON is invalid.");
+  }
+}
+
+function parseScenarioMaxAge(value: string | undefined): number | undefined {
+  if (!value?.trim()) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error("BRUNO_FOUNDER_CONTRACT_SCENARIO_MAX_AGE_MILLISECONDS is invalid.");
+  }
+  return parsed;
+}
+
+function isLifecycleScenario(value: unknown): value is FounderProductContractLifecycleScenario {
+  return (
+    value === "release_stage_admission" ||
+    value === "product_entitlement_lifecycle" ||
+    value === "recovery_archive_lifecycle" ||
+    value === "infrastructure_retirement"
+  );
+}
+
+function isCleanupOutcome(value: unknown): value is FounderProductContractCleanupOutcome {
+  if (!isRecord(value)) return false;
+  return (
+    ["passed", "failed"].includes(String(value.status)) &&
+    typeof value.verified === "boolean" &&
+    Number.isSafeInteger(value.resourcesBefore) &&
+    Number.isSafeInteger(value.resourcesAfter) &&
+    typeof value.observedAt === "string"
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -5,9 +5,7 @@ import postgres from "postgres";
 import {
   createFounderProductContractClock,
   createFounderProductContractHarness,
-  createFounderProductContractLifecycleApplication,
   createFounderProductContractProviderDoubles,
-  runFounderProductContractLifecycleScenarios,
   runFounderProductContractScenario,
   type FounderProductContractClock,
 } from "@/src/testing/founder-product-contract";
@@ -21,11 +19,6 @@ test("one persisted Operator scenario drives API, browser, keyboard, and accessi
   const clock = createFounderProductContractClock("2026-08-20T00:00:00.000Z");
   const providers = createFounderProductContractProviderDoubles({ clock });
   const fixture = await createFixture(clock);
-  const lifecycleHarness = createFounderProductContractHarness({
-    clock,
-    providers,
-    application: createFounderProductContractLifecycleApplication({ clock, providers }),
-  });
   const harness = createFounderProductContractHarness({
     clock,
     providers,
@@ -47,7 +40,6 @@ test("one persisted Operator scenario drives API, browser, keyboard, and accessi
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
   try {
-    await runFounderProductContractLifecycleScenarios(lifecycleHarness);
     await runFounderProductContractScenario(harness, async ({ application }) => {
       await withPinnedDevelopmentUser(fixture.userId, async () => {
         const apiResponse = await application.request({ method: "GET", path: "/api/operator" });

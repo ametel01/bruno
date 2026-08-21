@@ -46,6 +46,10 @@ on:
         description: Exact-revision provider outcomes and evidence digests
         required: false
         type: string
+      lifecycle_scenario_results_json:
+        description: Allowlisted results emitted by a real persisted Founder lifecycle contract run
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -94,6 +98,7 @@ jobs:
       BRUNO_FOUNDER_CONTRACT_TALKBACK_BROWSER_VERSION: ${{ inputs.talkback_browser_version }}
       BRUNO_FOUNDER_MODERATED_SUMMARY_JSON: ${{ inputs.moderated_founder_summary_json }}
       BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON: ${{ inputs.provider_decision_summary_json }}
+      BRUNO_FOUNDER_CONTRACT_SCENARIO_RESULTS_JSON: ${{ inputs.lifecycle_scenario_results_json }}
 
     steps:
       - name: Check out exact release candidate
