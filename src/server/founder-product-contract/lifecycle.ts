@@ -19,7 +19,11 @@ import { digitalOceanRunnerFirewallName } from "@/src/server/runners/runner-prov
 import { expireFounderRecoveryArchivesForUser } from "./archive-expiry";
 import { founderProductContractDigest } from "./digest";
 import { reconcileFounderCommerceEvent, requireRetirementDue } from "./entitlement";
-import { createDurableRecoveryArchive, fulfillRecoveryArchiveIntent } from "./recovery-archive";
+import {
+  createDurableRecoveryArchive,
+  fulfillRecoveryArchiveIntent,
+  persistFounderRecoveryArchiveIntentInTransaction,
+} from "./recovery-archive";
 import type { FounderRecoveryArchiveProvider } from "./recovery-archive-provider";
 
 export type FounderProductContractLifecycleAction =
@@ -429,28 +433,16 @@ async function prepareInfrastructureRetirement(
         })
         .where(eq(founderInfrastructureRetirements.id, existing.id));
     } else {
-      const [archiveIntent] = await tx
-        .insert(founderRecoveryArchives)
-        .values({
-          userId: input.userId,
-          operatorId,
-          status: "pending",
-          storageObjectKey: null,
-          ciphertextDigest: null,
-          restorableVerified: false,
-          failureCode: null,
-          observedAt: input.now,
-          expiresAt: new Date(input.now.valueOf() + 30 * 24 * 60 * 60 * 1_000),
-          createdAt: input.now,
-        })
-        .returning({ id: founderRecoveryArchives.id });
-      if (!archiveIntent) throw new Error("Recovery Archive intent was not persisted.");
-      recoveryArchiveId = archiveIntent.id;
+      recoveryArchiveId = await persistFounderRecoveryArchiveIntentInTransaction(tx, {
+        userId: input.userId,
+        operatorId,
+        now: input.now,
+      });
       archiveNeedsExecution = true;
       await tx.insert(founderInfrastructureRetirements).values({
         userId: input.userId,
         runnerId: runner.id,
-        recoveryArchiveId: archiveIntent.id,
+        recoveryArchiveId,
         idempotencyKey: founderProductContractDigest(`${input.userId}:${runner.id}`),
         providerResourceId: runner.providerResourceId,
         providerFirewallId: runner.providerFirewallId,

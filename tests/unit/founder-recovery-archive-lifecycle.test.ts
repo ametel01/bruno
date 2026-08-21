@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FakeBackupObjectStorage } from "@/src/server/backups/backup-storage";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  founderInfrastructureRetirements,
   founderRecoveryArchiveDeletionReceipts,
   founderRecoveryArchives,
-  founderInfrastructureRetirements,
   founderReleaseDecisions,
   operatorPreparations,
   operatorRuntimes,
@@ -18,6 +18,7 @@ import { EncryptedFounderRecoveryArchiveProvider } from "@/src/server/founder-pr
 import {
   createDurableRecoveryArchive,
   getFounderRecoveryArchiveStatusForUser,
+  persistFounderRecoveryArchiveIntentInTransaction,
   reconcileFounderRecoveryArchives,
 } from "@/src/server/founder-product-contract/recovery-archive";
 
@@ -126,6 +127,73 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     ).resolves.toMatchObject({ eligible: 1, created: 1, failed: 0, deleted: 0 });
 
     expect(await connection.db.select().from(founderRecoveryArchives)).toHaveLength(2);
+  });
+
+  it("reserves one archive intent while its provider upload is still pending", async () => {
+    let releaseFirstUpload: (() => void) | undefined;
+    let markFirstUploadStarted: (() => void) | undefined;
+    const firstUploadStarted = new Promise<void>((resolve) => {
+      markFirstUploadStarted = resolve;
+    });
+    const firstUploadReleased = new Promise<void>((resolve) => {
+      releaseFirstUpload = resolve;
+    });
+    let providerCalls = 0;
+    const blockingProvider = {
+      createRecoveryArchive: async (
+        input: Parameters<typeof provider.createRecoveryArchive>[0],
+      ) => {
+        providerCalls += 1;
+        if (providerCalls === 1) {
+          markFirstUploadStarted?.();
+          await firstUploadReleased;
+        } else {
+          throw new Error("Concurrent provider upload must not start.");
+        }
+        return provider.createRecoveryArchive(input);
+      },
+    };
+
+    const first = createDurableRecoveryArchive(
+      { action: "release_stage_admission", userId: USER_ID, now: START },
+      blockingProvider,
+      connection,
+    );
+    await firstUploadStarted;
+    const second = createDurableRecoveryArchive(
+      { action: "release_stage_admission", userId: USER_ID, now: START },
+      blockingProvider,
+      connection,
+    );
+
+    await expect(second).rejects.toThrow("Recovery Archive creation is already in progress.");
+    releaseFirstUpload?.();
+    await expect(first).resolves.toEqual(expect.any(String));
+    expect(providerCalls).toBe(1);
+    await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([
+      expect.objectContaining({ status: "verified" }),
+    ]);
+  });
+
+  it("persists deterministic deletion identities with every new archive intent", async () => {
+    const archiveId = await connection.db.transaction((tx) =>
+      persistFounderRecoveryArchiveIntentInTransaction(tx, {
+        userId: USER_ID,
+        operatorId: OPERATOR_ID,
+        now: START,
+      }),
+    );
+
+    const [intent] = await connection.db
+      .select()
+      .from(founderRecoveryArchives)
+      .where(eq(founderRecoveryArchives.id, archiveId));
+    expect(intent).toMatchObject({
+      status: "pending",
+      storageObjectKey: `founder-recovery/${USER_ID}/${archiveId}.age`,
+      recoveryCredentialObjectKey: `founder-recovery/${USER_ID}/${archiveId}.key`,
+      expiresAt: new Date(START.valueOf() + 30 * 24 * 60 * 60 * 1_000),
+    });
   });
 
   it("fails admission closed and records bounded failure state when storage is unavailable", async () => {

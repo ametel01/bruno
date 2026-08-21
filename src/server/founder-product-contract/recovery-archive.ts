@@ -1,12 +1,14 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import {
+  founderInfrastructureRetirements,
   founderRecoveryArchiveDeletionReceipts,
   founderRecoveryArchives,
-  founderInfrastructureRetirements,
   founderReleaseDecisions,
   operatorPreparations,
   operatorRuntimes,
@@ -17,14 +19,18 @@ import { requireOperationalEntitlement } from "./entitlement";
 import type { FounderProductContractLifecycleAction } from "./lifecycle";
 import {
   assertFounderRecoveryArchiveDeletionIdentity,
-  founderRecoveryArchiveObjectIdentity,
   type FounderRecoveryArchiveCreationProvider,
   type FounderRecoveryArchiveDurableState,
   type FounderRecoveryArchiveProvider,
+  founderRecoveryArchiveObjectIdentity,
 } from "./recovery-archive-provider";
 
 const DAILY_ARCHIVE_WINDOW_MS = 24 * 60 * 60 * 1_000;
 const ARCHIVE_RETENTION_MS = 30 * DAILY_ARCHIVE_WINDOW_MS;
+
+type RecoveryArchiveTransaction = Parameters<
+  Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
+>[0];
 
 type ArchiveLifecycleInput = {
   action: FounderProductContractLifecycleAction | "scheduled_archive";
@@ -114,30 +120,12 @@ export async function createDurableRecoveryArchive(
         .limit(1);
       if (current) return { archiveId: current.id, operatorId: operator.id, alreadyCurrent: true };
     }
-    const archiveId = randomUUID();
-    const objectIdentity = founderRecoveryArchiveObjectIdentity(input.userId, archiveId);
-    const [record] = await tx
-      .insert(founderRecoveryArchives)
-      .values({
-        id: archiveId,
-        userId: input.userId,
-        operatorId: operator.id,
-        status: "pending",
-        formatVersion: null,
-        ...objectIdentity,
-        ciphertextDigest: null,
-        recoveryCredentialDigest: null,
-        stateDigest: null,
-        restorableVerified: false,
-        restoreVerifiedAt: null,
-        failureCode: null,
-        observedAt: input.now,
-        expiresAt: new Date(input.now.valueOf() + ARCHIVE_RETENTION_MS),
-        createdAt: input.now,
-      })
-      .returning({ id: founderRecoveryArchives.id });
-    if (!record) throw new Error("Recovery Archive intent was not persisted.");
-    return { archiveId: record.id, operatorId: operator.id, alreadyCurrent: false };
+    const archiveId = await persistFounderRecoveryArchiveIntentInTransaction(tx, {
+      userId: input.userId,
+      operatorId: operator.id,
+      now: input.now,
+    });
+    return { archiveId, operatorId: operator.id, alreadyCurrent: false };
   });
 
   if (intent.alreadyCurrent) return intent.archiveId;
@@ -151,6 +139,63 @@ export async function createDurableRecoveryArchive(
     true,
   );
   return intent.archiveId;
+}
+
+export async function persistFounderRecoveryArchiveIntentInTransaction(
+  tx: RecoveryArchiveTransaction,
+  input: { userId: string; operatorId: string; now: Date },
+): Promise<string> {
+  const archiveWindowStart = new Date(input.now.valueOf() - DAILY_ARCHIVE_WINDOW_MS);
+  const [pending] = await tx
+    .select({ id: founderRecoveryArchives.id })
+    .from(founderRecoveryArchives)
+    .where(
+      and(
+        eq(founderRecoveryArchives.userId, input.userId),
+        eq(founderRecoveryArchives.status, "pending"),
+        gt(founderRecoveryArchives.observedAt, archiveWindowStart),
+      ),
+    )
+    .limit(1)
+    .for("update");
+  if (pending) throw new Error("Recovery Archive creation is already in progress.");
+
+  await tx
+    .update(founderRecoveryArchives)
+    .set({ status: "failed", failureCode: "archive_create_abandoned" })
+    .where(
+      and(
+        eq(founderRecoveryArchives.userId, input.userId),
+        eq(founderRecoveryArchives.status, "pending"),
+        isNotNull(founderRecoveryArchives.storageObjectKey),
+        lte(founderRecoveryArchives.observedAt, archiveWindowStart),
+      ),
+    );
+
+  const archiveId = randomUUID();
+  const objectIdentity = founderRecoveryArchiveObjectIdentity(input.userId, archiveId);
+  const [record] = await tx
+    .insert(founderRecoveryArchives)
+    .values({
+      id: archiveId,
+      userId: input.userId,
+      operatorId: input.operatorId,
+      status: "pending",
+      formatVersion: null,
+      ...objectIdentity,
+      ciphertextDigest: null,
+      recoveryCredentialDigest: null,
+      stateDigest: null,
+      restorableVerified: false,
+      restoreVerifiedAt: null,
+      failureCode: null,
+      observedAt: input.now,
+      expiresAt: new Date(input.now.valueOf() + ARCHIVE_RETENTION_MS),
+      createdAt: input.now,
+    })
+    .returning({ id: founderRecoveryArchives.id });
+  if (!record) throw new Error("Recovery Archive intent was not persisted.");
+  return record.id;
 }
 
 export async function fulfillRecoveryArchiveIntent(
@@ -171,7 +216,7 @@ export async function fulfillRecoveryArchiveIntent(
       state,
     });
     assertVerifiedArchiveOutcome(archiveId, input, operatorId, archive);
-    await connection.db
+    const [verified] = await connection.db
       .update(founderRecoveryArchives)
       .set({
         status: "verified",
@@ -185,7 +230,14 @@ export async function fulfillRecoveryArchiveIntent(
         restoreVerifiedAt: archive.restoreVerifiedAt,
         failureCode: null,
       })
-      .where(eq(founderRecoveryArchives.id, archiveId));
+      .where(
+        and(
+          eq(founderRecoveryArchives.id, archiveId),
+          eq(founderRecoveryArchives.status, "pending"),
+        ),
+      )
+      .returning({ id: founderRecoveryArchives.id });
+    if (!verified) throw new Error("Recovery Archive intent is no longer pending.");
   } catch (error) {
     await connection.db
       .update(founderRecoveryArchives)
@@ -199,7 +251,12 @@ export async function fulfillRecoveryArchiveIntent(
         restoreVerifiedAt: null,
         failureCode: "archive_create_failed",
       })
-      .where(eq(founderRecoveryArchives.id, archiveId));
+      .where(
+        and(
+          eq(founderRecoveryArchives.id, archiveId),
+          eq(founderRecoveryArchives.status, "pending"),
+        ),
+      );
     if (failClosed) throw error;
   }
 }
