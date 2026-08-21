@@ -3,9 +3,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildTestGoogleMailSendingAcceptanceRelease } from "@/scripts/founder-google-mail-sending-test-release";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
-  founderCheckoutCorrelations,
-  founderCommerceEvents,
-  founderProductEntitlements,
   operatorActionAuthorizations,
   operatorActionExecutionAttempts,
   operatorActionReceipts,
@@ -39,6 +36,7 @@ import {
   encryptOperatorSecret,
   type OperatorSecretKeyring,
 } from "@/src/server/secrets/operator-secret-keyring";
+import { insertPastDueFounderEntitlementFixture } from "@/tests/helpers/founder-entitlement";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003501";
 const NOW = new Date("2026-08-19T05:00:00.000Z");
@@ -222,7 +220,13 @@ describe("Founder approved Gmail execution", () => {
     await connection.db
       .update(operatorMailSendingConnections)
       .set({ tokenExpiresAt: new Date("2100-01-01T00:00:00.000Z") });
-    await insertPastDueEntitlement(connection);
+    await insertPastDueFounderEntitlementFixture({
+      connection,
+      userId: OWNER_ID,
+      fixtureId: "gmail-execution-deadline",
+      reconciledAt: NOW,
+      retirementDueAt: CONTROLLED_DEADLINE,
+    });
     let sendCount = 0;
 
     await expect(
@@ -381,42 +385,4 @@ async function reset(connection: DatabaseConnection): Promise<void> {
   await connection.client.unsafe(
     "truncate table operator_action_receipts, operator_action_execution_attempts, operator_action_authorizations, operator_action_decisions, operator_proposed_actions, operator_product_guardrails, operator_action_preview_revisions, operator_action_previews, operator_governance_receipts, operator_authority_policies, operator_processing_consents, operator_mail_sending_connection_receipts, operator_mail_sending_connections, operator_primary_communications_suites, operator_mail_connection_receipts, operator_mail_resources, operator_mail_connections, operator_calendar_connection_receipts, operator_calendar_resources, operator_calendar_connections, operator_runtimes, operator_preparations, operators, users restart identity cascade",
   );
-}
-
-async function insertPastDueEntitlement(connection: DatabaseConnection): Promise<void> {
-  const [correlation] = await connection.db
-    .insert(founderCheckoutCorrelations)
-    .values({
-      userId: OWNER_ID,
-      correlationDigest: `sha256:${"3".repeat(64)}`,
-      createdAt: NOW,
-      expiresAt: new Date("2100-01-01T00:00:00.000Z"),
-    })
-    .returning({ id: founderCheckoutCorrelations.id });
-  if (!correlation) throw new Error("entitlement correlation setup failed");
-  const [event] = await connection.db
-    .insert(founderCommerceEvents)
-    .values({
-      providerEventId: "gmail-execution-deadline",
-      userId: OWNER_ID,
-      checkoutCorrelationId: correlation.id,
-      providerSubscriptionId: "subscription-gmail-execution-deadline",
-      eventType: "subscription.past_due",
-      payloadDigest: `sha256:${"4".repeat(64)}`,
-      signatureVerified: true,
-      occurredAt: NOW,
-      recordedAt: NOW,
-    })
-    .returning({ id: founderCommerceEvents.id });
-  if (!event) throw new Error("entitlement event setup failed");
-  await connection.db.insert(founderProductEntitlements).values({
-    userId: OWNER_ID,
-    sourceEventId: event.id,
-    providerSubscriptionId: "subscription-gmail-execution-deadline",
-    status: "past_due",
-    reconciledProviderStatus: "past_due",
-    reconciledAt: NOW,
-    retirementDueAt: CONTROLLED_DEADLINE,
-    updatedAt: NOW,
-  });
 }

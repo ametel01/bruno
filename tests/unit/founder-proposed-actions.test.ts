@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
-  founderCheckoutCorrelations,
-  founderCommerceEvents,
-  founderProductEntitlements,
   operatorActionAuthorizations,
   operatorActionDecisions,
   operatorAuthorityPolicies,
@@ -20,6 +17,7 @@ import {
   getFounderProposedActionForUser,
   getFounderProposedActionsForUser,
 } from "@/src/server/operators/founder-proposed-actions";
+import { insertPastDueFounderEntitlementFixture } from "@/tests/helpers/founder-entitlement";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003471";
 const OTHER_OWNER_ID = "00000000-0000-4000-8000-000000003472";
@@ -149,7 +147,13 @@ describe("Founder Proposed Actions application seam", () => {
       createConnection: () => connection,
       now: () => NOW,
     });
-    await insertPastDueEntitlement(connection);
+    await insertPastDueFounderEntitlementFixture({
+      connection,
+      userId: OWNER_ID,
+      fixtureId: "proposed-action-deadline",
+      reconciledAt: NOW,
+      retirementDueAt: CONTROLLED_DEADLINE,
+    });
 
     await expect(
       claimFounderActionAuthorizationForUser(OWNER_ID, action.id, 1, {
@@ -366,42 +370,4 @@ async function reset(connection: DatabaseConnection): Promise<void> {
   await connection.client.unsafe(
     "truncate table operator_action_authorizations, operator_action_decisions, operator_proposed_actions, operator_product_guardrails, operator_action_preview_revisions, operator_action_previews, operator_governance_receipts, operator_authority_policies, operator_processing_consents, operators, users restart identity cascade",
   );
-}
-
-async function insertPastDueEntitlement(connection: DatabaseConnection): Promise<void> {
-  const [correlation] = await connection.db
-    .insert(founderCheckoutCorrelations)
-    .values({
-      userId: OWNER_ID,
-      correlationDigest: `sha256:${"1".repeat(64)}`,
-      createdAt: NOW,
-      expiresAt: new Date("2100-01-01T00:00:00.000Z"),
-    })
-    .returning({ id: founderCheckoutCorrelations.id });
-  if (!correlation) throw new Error("entitlement correlation setup failed");
-  const [event] = await connection.db
-    .insert(founderCommerceEvents)
-    .values({
-      providerEventId: "proposed-action-deadline",
-      userId: OWNER_ID,
-      checkoutCorrelationId: correlation.id,
-      providerSubscriptionId: "subscription-proposed-action-deadline",
-      eventType: "subscription.past_due",
-      payloadDigest: `sha256:${"2".repeat(64)}`,
-      signatureVerified: true,
-      occurredAt: NOW,
-      recordedAt: NOW,
-    })
-    .returning({ id: founderCommerceEvents.id });
-  if (!event) throw new Error("entitlement event setup failed");
-  await connection.db.insert(founderProductEntitlements).values({
-    userId: OWNER_ID,
-    sourceEventId: event.id,
-    providerSubscriptionId: "subscription-proposed-action-deadline",
-    status: "past_due",
-    reconciledProviderStatus: "past_due",
-    reconciledAt: NOW,
-    retirementDueAt: CONTROLLED_DEADLINE,
-    updatedAt: NOW,
-  });
 }

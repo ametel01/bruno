@@ -1,5 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
+
+type WorkflowStep = {
+  name?: string;
+  run?: string;
+};
 
 describe("Founder Product Contract workflow", () => {
   const workflow = readFileSync(
@@ -8,6 +14,12 @@ describe("Founder Product Contract workflow", () => {
   );
 
   it("binds ledger production to the exact run and keeps release signing isolated", () => {
+    const steps = (parse(workflow) as { jobs: { contract: { steps: WorkflowStep[] } } }).jobs
+      .contract.steps;
+    const ciContractStep = steps.find(
+      ({ name }) => name === "Run all-or-nothing Founder Product Contract (ci)",
+    );
+
     expect(workflow).toContain("actions: read");
     expect(workflow).not.toContain("lifecycle_scenario_ledger_json:");
     expect(workflow).not.toContain("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_JSON:");
@@ -32,11 +44,17 @@ describe("Founder Product Contract workflow", () => {
       "BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: $" +
         "{{ secrets.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET }}",
     );
-    expect(workflow).toContain("Bind an ephemeral CI signing authority");
-    expect(workflow).toContain('ci_signing_secret="$(openssl rand -hex 32)"');
-    expect(workflow).toContain('echo "::add-mask::$ci_signing_secret"');
-    expect(workflow).toContain(
-      'echo "BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET=$ci_signing_secret" >> "$GITHUB_ENV"',
+    expect(steps).not.toContainEqual(
+      expect.objectContaining({ name: "Bind an ephemeral CI signing authority" }),
+    );
+    expect(ciContractStep?.run).toContain('ci_signing_secret="$(openssl rand -hex 32)"');
+    expect(ciContractStep?.run).toContain('echo "::add-mask::$ci_signing_secret"');
+    expect(ciContractStep?.run).toContain(
+      'BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET="$ci_signing_secret" bun run founder:contract',
+    );
+    expect(ciContractStep?.run).not.toContain("GITHUB_ENV");
+    expect(workflow).not.toContain(
+      'BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET=$ci_signing_secret" >> "$GITHUB_ENV"',
     );
     expect(workflow).not.toContain("BRUNO_FOUNDER_CONTRACT_CI_SCENARIO_SIGNING_SECRET");
     expect(workflow).not.toContain(
