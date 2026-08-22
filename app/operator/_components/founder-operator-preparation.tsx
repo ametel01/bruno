@@ -501,6 +501,18 @@ export function FounderOperatorPreparation({
               Copies expire automatically after 30 days.
             </p>
           ) : null}
+          {initialRecoveryArchive.state === "current" &&
+          initialRecoveryArchive.latestAttempt?.status === "failed" ? (
+            <p className={styles.hint}>
+              Current protection remains verified. The latest daily refresh needs another try.
+            </p>
+          ) : null}
+          {initialRecoveryArchive.state === "current" &&
+          initialRecoveryArchive.latestAttempt?.status === "pending" ? (
+            <p className={styles.hint}>
+              Current protection remains verified while the latest daily refresh is being checked.
+            </p>
+          ) : null}
           {initialRecoveryArchive.deletion?.status === "completed" ? (
             <p className={styles.hint}>
               The last expired Recovery Archive and its recovery access were safely deleted.

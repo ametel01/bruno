@@ -5,7 +5,13 @@ import {
   getFounderOperatorForUser,
 } from "@/src/server/operators/founder-operator";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { operatorPreparations, operators, users } from "@/src/server/db/schema";
+import { operatorPreparations, operatorRuntimes, operators, users } from "@/src/server/db/schema";
+import { getFounderActionPreviewForUser } from "@/src/server/operators/founder-action-previews";
+import { getFounderConversationForUser } from "@/src/server/operators/founder-conversation";
+import { getFounderCoreOperationForUser } from "@/src/server/operators/founder-core-operation";
+import { getFounderLimitedOperationForUser } from "@/src/server/operators/founder-limited-operation";
+import { getFounderProposedActionsForUser } from "@/src/server/operators/founder-proposed-actions";
+import { getFounderRelationshipsForUser } from "@/src/server/operators/founder-relationships";
 
 const OWNER_A_ID = "00000000-0000-4000-8000-000000003371";
 const OWNER_B_ID = "00000000-0000-4000-8000-000000003372";
@@ -48,6 +54,24 @@ describe("Founder Operator application seam", () => {
     expect(replay.preparation.id).toBe(operator.preparation.id);
     await expect(connection.db.select().from(operators)).resolves.toHaveLength(1);
     await expect(connection.db.select().from(operatorPreparations)).resolves.toHaveLength(1);
+  });
+
+  it("keeps every workspace GET projection pure before preparation starts", async () => {
+    const dependencies = { createConnection: () => connection };
+
+    await expect(getFounderActionPreviewForUser(OWNER_A_ID, dependencies)).resolves.toBeNull();
+    await expect(getFounderLimitedOperationForUser(OWNER_A_ID, dependencies)).resolves.toBeNull();
+    await expect(getFounderCoreOperationForUser(OWNER_A_ID, dependencies)).resolves.toBeNull();
+    await expect(getFounderConversationForUser(OWNER_A_ID, dependencies)).resolves.toBeNull();
+    await expect(getFounderProposedActionsForUser(OWNER_A_ID, dependencies)).resolves.toEqual([]);
+    await expect(getFounderRelationshipsForUser(OWNER_A_ID, dependencies)).resolves.toMatchObject({
+      records: [],
+      candidates: [],
+    });
+
+    await expect(connection.db.select().from(operators)).resolves.toEqual([]);
+    await expect(connection.db.select().from(operatorPreparations)).resolves.toEqual([]);
+    await expect(connection.db.select().from(operatorRuntimes)).resolves.toEqual([]);
   });
 
   it("converges concurrent creation requests to the same Operator and preparation", async () => {

@@ -1,12 +1,18 @@
 import "server-only";
 
+import { createDatabaseConnection } from "@/src/server/db/client";
 import type { DatabaseConnection } from "@/src/server/db/client";
-import type { FounderProductContractTransaction } from "./operator-authority";
+import {
+  lockFounderProductContractLifecycleInTransaction,
+  type FounderProductContractTransaction,
+} from "./operator-authority";
 import type { FounderOwnerPreviewCapability } from "./preview-qualification";
 import {
+  FounderReleaseStageAccessError,
   requireFounderOwnerPreviewAccessForUser,
   requireFounderOwnerPreviewAccessInTransaction,
 } from "./release-stage-access";
+import { reconcileFounderOwnerPreviewQualificationExpiryInTransaction } from "./release-stage-hold";
 
 export type FounderOwnerPreviewWorkAuthorityDependencies = {
   applicationRevision?: string;
@@ -16,7 +22,7 @@ export type FounderOwnerPreviewWorkAuthorityDependencies = {
   requireReleaseStageAccessForUser?: typeof requireFounderOwnerPreviewAccessForUser;
 };
 
-export async function preflightFounderOwnerPreviewWorkAuthority(
+async function preflightFounderOwnerPreviewWorkAuthority(
   userId: string,
   now: Date,
   requiredCapabilities: readonly FounderOwnerPreviewCapability[],
@@ -46,24 +52,69 @@ export async function preflightFounderOwnerPreviewWorkAuthority(
   }
 }
 
-export async function requireFounderOwnerPreviewWorkAuthorityInTransaction(
-  tx: FounderProductContractTransaction,
+/**
+ * Runs state-creating Owner Preview work behind the same lifecycle lock as Release Holds.
+ * A newly discovered expiry is committed as a Hold before the access error is returned.
+ */
+export async function withFounderOwnerPreviewWorkAuthority<T>(
   input: {
     userId: string;
-    now: Date;
+    now: () => Date;
     requiredCapabilities: readonly FounderOwnerPreviewCapability[];
   },
   dependencies: FounderOwnerPreviewWorkAuthorityDependencies,
-): Promise<void> {
-  await (dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction)(
-    tx,
-    {
-      ...input,
-      applicationRevision:
-        dependencies.applicationRevision ??
-        dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
-        process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
-        "",
-    },
-  );
+  work: (tx: FounderProductContractTransaction, now: Date) => Promise<T>,
+): Promise<T> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const applicationRevision =
+    dependencies.applicationRevision ??
+    dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
+    process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
+    "";
+
+  try {
+    await preflightFounderOwnerPreviewWorkAuthority(
+      input.userId,
+      input.now(),
+      input.requiredCapabilities,
+      {
+        ...dependencies,
+        createConnection: () => connection,
+      },
+    );
+
+    const outcome = await connection.db.transaction(async (tx) => {
+      const now = input.now();
+      await lockFounderProductContractLifecycleInTransaction(tx, input.userId);
+      if (!dependencies.requireReleaseStageAccess) {
+        await reconcileFounderOwnerPreviewQualificationExpiryInTransaction(tx, {
+          userId: input.userId,
+          now,
+          applicationRevision,
+        });
+      }
+      try {
+        await (
+          dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction
+        )(tx, {
+          userId: input.userId,
+          now,
+          requiredCapabilities: input.requiredCapabilities,
+          applicationRevision,
+        });
+      } catch (error) {
+        if (error instanceof FounderReleaseStageAccessError) {
+          return { ok: false as const, error };
+        }
+        throw error;
+      }
+      return { ok: true as const, value: await work(tx, now) };
+    });
+
+    if (!outcome.ok) throw outcome.error;
+    return outcome.value;
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
 }

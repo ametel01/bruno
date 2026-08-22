@@ -38,7 +38,10 @@ import {
   FOUNDER_AI_WORK_PROVIDER,
   type FounderAiRecoveryChoice,
 } from "@/src/server/operators/founder-ai-work";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  ensureFounderOperatorForUser,
+  getFounderOperatorForUser,
+} from "@/src/server/operators/founder-operator";
 import {
   type FounderProposedActionDto,
   projectFounderProposedAction,
@@ -156,7 +159,8 @@ export async function getFounderConversationForUser(
   userId: string,
   dependencies: Pick<FounderConversationDependencies, "createConnection"> = {},
 ): Promise<FounderConversationDto | null> {
-  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const operator = await getFounderOperatorForUser(userId, dependencies);
+  if (!operator) return null;
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {

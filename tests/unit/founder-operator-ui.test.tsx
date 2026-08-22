@@ -133,6 +133,10 @@ describe("Founder Operator preparation shell", () => {
           restoreVerifiedAt: "2026-08-22T00:00:00.000Z",
           nextArchiveDueAt: "2026-08-23T00:00:00.000Z",
           retentionEndsAt: "2026-09-21T00:00:00.000Z",
+          latestAttempt: {
+            status: "failed",
+            observedAt: "2026-08-22T22:00:00.000Z",
+          },
           deletion: {
             status: "completed",
             attemptedAt: "2026-08-22T00:00:00.000Z",
@@ -145,6 +149,8 @@ describe("Founder Operator preparation shell", () => {
     expect(html).toContain("Protected recovery");
     expect(html).toContain("Recovery Archive verified");
     expect(html).toContain("provider access is never copied");
+    expect(html).toContain("Current protection remains verified");
+    expect(html).toContain("latest daily refresh needs another try");
     expect(html).toContain("were safely deleted");
     expect(html).not.toMatch(/object key|ciphertext|credential digest|storage bucket/i);
   });
@@ -159,6 +165,7 @@ describe("Founder Operator preparation shell", () => {
           restoreVerifiedAt: null,
           nextArchiveDueAt: null,
           retentionEndsAt: null,
+          latestAttempt: null,
           deletion: {
             status: "failed",
             attemptedAt: "2026-08-22T00:00:00.000Z",

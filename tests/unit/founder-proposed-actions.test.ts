@@ -126,6 +126,45 @@ describe("Founder Proposed Actions application seam", () => {
     await expect(connection.db.select().from(operatorProposedActions)).resolves.toHaveLength(1);
   });
 
+  it("keeps the current proposal when protection expires before Request changes commits", async () => {
+    const action = await createFounderProposedActionForUser(OWNER_ID, draft(), {
+      createConnection: () => connection,
+      now: () => NOW,
+      ...ALLOW_OWNER_PREVIEW_WORK,
+    });
+    const expiredAt = new Date(NOW.getTime() + 24 * 60 * 60 * 1_000);
+    let current = NOW;
+
+    await expect(
+      decideFounderProposedActionForUser(
+        OWNER_ID,
+        action.id,
+        "request_changes",
+        1,
+        draft({
+          businessOutcome: "Create a protected revision",
+          validUntil: new Date(expiredAt.getTime() + 60_000).toISOString(),
+        }),
+        {
+          createConnection: () => connection,
+          now: () => current,
+          requireReleaseStageAccessForUser: async () => {
+            current = expiredAt;
+          },
+          requireReleaseStageAccess: async (_tx, input) => {
+            if (input.now >= expiredAt) throw new FounderReleaseStageAccessError();
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+
+    await expect(
+      getFounderProposedActionForUser(OWNER_ID, { createConnection: () => connection }),
+    ).resolves.toMatchObject({ id: action.id, version: 1, state: "awaiting_approval" });
+    await expect(connection.db.select().from(operatorProposedActions)).resolves.toHaveLength(1);
+    await expect(connection.db.select().from(operatorActionDecisions)).resolves.toHaveLength(0);
+  });
+
   it("authorizes one exact version, creates one durable authorization, and wins duplicates", async () => {
     const action = await createFounderProposedActionForUser(
       OWNER_ID,
@@ -307,7 +346,7 @@ describe("Founder Proposed Actions application seam", () => {
         businessOutcome: "Send the corrected follow-up",
         idempotencyKey: "send-2",
       }),
-      { createConnection: () => connection, now: () => NOW },
+      { createConnection: () => connection, now: () => NOW, ...ALLOW_OWNER_PREVIEW_WORK },
     );
 
     expect(changed.action).toMatchObject({

@@ -19,7 +19,10 @@ import {
   requireFounderOwnerPreviewAccessForUser,
   requireFounderOwnerPreviewAccessInTransaction,
 } from "@/src/server/founder-product-contract/release-stage-access";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  ensureFounderOperatorForUser,
+  getFounderOperatorForUser,
+} from "@/src/server/operators/founder-operator";
 
 type FounderRelationshipTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -151,10 +154,11 @@ export async function getFounderRelationshipsForUser(
   userId: string,
   dependencies: Pick<FounderRelationshipsDependencies, "createConnection" | "now"> = {},
 ): Promise<FounderRelationshipsDto> {
-  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const now = dependencies.now ?? (() => new Date());
+  const operator = await getFounderOperatorForUser(userId, dependencies);
+  if (!operator) return { records: [], candidates: [], generatedAt: now().toISOString() };
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
-  const now = dependencies.now ?? (() => new Date());
   try {
     return await connection.db.transaction((tx) => projectRelationships(tx, operator.id, now()));
   } finally {

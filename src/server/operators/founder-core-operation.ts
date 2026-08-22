@@ -21,8 +21,7 @@ import {
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
   type FounderOwnerPreviewWorkAuthorityDependencies,
-  preflightFounderOwnerPreviewWorkAuthority,
-  requireFounderOwnerPreviewWorkAuthorityInTransaction,
+  withFounderOwnerPreviewWorkAuthority,
 } from "@/src/server/founder-product-contract/work-authority";
 import {
   type FounderActionPreviewDto,
@@ -34,7 +33,10 @@ import {
   prepareFounderMorningBrief,
   projectFounderMorningBrief,
 } from "@/src/server/operators/founder-morning-brief";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  ensureFounderOperatorForUser,
+  getFounderOperatorForUser,
+} from "@/src/server/operators/founder-operator";
 import type {
   FounderActionFamily,
   FounderAuthorityMode,
@@ -126,7 +128,8 @@ export async function getFounderCoreOperationForUser(
   userId: string,
   dependencies: FounderCoreOperationDependencies = {},
 ): Promise<FounderCoreOperationDto | null> {
-  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const operator = await getFounderOperatorForUser(userId, dependencies);
+  if (!operator) return null;
   return withConnection(dependencies, async (connection) =>
     connection.db.transaction(async (tx) => {
       const [operation] = await tx
@@ -145,24 +148,10 @@ export async function confirmFounderCoreProcessingConsentForUser(
 ): Promise<FounderCoreOperationDto> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const now = dependencies.now ?? (() => new Date());
-  await preflightFounderOwnerPreviewWorkAuthority(
-    userId,
-    now(),
-    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+  return withFounderOwnerPreviewWorkAuthority(
+    { userId, now, requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden },
     dependencies,
-  );
-  return withConnection(dependencies, async (connection) => {
-    return connection.db.transaction(async (tx) => {
-      const at = now();
-      await requireFounderOwnerPreviewWorkAuthorityInTransaction(
-        tx,
-        {
-          userId,
-          now: at,
-          requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
-        },
-        dependencies,
-      );
+    async (tx, at) => {
       await lockOperator(tx, operator.id);
       const pair = await readyCoreConnectionSet(tx, operator.id, at);
       if (!pair) {
@@ -251,8 +240,8 @@ export async function confirmFounderCoreProcessingConsentForUser(
       }
       await ensureCoreBrief(tx, saved, at);
       return projectCoreOperation(tx, saved, operator.id);
-    });
-  });
+    },
+  );
 }
 
 export async function reconcileFounderCoreOperationForUser(
@@ -261,24 +250,10 @@ export async function reconcileFounderCoreOperationForUser(
 ): Promise<FounderCoreOperationDto | null> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const now = dependencies.now ?? (() => new Date());
-  await preflightFounderOwnerPreviewWorkAuthority(
-    userId,
-    now(),
-    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+  return withFounderOwnerPreviewWorkAuthority(
+    { userId, now, requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden },
     dependencies,
-  );
-  return withConnection(dependencies, async (connection) =>
-    connection.db.transaction(async (tx) => {
-      const at = now();
-      await requireFounderOwnerPreviewWorkAuthorityInTransaction(
-        tx,
-        {
-          userId,
-          now: at,
-          requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
-        },
-        dependencies,
-      );
+    async (tx, at) => {
       await lockOperator(tx, operator.id);
       const operation = await ensureCoreOperation(tx, operator.id, at);
       if (operation?.status !== "core" || !operation.processingConsentId) {
@@ -305,7 +280,7 @@ export async function reconcileFounderCoreOperationForUser(
         .where(eq(operatorLimitedOperations.id, operation.id))
         .limit(1);
       return fresh ? projectCoreOperation(tx, fresh, operator.id) : null;
-    }),
+    },
   );
 }
 
@@ -315,24 +290,10 @@ export async function openFounderCoreBriefForUser(
 ): Promise<FounderCoreOperationDto> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const now = dependencies.now ?? (() => new Date());
-  await preflightFounderOwnerPreviewWorkAuthority(
-    userId,
-    now(),
-    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+  return withFounderOwnerPreviewWorkAuthority(
+    { userId, now, requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden },
     dependencies,
-  );
-  return withConnection(dependencies, async (connection) => {
-    return connection.db.transaction(async (tx) => {
-      const at = now();
-      await requireFounderOwnerPreviewWorkAuthorityInTransaction(
-        tx,
-        {
-          userId,
-          now: at,
-          requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
-        },
-        dependencies,
-      );
+    async (tx, at) => {
       await lockOperator(tx, operator.id);
       const operation = await ensureCoreOperation(tx, operator.id, at);
       if (operation?.status !== "core") {
@@ -394,8 +355,8 @@ export async function openFounderCoreBriefForUser(
           503,
         );
       return projectCoreOperation(tx, fresh, operator.id);
-    });
-  });
+    },
+  );
 }
 
 async function ensureCoreOperation(

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
 import { buildTestOpenAiConnectedAcceptanceRelease } from "@/scripts/founder-openai-test-release";
@@ -24,6 +24,7 @@ import {
   requireFounderOwnerPreviewAccessForUser,
 } from "@/src/server/founder-product-contract/release-stage-access";
 import { persistFounderOwnerPreviewHoldInTransaction } from "@/src/server/founder-product-contract/release-stage-hold";
+import { withFounderOwnerPreviewWorkAuthority } from "@/src/server/founder-product-contract/work-authority";
 import {
   createDurableRecoveryArchive,
   getFounderRecoveryArchiveStatusForUser,
@@ -95,6 +96,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       restoreVerifiedAt: START.toISOString(),
       nextArchiveDueAt: new Date(START.valueOf() + 24 * 60 * 60 * 1_000).toISOString(),
       retentionEndsAt: new Date(START.valueOf() + 30 * 24 * 60 * 60 * 1_000).toISOString(),
+      latestAttempt: { status: "verified", observedAt: START.toISOString() },
       deletion: null,
     });
     expect(JSON.stringify(status)).not.toMatch(/objectKey|digest|credential|ciphertext/i);
@@ -117,6 +119,38 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       ),
     ).resolves.toBe(archiveId);
     expect(await connection.db.select().from(founderRecoveryArchives)).toHaveLength(1);
+  });
+
+  it("keeps current verified coverage visible when a newer refresh attempt fails", async () => {
+    await createDurableRecoveryArchive(
+      { action: "release_stage_admission", userId: USER_ID, now: START },
+      provider,
+      connection,
+      () => START,
+    );
+    const failedAt = new Date(START.valueOf() + 22 * 60 * 60 * 1_000);
+    await connection.db.insert(founderRecoveryArchives).values({
+      userId: USER_ID,
+      operatorId: OPERATOR_ID,
+      runtimeRevision: "runtime-v1",
+      status: "failed",
+      restorableVerified: false,
+      failureCode: "archive_create_failed",
+      observedAt: failedAt,
+      expiresAt: new Date(failedAt.valueOf() + 30 * 24 * 60 * 60 * 1_000),
+      createdAt: failedAt,
+    });
+
+    await expect(
+      getFounderRecoveryArchiveStatusForUser(USER_ID, failedAt, {
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({
+      state: "current",
+      lastVerifiedAt: START.toISOString(),
+      restoreVerifiedAt: START.toISOString(),
+      latestAttempt: { status: "failed", observedAt: failedAt.toISOString() },
+    });
   });
 
   it("does not reuse or authorize an archive from a different runtime revision", async () => {
@@ -408,6 +442,90 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       outcome: "hold",
       affectedCapabilities: ["openai"],
       decidedAt: observedAt,
+    });
+  });
+
+  it("retains the lifecycle lock through the authorized work transaction", async () => {
+    await createDurableRecoveryArchive(
+      { action: "release_stage_admission", userId: USER_ID, now: START },
+      provider,
+      connection,
+      () => START,
+    );
+    const competingConnection = createDatabaseConnection();
+
+    try {
+      await expect(
+        withFounderOwnerPreviewWorkAuthority(
+          {
+            userId: USER_ID,
+            now: () => START,
+            requiredCapabilities: ["openai"],
+          },
+          {
+            applicationRevision: "a".repeat(40),
+            createConnection: () => connection,
+          },
+          async () => {
+            const lockKey = `bruno:founder-lifecycle:${USER_ID}`;
+            const result = await competingConnection.db.execute<{ acquired: boolean }>(
+              sql`select pg_try_advisory_xact_lock(hashtextextended(${lockKey}, 0)) as acquired`,
+            );
+            expect(result[0]?.acquired).toBe(false);
+            return "committed";
+          },
+        ),
+      ).resolves.toBe("committed");
+    } finally {
+      await competingConnection.close();
+    }
+  });
+
+  it("commits a scoped Hold when qualification expires at the fresh work check", async () => {
+    await createDurableRecoveryArchive(
+      { action: "release_stage_admission", userId: USER_ID, now: START },
+      provider,
+      connection,
+      () => START,
+    );
+    const expiresAt = new Date(START.valueOf() + 15 * 60 * 1_000);
+    await connection.db
+      .update(founderReleaseDecisions)
+      .set({ openAiQualificationExpiresAt: expiresAt })
+      .where(eq(founderReleaseDecisions.userId, USER_ID));
+    let current = START;
+    let workStarted = false;
+
+    await expect(
+      withFounderOwnerPreviewWorkAuthority(
+        {
+          userId: USER_ID,
+          now: () => current,
+          requiredCapabilities: ["openai"],
+        },
+        {
+          applicationRevision: "a".repeat(40),
+          createConnection: () => connection,
+          requireReleaseStageAccessForUser: async () => {
+            current = new Date(expiresAt.valueOf() + 1);
+          },
+        },
+        async () => {
+          workStarted = true;
+        },
+      ),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+
+    expect(workStarted).toBe(false);
+    const decisions = await connection.db
+      .select()
+      .from(founderReleaseDecisions)
+      .where(eq(founderReleaseDecisions.userId, USER_ID))
+      .orderBy(founderReleaseDecisions.decidedAt);
+    expect(decisions.at(-1)).toMatchObject({
+      outcome: "hold",
+      affectedCapabilities: ["openai"],
+      decidedAt: current,
     });
   });
 

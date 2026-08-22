@@ -51,6 +51,10 @@ export type FounderRecoveryArchiveStatusDto = {
   restoreVerifiedAt: string | null;
   nextArchiveDueAt: string | null;
   retentionEndsAt: string | null;
+  latestAttempt: {
+    status: "pending" | "verified" | "failed" | "deleted";
+    observedAt: string;
+  } | null;
   deletion: {
     status: "pending" | "failed" | "completed";
     attemptedAt: string;
@@ -532,6 +536,29 @@ export async function getFounderRecoveryArchiveStatusForUser(
       .where(eq(founderRecoveryArchives.userId, userId))
       .orderBy(desc(founderRecoveryArchives.observedAt))
       .limit(1);
+    const [coverage] = authority?.runtimeRevision
+      ? await connection.db
+          .select()
+          .from(founderRecoveryArchives)
+          .where(
+            and(
+              eq(founderRecoveryArchives.userId, userId),
+              eq(founderRecoveryArchives.operatorId, authority.operatorId),
+              eq(founderRecoveryArchives.runtimeRevision, authority.runtimeRevision),
+              eq(founderRecoveryArchives.status, "verified"),
+              eq(founderRecoveryArchives.formatVersion, 1),
+              eq(founderRecoveryArchives.restorableVerified, true),
+              lte(founderRecoveryArchives.observedAt, now),
+              gt(
+                founderRecoveryArchives.observedAt,
+                new Date(now.valueOf() - DAILY_ARCHIVE_WINDOW_MS),
+              ),
+              gt(founderRecoveryArchives.expiresAt, now),
+            ),
+          )
+          .orderBy(desc(founderRecoveryArchives.observedAt))
+          .limit(1)
+      : [];
     const [deletion] = await connection.db
       .select({
         status: founderRecoveryArchiveDeletionReceipts.status,
@@ -543,12 +570,7 @@ export async function getFounderRecoveryArchiveStatusForUser(
       .where(eq(founderRecoveryArchiveDeletionReceipts.userId, userId))
       .orderBy(desc(founderRecoveryArchiveDeletionReceipts.attemptedAt))
       .limit(1);
-    const current =
-      latest !== undefined &&
-      Boolean(authority?.runtimeRevision) &&
-      latest.operatorId === authority?.operatorId &&
-      latest.runtimeRevision === authority?.runtimeRevision &&
-      isCurrentVerifiedRecoveryArchive(latest, now);
+    const current = coverage !== undefined && isCurrentVerifiedRecoveryArchive(coverage, now);
     return {
       state: current
         ? "current"
@@ -557,13 +579,16 @@ export async function getFounderRecoveryArchiveStatusForUser(
           : latest && latest.status !== "deleted"
             ? "due"
             : "unavailable",
-      lastVerifiedAt: latest?.status === "verified" ? latest.observedAt.toISOString() : null,
-      restoreVerifiedAt: latest?.restoreVerifiedAt?.toISOString() ?? null,
+      lastVerifiedAt: coverage?.observedAt.toISOString() ?? null,
+      restoreVerifiedAt: coverage?.restoreVerifiedAt?.toISOString() ?? null,
       nextArchiveDueAt:
-        latest?.status === "verified"
-          ? new Date(latest.observedAt.valueOf() + DAILY_ARCHIVE_WINDOW_MS).toISOString()
+        coverage !== undefined
+          ? new Date(coverage.observedAt.valueOf() + DAILY_ARCHIVE_WINDOW_MS).toISOString()
           : null,
-      retentionEndsAt: latest?.expiresAt.toISOString() ?? null,
+      retentionEndsAt: (coverage ?? latest)?.expiresAt.toISOString() ?? null,
+      latestAttempt: latest
+        ? { status: latest.status, observedAt: latest.observedAt.toISOString() }
+        : null,
       deletion: deletion
         ? {
             status:

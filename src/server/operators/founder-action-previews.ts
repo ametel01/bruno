@@ -9,10 +9,12 @@ import { operatorActionPreviewRevisions, operatorActionPreviews } from "@/src/se
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
   type FounderOwnerPreviewWorkAuthorityDependencies,
-  preflightFounderOwnerPreviewWorkAuthority,
-  requireFounderOwnerPreviewWorkAuthorityInTransaction,
+  withFounderOwnerPreviewWorkAuthority,
 } from "@/src/server/founder-product-contract/work-authority";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  ensureFounderOperatorForUser,
+  getFounderOperatorForUser,
+} from "@/src/server/operators/founder-operator";
 
 type ActionPreviewTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -85,7 +87,8 @@ export async function getFounderActionPreviewForUser(
   userId: string,
   dependencies: FounderActionPreviewDependencies = {},
 ): Promise<FounderActionPreviewDto | null> {
-  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const operator = await getFounderOperatorForUser(userId, dependencies);
+  if (!operator) return null;
   return withConnection(dependencies, (connection) =>
     connection.db.transaction((tx) => projectFounderActionPreview(tx, operator.id)),
   );
@@ -99,24 +102,14 @@ export async function editFounderActionPreviewForUser(
   const normalized = normalizeDraft(draft);
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const now = dependencies.now ?? (() => new Date());
-  await preflightFounderOwnerPreviewWorkAuthority(
-    userId,
-    now(),
-    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+  return withFounderOwnerPreviewWorkAuthority(
+    {
+      userId,
+      now,
+      requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+    },
     dependencies,
-  );
-  return withConnection(dependencies, (connection) =>
-    connection.db.transaction(async (tx) => {
-      const at = now();
-      await requireFounderOwnerPreviewWorkAuthorityInTransaction(
-        tx,
-        {
-          userId,
-          now: at,
-          requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
-        },
-        dependencies,
-      );
+    async (tx, at) => {
       await lockOperator(tx, operator.id);
       const preview = await ensurePreview(
         tx,
@@ -159,7 +152,7 @@ export async function editFounderActionPreviewForUser(
         .set({ updatedAt: at })
         .where(eq(operatorActionPreviews.id, preview.id));
       return projectPreview(tx, preview, created);
-    }),
+    },
   );
 }
 
@@ -169,24 +162,14 @@ export async function dismissFounderMailSendingOfferForUser(
 ): Promise<FounderActionPreviewDto> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const now = dependencies.now ?? (() => new Date());
-  await preflightFounderOwnerPreviewWorkAuthority(
-    userId,
-    now(),
-    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+  return withFounderOwnerPreviewWorkAuthority(
+    {
+      userId,
+      now,
+      requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+    },
     dependencies,
-  );
-  return withConnection(dependencies, (connection) =>
-    connection.db.transaction(async (tx) => {
-      const at = now();
-      await requireFounderOwnerPreviewWorkAuthorityInTransaction(
-        tx,
-        {
-          userId,
-          now: at,
-          requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
-        },
-        dependencies,
-      );
+    async (tx, at) => {
       await lockOperator(tx, operator.id);
       const preview = await ensurePreview(tx, operator.id, at, {
         ...(dependencies.randomUUID ? { randomUUID: dependencies.randomUUID } : {}),
@@ -208,7 +191,7 @@ export async function dismissFounderMailSendingOfferForUser(
           503,
         );
       return projectPreview(tx, { ...preview, mailSendingOfferDismissedAt: at }, latest);
-    }),
+    },
   );
 }
 

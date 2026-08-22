@@ -58,6 +58,10 @@ describe("Founder Operator route", () => {
       restoreVerifiedAt: "2026-08-22T00:00:00.000Z",
       nextArchiveDueAt: "2026-08-23T00:00:00.000Z",
       retentionEndsAt: "2026-09-21T00:00:00.000Z",
+      latestAttempt: {
+        status: "verified",
+        observedAt: "2026-08-22T00:00:00.000Z",
+      },
       deletion: null,
     });
     mocks.getOwnerPreviewAccess.mockResolvedValue({
@@ -126,6 +130,7 @@ describe("Founder Operator route", () => {
     const { GET } = await import("@/app/api/operator/route");
 
     const response = await GET(new Request("http://localhost/api/operator"), undefined, {
+      authMode: "development",
       getRecoveryArchiveStatus: mocks.getRecoveryArchiveStatus,
     });
     const body = await response.json();
