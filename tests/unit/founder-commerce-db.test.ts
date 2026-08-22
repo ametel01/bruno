@@ -335,6 +335,77 @@ describe("persisted Founder commerce authority", () => {
     expect(provider.refundOrder).not.toHaveBeenCalled();
   });
 
+  it("retires an obsolete cleanup retry when a newer checkout has established access", async () => {
+    await record(webhook("old-timeout", "2026-08-23T00:00:00.000Z"));
+    const retirementProvider = {
+      createRecoveryArchive: vi.fn(async () => {
+        throw new Error("no runtime archive needed in fixture");
+      }),
+      deleteRecoveryArchive: vi.fn(),
+      digitalOcean: {
+        observeOwnedSet: vi.fn(),
+        deleteFirewall: vi.fn(),
+        deleteDroplet: vi.fn(),
+      },
+      calls: () => [],
+    } as unknown as FounderInfrastructureRetirementProvider;
+    await reconcileNextFounderCommerce({
+      now: new Date("2026-08-23T01:00:00.000Z"),
+      applicationRevision: "a".repeat(40),
+      commerceProvider: provider,
+      retirementProvider,
+      createConnection: () => connection,
+    });
+
+    await connection.db.insert(founderCheckoutCorrelations).values({
+      userId: USER_ID,
+      correlationDigest: digest(NEWER_CORRELATION),
+      generation: 2,
+      createdAt: new Date("2026-08-23T01:01:00.000Z"),
+      expiresAt: new Date("2026-08-23T02:01:00.000Z"),
+    });
+    subscription = {
+      subscriptionId: "790",
+      orderId: "102",
+      status: "active",
+      updatedAt: "2026-08-23T01:01:00.000Z",
+      endsAt: null,
+    };
+    order = {
+      orderId: "102",
+      status: "paid",
+      total: 3000,
+      refundedAmount: 0,
+      updatedAt: subscription.updatedAt,
+    };
+    const newer = await record(
+      webhook("new-access", subscription.updatedAt, NEWER_CORRELATION, {
+        subscriptionId: subscription.subscriptionId,
+        orderId: order.orderId,
+      }),
+    );
+    expect(await reconcile(newer.receiptId)).toBe("applied");
+
+    await expect(
+      reconcileNextFounderCommerce({
+        now: new Date("2026-08-23T01:02:00.000Z"),
+        applicationRevision: "a".repeat(40),
+        commerceProvider: provider,
+        retirementProvider,
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ processed: 1, outcome: "retirement_superseded" });
+    expect((await connection.db.select().from(founderProductEntitlements))[0]).toMatchObject({
+      providerSubscriptionId: "790",
+      status: "verified",
+    });
+    expect(
+      (await connection.db.select().from(founderCheckoutCorrelations)).find(
+        (attempt) => attempt.generation === 1,
+      ),
+    ).toMatchObject({ closureReason: "payment_without_access_refunded_superseded" });
+  });
+
   async function record(webhookInput: VerifiedLemonSqueezyWebhook) {
     return recordFounderCommerceWebhook({
       webhook: webhookInput,

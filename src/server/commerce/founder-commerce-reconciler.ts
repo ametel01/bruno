@@ -41,7 +41,8 @@ export type FounderCommerceReconciliationResult = {
     | "refund_confirmed"
     | "refund_retrying"
     | "retirement_completed"
-    | "retirement_retrying";
+    | "retirement_retrying"
+    | "retirement_superseded";
 };
 
 export async function reconcileNextFounderCommerce(input: {
@@ -82,7 +83,11 @@ export async function reconcileNextFounderCommerce(input: {
     }
 
     const [retirement] = await connection.db
-      .select({ userId: founderCheckoutCorrelations.userId, id: founderCheckoutCorrelations.id })
+      .select({
+        userId: founderCheckoutCorrelations.userId,
+        id: founderCheckoutCorrelations.id,
+        generation: founderCheckoutCorrelations.generation,
+      })
       .from(founderCheckoutCorrelations)
       .where(
         and(
@@ -104,6 +109,22 @@ export async function reconcileNextFounderCommerce(input: {
       .orderBy(asc(founderCheckoutCorrelations.closedAt))
       .limit(1);
     if (retirement) {
+      const superseded = await connection.db.transaction(async (tx) => {
+        await lockFounderProductContractLifecycleInTransaction(tx, retirement.userId);
+        const authority = await readCurrentEntitlementAuthority(tx, retirement.userId);
+        if (!authority || authority.generation <= retirement.generation) return false;
+        await tx
+          .update(founderCheckoutCorrelations)
+          .set({ closureReason: "payment_without_access_refunded_superseded" })
+          .where(
+            and(
+              eq(founderCheckoutCorrelations.id, retirement.id),
+              eq(founderCheckoutCorrelations.closureReason, "payment_without_access_refunded"),
+            ),
+          );
+        return true;
+      });
+      if (superseded) return { processed: 1, outcome: "retirement_superseded" };
       try {
         await executeFounderInfrastructureRetirement(
           {
