@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
 import { buildTestOpenAiConnectedAcceptanceRelease } from "@/scripts/founder-openai-test-release";
@@ -23,6 +23,10 @@ import {
   enterFounderTrustedPreviewStage,
   issueFounderTrustedPreviewInvitation,
 } from "@/src/server/founder-product-contract/trusted-preview-admission";
+import {
+  assessFounderTrustedPreviewPromotionEvidenceForCohort,
+  FOUNDER_TRUSTED_PREVIEW_PROMOTION_EVIDENCE_SCHEMA,
+} from "@/src/server/founder-product-contract/trusted-preview-promotion";
 import {
   FOUNDER_TRUSTED_PREVIEW_COHORT_LOCK_KEY,
   persistFounderTrustedPreviewStageHoldInTransaction,
@@ -99,6 +103,23 @@ describe("Trusted Preview admission authority", () => {
   });
 
   it("serializes three identity-bound slots and denies Clerk-only or cross-identity access", async () => {
+    await expect(
+      issueFounderTrustedPreviewInvitation(
+        {
+          cohortOwnerUserId: OWNER_ID,
+          invitedClerkSubject: "user_preview_owner",
+          serviceBusinessEvidenceDigest: digest(9),
+        },
+        {
+          applicationRevision: APPLICATION_REVISION,
+          createConnection: () => connection,
+          createInvitationToken: () => "O".repeat(43),
+          env: ENV,
+          now: () => START,
+        },
+      ),
+    ).rejects.toThrow("Owner cannot occupy a trusted-contact cohort slot");
+
     const tokens: string[] = [];
     for (const [index, participant] of PARTICIPANTS.slice(0, 3).entries()) {
       const token = String.fromCharCode(65 + index).repeat(43);
@@ -195,6 +216,81 @@ describe("Trusted Preview admission authority", () => {
       availableCapabilities: ["openai", "calendar_reading"],
       stage: "trusted_preview",
       cohortSlot: 2,
+    });
+  });
+
+  it("derives promotion participants only from persisted admitted cohort authority", async () => {
+    const tokens = ["P".repeat(43), "Q".repeat(43)] as const;
+    for (const [index, participant] of PARTICIPANTS.slice(0, 2).entries()) {
+      await issueFounderTrustedPreviewInvitation(
+        {
+          cohortOwnerUserId: OWNER_ID,
+          invitedClerkSubject: participant.clerk,
+          serviceBusinessEvidenceDigest: digest(20 + index),
+        },
+        {
+          applicationRevision: APPLICATION_REVISION,
+          createConnection: () => connection,
+          createInvitationToken: () => tokens[index] ?? "",
+          env: ENV,
+          now: () => START,
+        },
+      );
+      await admitFounderToTrustedPreview(participant.userId, tokens[index] ?? "", {
+        applicationRevision: APPLICATION_REVISION,
+        createConnection: () => connection,
+        createProvider: () => provider,
+        env: ENV,
+        now: () => START,
+      });
+    }
+    const admitted = await connection.db
+      .select({
+        userId: founderTrustedPreviewInvitations.participantUserId,
+        operatorId: founderTrustedPreviewInvitations.participantOperatorId,
+        activeDecisionId: founderTrustedPreviewInvitations.admissionDecisionId,
+        admittedAt: founderTrustedPreviewInvitations.admittedAt,
+      })
+      .from(founderTrustedPreviewInvitations)
+      .where(eq(founderTrustedPreviewInvitations.status, "admitted"))
+      .orderBy(asc(founderTrustedPreviewInvitations.cohortSlot));
+    const observedAt = new Date(START.valueOf() + 10_000);
+    const evidence = trustedPromotionEvidence(admitted);
+
+    await expect(
+      assessFounderTrustedPreviewPromotionEvidenceForCohort({
+        value: evidence,
+        cohortOwnerUserId: OWNER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        observedAt,
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({
+      promotionEligible: true,
+      completedParticipants: 2,
+      founderAcceptanceEligible: false,
+      automaticPromotion: false,
+    });
+
+    const fabricated = structuredClone(evidence);
+    const firstParticipant = fabricated.participants[0];
+    if (!firstParticipant) throw new Error("Expected persisted participant evidence.");
+    firstParticipant.userId = PARTICIPANTS[2].userId;
+    await expect(
+      assessFounderTrustedPreviewPromotionEvidenceForCohort({
+        value: fabricated,
+        cohortOwnerUserId: OWNER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        observedAt,
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({
+      promotionEligible: false,
+      completedParticipants: 1,
+      reasons: expect.arrayContaining([
+        "admitted_attended_participant_required",
+        "two_completed_participants_required",
+      ]),
     });
   });
 
@@ -494,6 +590,58 @@ async function insertOwnerPreviewDecision(connection: DatabaseConnection): Promi
     decidedAt,
     createdAt: decidedAt,
   });
+}
+
+function trustedPromotionEvidence(
+  participants: readonly {
+    userId: string | null;
+    operatorId: string | null;
+    activeDecisionId: string | null;
+    admittedAt: Date | null;
+  }[],
+) {
+  return {
+    schemaVersion: FOUNDER_TRUSTED_PREVIEW_PROMOTION_EVIDENCE_SCHEMA,
+    stage: "trusted_preview",
+    classification: "learning_round",
+    supportMode: "attended",
+    applicationRevision: APPLICATION_REVISION,
+    participants: participants.map((participant, participantIndex) => {
+      if (
+        !participant.userId ||
+        !participant.operatorId ||
+        !participant.activeDecisionId ||
+        !participant.admittedAt
+      ) {
+        throw new Error("Expected complete persisted Trusted Preview admission.");
+      }
+      const admittedAt = participant.admittedAt;
+      return {
+        userId: participant.userId,
+        operatorId: participant.operatorId,
+        activeDecisionId: participant.activeDecisionId,
+        attendedObservation: true,
+        journeys: Object.fromEntries(
+          ["activation", "recurring_use", "authority", "recovery", "privacy"].map(
+            (journey, journeyIndex) => [
+              journey,
+              {
+                occurredAt: new Date(
+                  admittedAt.valueOf() + (journeyIndex + 1) * 1_000,
+                ).toISOString(),
+                evidenceDigest: digest(100 + participantIndex * 10 + journeyIndex),
+              },
+            ],
+          ),
+        ) as Record<
+          "activation" | "recurring_use" | "authority" | "recovery" | "privacy",
+          { occurredAt: string; evidenceDigest: `sha256:${string}` }
+        >,
+      };
+    }),
+    unresolvedReleaseBlockers: 0,
+    unresolvedCriticalFailures: 0,
+  };
 }
 
 function ownerPromotionEvidence(activeDecisionId: string, admittedAt: Date) {

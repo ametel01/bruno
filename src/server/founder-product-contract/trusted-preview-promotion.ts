@@ -1,5 +1,20 @@
 import "server-only";
 
+import { and, eq, inArray, lte } from "drizzle-orm";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import {
+  founderReleaseDecisions,
+  founderTrustedPreviewInvitations,
+  operatorRuntimes,
+  operators,
+} from "@/src/server/db/schema";
+import { FOUNDER_TRUSTED_PREVIEW_CAPABILITIES } from "./trusted-preview-qualification";
+import {
+  getLatestFounderTrustedPreviewStageDecisionInTransaction,
+  lockFounderTrustedPreviewCohortInTransaction,
+  requireFounderTrustedPreviewCohortOwnerInTransaction,
+} from "./trusted-preview-release-decision";
+
 export const FOUNDER_TRUSTED_PREVIEW_PROMOTION_EVIDENCE_SCHEMA =
   "bruno.trusted-preview-promotion-evidence.v1" as const;
 
@@ -21,6 +36,125 @@ export type FounderTrustedPreviewPromotionAssessment = {
   evidenceDigests: readonly `sha256:${string}`[];
   reasons: readonly string[];
 };
+
+export async function assessFounderTrustedPreviewPromotionEvidenceForCohort(input: {
+  value: unknown;
+  cohortOwnerUserId: string;
+  applicationRevision: string;
+  observedAt: Date;
+  createConnection?: () => DatabaseConnection;
+}): Promise<FounderTrustedPreviewPromotionAssessment> {
+  const connection = input.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !input.createConnection;
+  try {
+    return await connection.db.transaction(async (tx) => {
+      await lockFounderTrustedPreviewCohortInTransaction(tx);
+      await requireFounderTrustedPreviewCohortOwnerInTransaction(tx, input.cohortOwnerUserId);
+      const stageDecision = await getLatestFounderTrustedPreviewStageDecisionInTransaction(
+        tx,
+        input.cohortOwnerUserId,
+      );
+      const [ownerAuthority] = await tx
+        .select({
+          operatorId: operators.id,
+          runtimeRevision: operatorRuntimes.configRevision,
+          runtimeStatus: operatorRuntimes.status,
+        })
+        .from(operators)
+        .innerJoin(operatorRuntimes, eq(operatorRuntimes.operatorId, operators.id))
+        .where(and(eq(operators.userId, input.cohortOwnerUserId), eq(operators.status, "active")))
+        .limit(1);
+      if (
+        !stageDecision ||
+        !ownerAuthority ||
+        (stageDecision.outcome !== "enter" && stageDecision.outcome !== "resume") ||
+        stageDecision.applicationRevision !== input.applicationRevision ||
+        stageDecision.operatorId !== ownerAuthority.operatorId ||
+        stageDecision.runtimeRevision !== ownerAuthority.runtimeRevision ||
+        ownerAuthority.runtimeStatus !== "ready" ||
+        stageDecision.capabilityManifest.length !== FOUNDER_TRUSTED_PREVIEW_CAPABILITIES.length ||
+        !FOUNDER_TRUSTED_PREVIEW_CAPABILITIES.every((capability) =>
+          stageDecision.capabilityManifest.includes(capability),
+        ) ||
+        !stageDecision.openAiQualificationExpiresAt ||
+        stageDecision.openAiQualificationExpiresAt <= input.observedAt ||
+        !stageDecision.calendarQualificationExpiresAt ||
+        stageDecision.calendarQualificationExpiresAt <= input.observedAt
+      ) {
+        return deniedAssessment(["active_stage_decision_required"]);
+      }
+      const admittedRows = await tx
+        .select({
+          userId: founderTrustedPreviewInvitations.participantUserId,
+          operatorId: founderTrustedPreviewInvitations.participantOperatorId,
+          activeDecisionId: founderReleaseDecisions.id,
+          admittedAt: founderTrustedPreviewInvitations.admittedAt,
+          decisionApplicationRevision: founderReleaseDecisions.applicationRevision,
+          decisionRuntimeRevision: founderReleaseDecisions.runtimeRevision,
+          capabilityManifest: founderReleaseDecisions.capabilityManifest,
+          runtimeRevision: operatorRuntimes.configRevision,
+          runtimeStatus: operatorRuntimes.status,
+        })
+        .from(founderTrustedPreviewInvitations)
+        .innerJoin(
+          founderReleaseDecisions,
+          eq(founderReleaseDecisions.id, founderTrustedPreviewInvitations.admissionDecisionId),
+        )
+        .innerJoin(
+          operators,
+          and(
+            eq(operators.id, founderTrustedPreviewInvitations.participantOperatorId),
+            eq(operators.userId, founderTrustedPreviewInvitations.participantUserId),
+          ),
+        )
+        .innerJoin(operatorRuntimes, eq(operatorRuntimes.operatorId, operators.id))
+        .where(
+          and(
+            eq(founderTrustedPreviewInvitations.cohortOwnerUserId, input.cohortOwnerUserId),
+            eq(founderTrustedPreviewInvitations.status, "admitted"),
+            lte(founderTrustedPreviewInvitations.admittedAt, input.observedAt),
+            eq(founderReleaseDecisions.stage, "trusted_preview"),
+            inArray(founderReleaseDecisions.outcome, ["enter", "resume"]),
+            eq(founderReleaseDecisions.applicationRevision, input.applicationRevision),
+            eq(operators.status, "active"),
+          ),
+        );
+      const admittedParticipants = admittedRows.flatMap((row) => {
+        if (
+          !row.userId ||
+          !row.operatorId ||
+          !row.admittedAt ||
+          row.userId === input.cohortOwnerUserId ||
+          row.decisionApplicationRevision !== input.applicationRevision ||
+          row.decisionRuntimeRevision !== row.runtimeRevision ||
+          row.runtimeStatus !== "ready" ||
+          row.capabilityManifest.length !== FOUNDER_TRUSTED_PREVIEW_CAPABILITIES.length ||
+          !FOUNDER_TRUSTED_PREVIEW_CAPABILITIES.every((capability) =>
+            row.capabilityManifest.includes(capability),
+          )
+        ) {
+          return [];
+        }
+        return [
+          {
+            userId: row.userId,
+            operatorId: row.operatorId,
+            activeDecisionId: row.activeDecisionId,
+            admittedAt: row.admittedAt,
+          },
+        ];
+      });
+      return assessFounderTrustedPreviewPromotionEvidence({
+        value: input.value,
+        admittedParticipants,
+        applicationRevision: input.applicationRevision,
+        observedAt: input.observedAt,
+      });
+    });
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
 
 export function assessFounderTrustedPreviewPromotionEvidence(input: {
   value: unknown;
