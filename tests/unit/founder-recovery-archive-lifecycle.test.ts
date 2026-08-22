@@ -124,14 +124,17 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         applicationRevision: "a".repeat(40),
         createConnection: () => connection,
       }),
-    ).resolves.toEqual({ admitted: true, workAllowed: true });
+    ).resolves.toEqual({
+      admitted: true,
+      availableCapabilities: ["openai", "calendar_reading"],
+    });
 
     await expect(
       getFounderOwnerPreviewAccessForUser(USER_ID, START, {
         applicationRevision: "b".repeat(40),
         createConnection: () => connection,
       }),
-    ).resolves.toEqual({ admitted: false, workAllowed: false });
+    ).resolves.toEqual({ admitted: false, availableCapabilities: [] });
 
     const heldAt = new Date(START.valueOf() + 60_000);
     await connection.db.insert(founderReleaseDecisions).values({
@@ -142,6 +145,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision: "a".repeat(40),
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      affectedCapabilities: ["openai"],
       evidenceDigests: [`sha256:${"c".repeat(64)}`],
       decidedAt: heldAt,
       createdAt: heldAt,
@@ -152,7 +156,22 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         applicationRevision: "a".repeat(40),
         createConnection: () => connection,
       }),
-    ).resolves.toEqual({ admitted: true, workAllowed: false });
+    ).resolves.toEqual({ admitted: true, availableCapabilities: ["calendar_reading"] });
+
+    await connection.db
+      .update(operatorRuntimes)
+      .set({
+        status: "needs_attention",
+        recoveryMessage: "Runtime recovery is required.",
+        failureCode: "runtime_unavailable",
+      })
+      .where(eq(operatorRuntimes.operatorId, OPERATOR_ID));
+    await expect(
+      getFounderOwnerPreviewAccessForUser(USER_ID, heldAt, {
+        applicationRevision: "a".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ admitted: true, availableCapabilities: [] });
   });
 
   it("admits a production Operator only after persisting its initial verified archive", async () => {
@@ -200,6 +219,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision,
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      affectedCapabilities: ["openai", "calendar_reading"],
       evidenceDigests: [`sha256:${"e".repeat(64)}`],
       decidedAt: holdAt,
       createdAt: holdAt,
@@ -396,6 +416,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision: "7".repeat(40),
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      affectedCapabilities: ["openai", "calendar_reading"],
       evidenceDigests: [`sha256:${"6".repeat(64)}`],
       decidedAt: holdAt,
       createdAt: holdAt,
@@ -597,6 +618,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision: "e".repeat(40),
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      affectedCapabilities: ["openai", "calendar_reading"],
       evidenceDigests: [`sha256:${"f".repeat(64)}`],
       decidedAt: new Date(START.valueOf() + 1_000),
       createdAt: new Date(START.valueOf() + 1_000),
@@ -821,6 +843,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision: "c".repeat(40),
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      affectedCapabilities: ["openai", "calendar_reading"],
       evidenceDigests: [`sha256:${"d".repeat(64)}`],
       decidedAt: new Date(START.valueOf() + 60 * 60 * 1_000),
       createdAt: new Date(START.valueOf() + 60 * 60 * 1_000),
@@ -858,6 +881,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision: "d".repeat(40),
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      affectedCapabilities: ["openai", "calendar_reading"],
       evidenceDigests: [`sha256:${"e".repeat(64)}`],
       decidedAt: heldAt,
       createdAt: heldAt,

@@ -236,6 +236,7 @@ export async function executeFounderApprovedGmailActionForUser(
         userId,
         now: checkedAt,
         applicationRevision: resolveApplicationRevision(dependencies.env),
+        requiredCapabilities: ["openai"],
       });
       await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id, checkedAt);
       const check = await recheckFounderProposedActionForExecution(
@@ -619,6 +620,7 @@ async function assertFounderMailSubmissionStillReady(
       userId,
       now: checkedAt,
       applicationRevision: resolveApplicationRevision(environment),
+      requiredCapabilities: ["openai"],
     });
     const [action] = await tx
       .select()

@@ -1,6 +1,10 @@
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { admitFounderOperatorToOwnerPreview } from "@/src/server/founder-product-contract/owner-preview-admission";
-import { getFounderOwnerPreviewAccessForUser } from "@/src/server/founder-product-contract/release-stage-access";
+import {
+  getFounderOwnerPreviewAccessForUser,
+  hasFounderOwnerPreviewCapabilities,
+} from "@/src/server/founder-product-contract/release-stage-access";
+import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
 import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
 import {
   confirmFounderTimezoneForUser,
@@ -51,14 +55,20 @@ export async function GET(
           applicationUser.userId,
           new Date(),
         )
-      : { admitted: true, workAllowed: true };
+      : {
+          admitted: true,
+          availableCapabilities: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+        };
 
   return Response.json(
     {
       operator,
       recoveryArchive,
       ownerPreviewAdmitted: ownerPreviewAccess.admitted,
-      ownerPreviewWorkAllowed: ownerPreviewAccess.workAllowed,
+      ownerPreviewWorkAllowed: hasFounderOwnerPreviewCapabilities(
+        ownerPreviewAccess,
+        FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+      ),
     },
     { headers: noStoreHeaders() },
   );

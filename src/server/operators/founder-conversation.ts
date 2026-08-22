@@ -41,6 +41,10 @@ import {
   type FounderProposedActionDto,
   projectFounderProposedAction,
 } from "@/src/server/operators/founder-proposed-actions";
+import {
+  FounderReleaseStageAccessError,
+  requireFounderOwnerPreviewAccessInTransaction,
+} from "@/src/server/founder-product-contract/release-stage-access";
 
 type FounderConversationTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -120,6 +124,8 @@ export type FounderConversationDependencies = {
     userId: string,
     dependencies?: { createConnection?: () => DatabaseConnection },
   ) => Promise<FounderAiConnectionDto>;
+  applicationRevision?: string;
+  requireOwnerPreviewAccess?: typeof requireFounderOwnerPreviewAccessInTransaction;
   maxMessageLength?: number;
 };
 
@@ -129,12 +135,12 @@ export class FounderConversationError extends Error {
     | "operator_not_ready"
     | "conversation_unavailable"
     | "conversation_ai_unavailable";
-  readonly status: 400 | 409 | 503;
+  readonly status: 400 | 403 | 409 | 503;
 
   constructor(
     code: FounderConversationError["code"],
     message: string,
-    status: 400 | 409 | 503 = 409,
+    status: 400 | 403 | 409 | 503 = 409,
   ) {
     super(message);
     this.name = "FounderConversationError";
@@ -191,7 +197,9 @@ export async function sendFounderConversationMessageForUser(
   try {
     const started = await connection.db.transaction(async (tx) => {
       await lockOperator(tx, operator.id);
-      const conversation = await ensureConversation(tx, operator.id, now());
+      const checkedAt = now();
+      await requireConversationWorkAccess(tx, userId, checkedAt, dependencies);
+      const conversation = await ensureConversation(tx, operator.id, checkedAt);
       const [existing] = await tx
         .select()
         .from(operatorConversationWorks)
@@ -382,6 +390,7 @@ export async function resumeFounderConversationWorkForUser(
   try {
     const started = await connection.db.transaction(async (tx) => {
       await lockOperator(tx, operator.id);
+      await requireConversationWorkAccess(tx, userId, now(), dependencies);
       const [work] = await tx
         .select()
         .from(operatorConversationWorks)
@@ -558,6 +567,33 @@ export async function resumeFounderConversationWorkForUser(
     return finalizeCompletedConversation(connection, started, response, now());
   } finally {
     if (ownsConnection) await connection.close();
+  }
+}
+
+async function requireConversationWorkAccess(
+  tx: FounderConversationTransaction,
+  userId: string,
+  now: Date,
+  dependencies: FounderConversationDependencies,
+): Promise<void> {
+  try {
+    await (dependencies.requireOwnerPreviewAccess ?? requireFounderOwnerPreviewAccessInTransaction)(
+      tx,
+      {
+        userId,
+        now,
+        applicationRevision:
+          dependencies.applicationRevision ?? process.env.VERCEL_GIT_COMMIT_SHA?.trim() ?? "",
+        requiredCapabilities: ["openai"],
+      },
+    );
+  } catch (error) {
+    if (!(error instanceof FounderReleaseStageAccessError)) throw error;
+    throw new FounderConversationError(
+      "conversation_unavailable",
+      "Conversation work is paused until OpenAI Owner Preview protection is current.",
+      403,
+    );
   }
 }
 

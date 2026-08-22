@@ -7,7 +7,7 @@ import {
 
 export async function requireFounderOperatorWorkspaceAccess(
   userId: string,
-  requirement: FounderOwnerPreviewAccessRequirement = "work",
+  requirement: FounderOwnerPreviewAccessRequirement,
 ): Promise<Response | null> {
   if (resolveAuthMode(process.env).mode !== "clerk") return null;
   try {

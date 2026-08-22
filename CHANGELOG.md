@@ -24,11 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Owner Preview admission now requires a current encrypted, isolated-rebuild-verified Recovery
   Archive outside the Droplet plus exact Owner, stage, application, runtime, and capability Preview
   Qualification, independently evidenced for OpenAI and Calendar. Hourly reconciliation refreshes
-  eligible archives before the 24-hour access boundary, expires both archive objects after 30 days with an
-  absence-backed Deletion Receipt, bounds S3-compatible operations, and keeps Infrastructure
+  eligible archives before the 24-hour access boundary, expires both archive objects after 30 days
+  with an absence-backed Deletion Receipt, bounds S3-compatible operations, and keeps Infrastructure
   Retirement independent from archive health. Founder workspace and effect-starting boundaries now
   distinguish prior admission for safe workspace reads from current protection for new work and
-  effects. Holds preserve checkpoints, retirement invalidates destroyed runtime readiness,
+  effects. Holds preserve checkpoints and scope pauses to their affected capabilities, non-Ready
+  runtimes retain safe workspace reads, retirement invalidates destroyed runtime readiness,
   admission rechecks evidence at its final commit, and restore proof preserves the complete
   external-action pause tuple.
 - A protected production rollout now advances versioned defaults through QStash, an Approved

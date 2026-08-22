@@ -2,9 +2,8 @@ import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_share
 import {
   confirmFounderCoreProcessingConsentForUser,
   FounderCoreOperationError,
-  type getFounderCoreOperationForUser,
+  getFounderCoreOperationForUser,
   openFounderCoreBriefForUser,
-  reconcileFounderCoreOperationForUser,
 } from "@/src/server/operators/founder-core-operation";
 import type { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import { requireConfiguredApplicationUser as defaultRequireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
@@ -14,7 +13,6 @@ export const dynamic = "force-dynamic";
 type Dependencies = {
   requireApplicationUser?: typeof requireConfiguredApplicationUser;
   getOperation?: typeof getFounderCoreOperationForUser;
-  reconcileOperation?: typeof reconcileFounderCoreOperationForUser;
   confirmConsent?: typeof confirmFounderCoreProcessingConsentForUser;
   openBrief?: typeof openFounderCoreBriefForUser;
 };
@@ -33,11 +31,9 @@ export async function GET(
     "workspace",
   );
   if (accessFailure) return accessFailure;
-  const operation = await (
-    dependencies.reconcileOperation ??
-    dependencies.getOperation ??
-    reconcileFounderCoreOperationForUser
-  )(applicationUser.userId);
+  const operation = await (dependencies.getOperation ?? getFounderCoreOperationForUser)(
+    applicationUser.userId,
+  );
   return Response.json({ operation }, { headers: noStoreHeaders() });
 }
 
@@ -50,7 +46,10 @@ export async function POST(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
-  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId, [
+    "openai",
+    "calendar_reading",
+  ]);
   if (accessFailure) return accessFailure;
   let payload: unknown;
   try {

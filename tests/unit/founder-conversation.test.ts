@@ -9,6 +9,7 @@ import {
   users,
 } from "@/src/server/db/schema";
 import { ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY } from "@/src/server/operators/founder-ai-routing";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 import {
   assertFounderExternalActionsNotPaused,
   getFounderExternalActionPauseForUser,
@@ -79,6 +80,7 @@ describe("Founder Conversation application seam", () => {
 
     const sent = await sendFounderConversationMessageForUser(OWNER_ID, "What needs my attention?", {
       createConnection: () => connection,
+      requireOwnerPreviewAccess: allowOwnerPreviewWork,
       adapter,
       requestId: "request-1",
       now: () => now,
@@ -118,6 +120,7 @@ describe("Founder Conversation application seam", () => {
 
     const duplicate = await sendFounderConversationMessageForUser(OWNER_ID, "ignored duplicate", {
       createConnection: () => connection,
+      requireOwnerPreviewAccess: allowOwnerPreviewWork,
       adapter,
       requestId: "request-1",
       now: () => now,
@@ -146,6 +149,7 @@ describe("Founder Conversation application seam", () => {
 
     const result = await sendFounderConversationMessageForUser(OWNER_ID, "Draft a client reply", {
       createConnection: () => connection,
+      requireOwnerPreviewAccess: allowOwnerPreviewWork,
       adapter,
       requestId: "request-paused",
       now: () => now,
@@ -192,6 +196,32 @@ describe("Founder Conversation application seam", () => {
     );
   });
 
+  it("rechecks OpenAI release protection inside the work-start transaction", async () => {
+    let providerCalls = 0;
+
+    await expect(
+      sendFounderConversationMessageForUser(OWNER_ID, "Start protected work", {
+        createConnection: () => connection,
+        requestId: "request-held",
+        now: () => now,
+        requireOwnerPreviewAccess: async (_tx, input) => {
+          expect(input.requiredCapabilities).toEqual(["openai"]);
+          throw new FounderReleaseStageAccessError();
+        },
+        adapter: {
+          async send() {
+            providerCalls += 1;
+            return { ok: true, response: "should not run" };
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ status: 403, code: "conversation_unavailable" });
+
+    expect(providerCalls).toBe(0);
+    await expect(connection.db.select().from(operatorConversationWorks)).resolves.toEqual([]);
+    await expect(connection.db.select().from(operatorConversationMessages)).resolves.toEqual([]);
+  });
+
   it("routes a work unit through the next Ready provider and records its account evidence", async () => {
     const [anthropic] = await connection.db
       .insert(operatorAiConnections)
@@ -230,6 +260,7 @@ describe("Founder Conversation application seam", () => {
     });
     const sent = await sendFounderConversationMessageForUser(OWNER_ID, "Use the connected backup", {
       createConnection: () => connection,
+      requireOwnerPreviewAccess: allowOwnerPreviewWork,
       adapters: {
         anthropic: {
           async send(input) {
@@ -320,6 +351,7 @@ describe("Founder Conversation application seam", () => {
       "Try the primary account",
       {
         createConnection: () => connection,
+        requireOwnerPreviewAccess: allowOwnerPreviewWork,
         adapters: {
           openai: {
             async send(input) {
@@ -355,6 +387,7 @@ describe("Founder Conversation application seam", () => {
       paused.activeWork?.id ?? "",
       {
         createConnection: () => connection,
+        requireOwnerPreviewAccess: allowOwnerPreviewWork,
         adapters: {
           anthropic: {
             async send(input) {
@@ -402,6 +435,7 @@ describe("Founder Conversation application seam", () => {
 
     const sent = await sendFounderConversationMessageForUser(OWNER_ID, "Keep observing", {
       createConnection: () => connection,
+      requireOwnerPreviewAccess: allowOwnerPreviewWork,
       adapter: {
         async send() {
           return { ok: true, response: "Conversation remains available." };
@@ -443,6 +477,7 @@ describe("Founder Conversation application seam", () => {
     };
     const dependencies = {
       createConnection: () => connection,
+      requireOwnerPreviewAccess: allowOwnerPreviewWork,
       adapter,
       requestId: "request-ambiguous",
       now: () => now,
@@ -499,6 +534,7 @@ describe("Founder Conversation application seam", () => {
     await Promise.all([
       sendFounderConversationMessageForUser(OWNER_ID, "First message", {
         createConnection: () => connection,
+        requireOwnerPreviewAccess: allowOwnerPreviewWork,
         adapter,
         requestId: "request-first",
         now: () => now,
@@ -506,6 +542,7 @@ describe("Founder Conversation application seam", () => {
       }),
       sendFounderConversationMessageForUser(OWNER_ID, "Second message", {
         createConnection: () => connection,
+        requireOwnerPreviewAccess: allowOwnerPreviewWork,
         adapter,
         requestId: "request-second",
         now: () => now,
@@ -524,6 +561,8 @@ describe("Founder Conversation application seam", () => {
     ]);
   });
 });
+
+async function allowOwnerPreviewWork(): Promise<void> {}
 
 async function reset(connection: DatabaseConnection): Promise<void> {
   await connection.client.unsafe(

@@ -1,7 +1,11 @@
 import { FounderOperatorPreparation } from "@/app/operator/_components/founder-operator-preparation";
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
-import { getFounderOwnerPreviewAccessForUser } from "@/src/server/founder-product-contract/release-stage-access";
+import {
+  getFounderOwnerPreviewAccessForUser,
+  hasFounderOwnerPreviewCapabilities,
+} from "@/src/server/founder-product-contract/release-stage-access";
+import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
 import { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
 import {
   isFounderGoogleCalendarReleased,
@@ -40,7 +44,10 @@ export default async function FounderOperatorPage() {
     getFounderRecoveryArchiveStatusForUser(applicationUser.userId, new Date()),
     resolveAuthMode(process.env).mode === "clerk"
       ? getFounderOwnerPreviewAccessForUser(applicationUser.userId, new Date())
-      : Promise.resolve({ admitted: true, workAllowed: true }),
+      : Promise.resolve({
+          admitted: true,
+          availableCapabilities: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+        }),
   ]);
   const calendarReadingReleased = isFounderGoogleCalendarReleased();
   const mailReadingReleased = isFounderGoogleMailReadingReleased();
@@ -54,7 +61,10 @@ export default async function FounderOperatorPage() {
         initialOnboarding={onboarding}
         initialRecoveryArchive={recoveryArchive}
         ownerPreviewAdmitted={ownerPreviewAccess.admitted}
-        ownerPreviewWorkAllowed={ownerPreviewAccess.workAllowed}
+        ownerPreviewWorkAllowed={hasFounderOwnerPreviewCapabilities(
+          ownerPreviewAccess,
+          FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+        )}
         timezoneOptions={buildFounderTimezoneOptions()}
         openAiReleased={openAiReleased}
         calendarReadingReleased={calendarReadingReleased}

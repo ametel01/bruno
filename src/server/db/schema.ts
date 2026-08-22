@@ -864,6 +864,10 @@ export const founderReleaseDecisions = pgTable(
     applicationRevision: text("application_revision").notNull(),
     runtimeRevision: text("runtime_revision").notNull(),
     capabilityManifest: jsonb("capability_manifest").$type<readonly string[]>().notNull(),
+    affectedCapabilities: jsonb("affected_capabilities")
+      .$type<readonly string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     evidenceDigests: jsonb("evidence_digests").$type<readonly string[]>().notNull(),
     decidedAt: timestamp("decided_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -876,6 +880,14 @@ export const founderReleaseDecisions = pgTable(
     check(
       "founder_release_decisions_runtime_revision_check",
       sql`length(trim(${table.runtimeRevision})) > 0`,
+    ),
+    check(
+      "founder_release_decisions_affected_capabilities_check",
+      sql`(${table.outcome} = 'hold' AND jsonb_array_length(${table.affectedCapabilities}) > 0) OR (${table.outcome} <> 'hold' AND jsonb_array_length(${table.affectedCapabilities}) = 0)`,
+    ),
+    check(
+      "founder_release_decisions_affected_capabilities_manifest_check",
+      sql`${table.affectedCapabilities} <@ ${table.capabilityManifest}`,
     ),
     index("founder_release_decisions_user_stage_idx").on(
       table.userId,

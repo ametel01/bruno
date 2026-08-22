@@ -147,7 +147,7 @@ export function FounderOperatorPreparation({
   const runtimeReady = runtime?.status === "ready";
   const runtimeNeedsAttention = runtime?.status === "needs_attention";
   const activated = onboarding?.activated === true;
-  const workspaceAvailable = runtimeReady && admitted;
+  const workspaceAvailable = admitted;
 
   async function confirmTimezone(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -271,21 +271,21 @@ export function FounderOperatorPreparation({
         </section>
       ) : null}
 
-      {runtimeReady && (!admitted || !workAllowed) ? (
+      {(runtimeReady && !admitted) || (admitted && (!runtimeReady || !workAllowed)) ? (
         <section className={styles.card} aria-labelledby="owner-preview-access-title">
           <div className={styles.cardHeading}>
             <div>
               <p className={styles.kicker}>Needs you</p>
               <h3 id="owner-preview-access-title">
                 {admitted
-                  ? "New work is paused until protection is current"
+                  ? "Some new work is paused"
                   : "Owner Preview is waiting for current protection"}
               </h3>
             </div>
           </div>
           <p className={styles.hint}>
             {admitted
-              ? "Your saved workspace remains available. Bruno will not begin new work or provider effects until the exact Release Decision and Recovery Archive protection are current again."
+              ? "Your saved workspace remains available. Bruno starts work only for capabilities whose exact Release Decision, runtime, and Recovery Archive protection remain current."
               : "Bruno will open the workspace only after current qualification and a verified Recovery Archive are confirmed together. Try preparation again when protection is available."}
           </p>
         </section>

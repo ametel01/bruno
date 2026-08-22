@@ -239,6 +239,7 @@ describe("Founder approved Gmail execution", () => {
       applicationRevision: REVISION,
       runtimeRevision: "runtime-mail-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      affectedCapabilities: ["openai", "calendar_reading"],
       evidenceDigests: [`sha256:${"7".repeat(64)}`],
       decidedAt: heldAt,
       createdAt: heldAt,

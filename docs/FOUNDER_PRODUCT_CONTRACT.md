@@ -88,9 +88,11 @@ Qualification, production preparation records the Owner Preview `enter` Release 
 this verified-restorable archive exists; unavailable storage returns a fail-closed preparation
 response without admission authority. Founder workspace reads require a prior exact-revision Owner
 Preview admission. New work and effect-starting application boundaries additionally recheck that
-the latest decision is an `enter` or `resume` and that its verified archive remains within the
-24-hour currency window. A Hold or stale archive preserves safe reads and checkpoints while pausing
-new work. A later Release Hold can be lifted only by a new `resume`
+their required capabilities remain available under the latest exact-revision decision and that its
+verified archive remains within the 24-hour currency window. A Hold records its affected capability
+subset separately from the complete admitted manifest, preserving unrelated qualified work plus all
+safe reads and checkpoints. A stale archive or non-Ready runtime pauses new work without hiding that
+saved state. A later Release Hold can be lifted only by a new `resume`
 decision after fresh, independently evidenced OpenAI and Calendar qualifications revalidate the
 same Owner, stage, application, runtime, and capability boundaries after that Hold. Provider
 subscription state applies bounded retirement deadlines and immediately pauses new work for unpaid,

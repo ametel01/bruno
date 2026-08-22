@@ -268,8 +268,10 @@ a later `resume` Release Decision can start protection again for a restored Oper
 Operator preparation grants Owner Preview admission only after current OpenAI and Calendar Preview
 Qualification and the initial archive's isolated rebuild check all pass. Founder workspace reads
 require a prior exact-revision Owner Preview admission. New work and effect-starting transactions
-additionally require the latest decision to remain active and a verified archive observed within the
-last 24 hours; a Hold or stale archive preserves safe reads and checkpoints while pausing work.
+additionally require a verified archive observed within the last 24 hours and every capability named
+by that boundary to remain available. A Release Hold keeps the complete admitted manifest while
+persisting the affected capability subset, so unrelated qualified work and all safe reads remain
+available. A stale archive or non-Ready runtime pauses new work without hiding saved checkpoints.
 Infrastructure Retirement marks the destroyed runtime as needing attention before
 its receipt completes, so only newly provisioned and verified infrastructure can become Ready
 again. The encrypted durable state preserves an external-action pause as the complete boolean,

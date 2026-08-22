@@ -299,7 +299,47 @@ describe("Founder Operator preparation shell", () => {
       }),
     );
 
-    expect(html).toContain("New work is paused until protection is current");
+    expect(html).toContain("Some new work is paused");
+    expect(html).toContain('aria-label="Current Founder workspace"');
+    expect(html).toContain("What should we handle today?");
+  });
+
+  it("preserves safe workspace checkpoints when the admitted runtime needs attention", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: {
+          ...OPERATOR,
+          preparation: {
+            ...OPERATOR.preparation,
+            status: "ready",
+            timezone: "Asia/Manila",
+            timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+          },
+          runtime: {
+            status: "needs_attention",
+            recoveryMessage: "Runtime recovery is required.",
+          },
+        },
+        initialOnboarding: {
+          nextStep: "conversation",
+          defaultRoute: "/operator#conversation",
+          activated: true,
+          operation: "calendar_limited",
+          capabilities: { ai: "ready", calendar: "ready", mail: "not_offered", core: "missing" },
+          facts: {
+            timezoneConfirmed: true,
+            runtimeReady: false,
+            processingConsent: true,
+            firstBriefReady: true,
+            primarySuiteIdentity: "google-owner-preview",
+          },
+        } satisfies FounderOnboardingDto,
+        ownerPreviewAdmitted: true,
+        ownerPreviewWorkAllowed: false,
+      }),
+    );
+
+    expect(html).toContain("Some new work is paused");
     expect(html).toContain('aria-label="Current Founder workspace"');
     expect(html).toContain("What should we handle today?");
   });

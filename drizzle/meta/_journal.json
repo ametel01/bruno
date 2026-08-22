@@ -631,6 +631,13 @@
       "when": 1787351654822,
       "tag": "0089_elite_stone_men",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1787381762706,
+      "tag": "0090_release_hold_capabilities",
+      "breakpoints": true
     }
   ]
 }
