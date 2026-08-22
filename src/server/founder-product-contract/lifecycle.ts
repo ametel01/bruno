@@ -174,6 +174,7 @@ export async function executeFounderProductContractLifecycleAction(
           await persistFounderExternalBetaQualificationsInTransaction(
             tx,
             externalBetaQualifications,
+            input.now,
           );
           if (!lifecycleArchiveId) throw new Error("A verified Recovery Archive is required.");
           const qualificationEvidenceDigests = [

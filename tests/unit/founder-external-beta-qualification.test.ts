@@ -1,9 +1,12 @@
+import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildTestAnthropicAcceptanceRelease } from "@/scripts/founder-anthropic-test-release";
 import { buildTestGoogleMailSendingAcceptanceRelease } from "@/scripts/founder-google-mail-sending-test-release";
 import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
 import { buildTestOpenAiConnectedAcceptanceRelease } from "@/scripts/founder-openai-test-release";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import { founderPreviewQualifications } from "@/src/server/db/schema";
 import {
   FOUNDER_EXTERNAL_BETA_CAPABILITIES,
   type FounderExternalBetaQualificationError,
@@ -18,7 +21,7 @@ import {
 const NOW = new Date("2026-08-23T06:00:00.000Z");
 const REVISION = "a".repeat(40);
 const RUNTIME_REVISION = "external-beta-runtime-v1";
-const COHORT = "external-beta-2026-01";
+const COHORT = `external-beta-test-${randomUUID()}`;
 
 describe("External Beta exact-candidate qualification", () => {
   it("requires five independent capabilities before exposing the complete manifest", () => {
@@ -110,11 +113,11 @@ describe("persisted External Beta manifest", () => {
 
   beforeEach(async () => {
     connection = createDatabaseConnection();
-    await connection.client.unsafe("truncate table founder_preview_qualifications");
+    await deleteTestQualifications(connection);
   });
 
   afterEach(async () => {
-    await connection.client.unsafe("truncate table founder_preview_qualifications");
+    await deleteTestQualifications(connection);
     await connection.close();
   });
 
@@ -129,10 +132,10 @@ describe("persisted External Beta manifest", () => {
           : qualification,
     );
     await connection.db.transaction((tx) =>
-      persistFounderExternalBetaQualificationsInTransaction(tx, qualifications),
+      persistFounderExternalBetaQualificationsInTransaction(tx, qualifications, NOW),
     );
     await connection.db.transaction((tx) =>
-      persistFounderExternalBetaQualificationsInTransaction(tx, qualifications),
+      persistFounderExternalBetaQualificationsInTransaction(tx, qualifications, NOW),
     );
 
     const current = await getFounderExternalBetaManifest(candidate(), {
@@ -159,6 +162,45 @@ describe("persisted External Beta manifest", () => {
     expect(degraded.safeWorkCheckpointsPreserved).toBe(true);
   });
 
+  it("fails closed when a persisted row has an over-long qualification window", async () => {
+    await connection.db.insert(founderPreviewQualifications).values({
+      stage: "external_beta",
+      cohort: COHORT,
+      capability: "openai",
+      applicationRevision: REVISION,
+      runtimeRevision: RUNTIME_REVISION,
+      evidenceDigest: `sha256:${"c".repeat(64)}`,
+      observedAt: NOW,
+      expiresAt: new Date(NOW.valueOf() + 9 * 24 * 60 * 60 * 1_000),
+      createdAt: NOW,
+    });
+
+    const manifest = await getFounderExternalBetaManifest(candidate(), {
+      createConnection: () => connection,
+    });
+
+    expect(manifest.qualifiedCapabilities).toEqual([]);
+    expect(manifest.unavailableCapabilities).toContain("openai");
+  });
+
+  it("rejects an over-long qualification window at the persistence boundary", async () => {
+    const qualifications = requireFounderExternalBetaQualifications(candidate(), environment()).map(
+      (qualification) =>
+        qualification.capability === "openai"
+          ? {
+              ...qualification,
+              expiresAt: new Date(NOW.valueOf() + 9 * 24 * 60 * 60 * 1_000).toISOString(),
+            }
+          : qualification,
+    );
+
+    await expect(
+      connection.db.transaction((tx) =>
+        persistFounderExternalBetaQualificationsInTransaction(tx, qualifications, NOW),
+      ),
+    ).rejects.toThrow("External Beta qualification manifest is incomplete or inconsistent.");
+  });
+
   it("projects only nontechnical Founder-readable status", () => {
     const status = projectFounderExternalBetaManifestStatus({
       complete: false,
@@ -176,6 +218,12 @@ describe("persisted External Beta manifest", () => {
     );
   });
 });
+
+async function deleteTestQualifications(connection: DatabaseConnection): Promise<void> {
+  await connection.db
+    .delete(founderPreviewQualifications)
+    .where(eq(founderPreviewQualifications.cohort, COHORT));
+}
 
 function candidate() {
   return {
