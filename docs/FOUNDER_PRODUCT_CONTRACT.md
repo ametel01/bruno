@@ -51,14 +51,19 @@ two JSON inputs containing allowlisted counts and SHA-256 evidence digests only:
 - `moderated_founder_summary_json` records the 4/4 desktop/phone cohort, cross-device day-two count,
   7-of-8 activation/action/recovery and first-brief thresholds, 8-of-8 comprehension, zero critical
   failure counts, and applied 90-day/30-day/24-month retention controls.
-- `provider_decision_summary_json` records exact-revision released/hidden outcomes plus evidence
-  digests for OpenAI, Calendar reading, Gmail reading, Gmail sending, and Anthropic.
+- `provider_decision_summary_json` records each capability's released/hidden outcome, exact source
+  revision, qualification and expiry instants, and a distinct sanitized evidence digest for OpenAI,
+  Anthropic, Calendar reading, Gmail reading, and one-to-one Gmail sending.
 
 The decision approves only when the product contract is release-eligible, every usability and
-safety threshold passes, all four core provider decisions are released for the exact app revision,
-and the attended summaries are complete. Anthropic is included only when its own outcome is
-`released`. The retained decision excludes participant identities, recordings, transcripts,
-credentials, prompts, and provider responses.
+safety threshold passes, all five provider capability decisions are independently released and
+current for the exact app revision, and the attended summaries are complete. Hidden, missing,
+malformed, stale, expired, future-dated, revision-mismatched, or reused provider evidence fails
+closed. The retained decision excludes participant identities, recordings, transcripts,
+credentials, prompts, provider responses, and any unrecognized supplied fields. It also records the
+General Release policy boundary: each Founder may authorize OpenAI only, Anthropic only, or both;
+routing uses only those authorized Ready connections; Bruno-funded fallback is prohibited; and
+qualification loss is capability-scoped at Safe Work Checkpoints.
 
 The workflow runs in automated mode for every push to `main`. A release candidate uses the manual
 `release` mode only after attended assistive-technology evidence exists. Before either mode runs,
