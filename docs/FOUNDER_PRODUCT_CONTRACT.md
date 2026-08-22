@@ -100,7 +100,7 @@ path rather than only a policy helper. Verified archives that reach their 30-day
 durable, idempotent deletion boundary that requires separate absence proof for the encrypted object
 and its recovery-only credential. The production adapter uses the configured S3-compatible object
 store under the reserved `founder-recovery/` namespace, while the hourly protected reconciler
-refreshes one schedule interval before the 24-hour access boundary and processes expiry for retained
+refreshes two schedule intervals before the 24-hour access boundary and processes expiry for retained
 archives even when the Owner is no longer eligible for new archives. Neither the manual backup
 manifest nor a DigitalOcean snapshot can enter the v1 archive state. Archive and recovery-credential
 deletion requires a live proof that bucket versioning is disabled, so a delete marker that leaves

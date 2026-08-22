@@ -30,7 +30,7 @@ import {
 } from "./recovery-archive-provider";
 
 const DAILY_ARCHIVE_WINDOW_MS = 24 * 60 * 60 * 1_000;
-const SCHEDULED_ARCHIVE_REFRESH_MS = DAILY_ARCHIVE_WINDOW_MS - 60 * 60 * 1_000;
+const SCHEDULED_ARCHIVE_REFRESH_MS = DAILY_ARCHIVE_WINDOW_MS - 2 * 60 * 60 * 1_000;
 const ARCHIVE_RETENTION_MS = 30 * DAILY_ARCHIVE_WINDOW_MS;
 
 type RecoveryArchiveTransaction = Parameters<

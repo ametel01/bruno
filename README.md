@@ -259,7 +259,7 @@ Recovery Archives use the object store only as an off-Droplet transport. Their e
 separate wrapped recovery credential, authenticated restore check, 24-hour refresh boundary, and
 30-day deletion receipt are distinct from the manual backup manifest and from DigitalOcean
 snapshots. The protected `/api/internal/operator/recovery-archives` cron runs hourly, creates a new
-archive one hourly schedule interval before the current verified copy reaches 24 hours, and
+archive two hourly schedule intervals before the current verified copy reaches 24 hours, and
 processes expiry even after a
 Release Hold or denied admission. Object identities are persisted before upload, so an interrupted
 or partially failed creation remains discoverable for bounded cleanup. A completed Infrastructure

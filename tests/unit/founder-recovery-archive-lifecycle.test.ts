@@ -359,7 +359,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([]);
   });
 
-  it("refreshes before the daily boundary without duplicating the scheduled cohort", async () => {
+  it("refreshes with two cron intervals of verification margin", async () => {
     await createDurableRecoveryArchive(
       { action: "release_stage_admission", userId: USER_ID, now: START },
       provider,
@@ -369,7 +369,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
     await expect(
       reconcileFounderRecoveryArchives({
-        now: new Date(START.valueOf() + 23 * 60 * 60 * 1_000),
+        now: new Date(START.valueOf() + 22 * 60 * 60 * 1_000),
         provider,
         createConnection: () => connection,
       }),
@@ -377,7 +377,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
     await expect(
       reconcileFounderRecoveryArchives({
-        now: new Date(START.valueOf() + 24 * 60 * 60 * 1_000),
+        now: new Date(START.valueOf() + 23 * 60 * 60 * 1_000),
         provider,
         createConnection: () => connection,
       }),
