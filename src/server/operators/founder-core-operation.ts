@@ -149,7 +149,7 @@ export async function confirmFounderCoreProcessingConsentForUser(
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const now = dependencies.now ?? (() => new Date());
   return withFounderOwnerPreviewWorkAuthority(
-    { userId, now, requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden },
+    { userId, now, requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.coreOperation },
     dependencies,
     async (tx, at) => {
       await lockOperator(tx, operator.id);
@@ -251,7 +251,7 @@ export async function reconcileFounderCoreOperationForUser(
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const now = dependencies.now ?? (() => new Date());
   return withFounderOwnerPreviewWorkAuthority(
-    { userId, now, requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden },
+    { userId, now, requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.coreOperation },
     dependencies,
     async (tx, at) => {
       await lockOperator(tx, operator.id);
@@ -291,7 +291,7 @@ export async function openFounderCoreBriefForUser(
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const now = dependencies.now ?? (() => new Date());
   return withFounderOwnerPreviewWorkAuthority(
-    { userId, now, requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden },
+    { userId, now, requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.coreOperation },
     dependencies,
     async (tx, at) => {
       await lockOperator(tx, operator.id);

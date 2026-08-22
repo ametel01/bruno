@@ -6,6 +6,7 @@ import type { DatabaseConnection } from "@/src/server/db/client";
 import {
   founderCommerceEvents,
   founderCheckoutCorrelations,
+  founderExternalBetaInvitations,
   founderProductEntitlements,
   operators,
 } from "@/src/server/db/schema";
@@ -260,11 +261,21 @@ export async function requireRetirementDue(
       ),
     )
     .limit(1);
-  if (!entitlement) throw new Error("Product Entitlement retirement is not due.");
-  if (!entitlement.retirementDueAt) {
-    throw new Error("Product Entitlement retirement deadline is unavailable.");
+  if (entitlement?.retirementDueAt) return entitlement.retirementDueAt;
+  const [externalBeta] = await tx
+    .select({ retirementDueAt: founderExternalBetaInvitations.retirementDueAt })
+    .from(founderExternalBetaInvitations)
+    .where(
+      and(
+        eq(founderExternalBetaInvitations.participantUserId, userId),
+        inArray(founderExternalBetaInvitations.status, ["expired", "withdrawn"]),
+      ),
+    )
+    .limit(1);
+  if (!externalBeta?.retirementDueAt) {
+    throw new Error("Infrastructure Retirement is not due.");
   }
-  return entitlement.retirementDueAt;
+  return externalBeta.retirementDueAt;
 }
 
 async function consumeOrVerifyCheckoutCorrelation(

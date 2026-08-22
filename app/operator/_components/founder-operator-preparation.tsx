@@ -79,6 +79,8 @@ export function FounderOperatorPreparation({
       ),
   );
   const ownerPreviewExperience = experience === "owner_preview";
+  const previewLearningExperience =
+    ownerPreviewExperience && previewStatus.stage !== "External Beta";
   const lastOpenedStep = useRef<string | null>(null);
 
   useEffect(() => {
@@ -447,14 +449,14 @@ export function FounderOperatorPreparation({
                 {onboarding.activated
                   ? "Your current brief and Conversation are ready."
                   : `Next step: ${
-                      ownerPreviewExperience
+                      previewLearningExperience
                         ? ownerPreviewOnboardingStepLabel(onboarding.nextStep)
                         : onboardingStepLabel(onboarding.nextStep)
                     }`}
               </h3>
             </div>
             <span className={styles.confirmed}>
-              {ownerPreviewExperience
+              {previewLearningExperience
                 ? "Limited Operation"
                 : onboarding.operation === "core"
                   ? "Core Operation"
@@ -466,7 +468,7 @@ export function FounderOperatorPreparation({
               ? "Bruno opens the active workspace here after every refresh."
               : "This step is derived from the latest saved connection, consent, and evidence state."}
           </p>
-          {ownerPreviewExperience ? (
+          {previewLearningExperience ? (
             <p className={styles.hint}>
               Owner Preview capabilities — AI: {capabilityLabel(onboarding.capabilities.ai)}
               {"; "}Calendar: {capabilityLabel(onboarding.capabilities.calendar)}.
@@ -495,9 +497,11 @@ export function FounderOperatorPreparation({
             Available now: {capabilityList(previewStatus.availableCapabilities)}.
           </p>
           <p className={styles.hint}>
-            Support is {previewStatus.supportBoundary.toLowerCase()}. This attended use remains a
-            Learning Round, cannot become Founder Acceptance Evidence, and never promotes Bruno
-            automatically.
+            Support is {previewStatus.supportBoundary.toLowerCase()}. This use remains{" "}
+            {previewStatus.stage === "External Beta"
+              ? "product-hardening evidence"
+              : "a Learning Round"}
+            , cannot become Founder Acceptance Evidence, and never promotes Bruno automatically.
           </p>
         </section>
       ) : null}
@@ -520,7 +524,7 @@ export function FounderOperatorPreparation({
               ? "Your saved workspace remains available. Bruno starts work only for capabilities whose exact Release Decision, runtime, and Recovery Archive protection remain current."
               : "Bruno will open the workspace only after current qualification and a verified Recovery Archive are confirmed together. Try preparation again when protection is available."}
           </p>
-          {runtimeReady && !admitted ? (
+          {runtimeReady && !admitted && previewStatus.stage !== "External Beta" ? (
             <button
               className={styles.button}
               type="button"
@@ -566,7 +570,7 @@ export function FounderOperatorPreparation({
             <FounderConversation showDecisionContext={false} />
           </div>
           <div className={styles.workspaceBrief}>
-            {ownerPreviewExperience || onboarding?.operation !== "core" ? (
+            {previewLearningExperience || onboarding?.operation !== "core" ? (
               <FounderLimitedOperation />
             ) : (
               <FounderCoreOperation />
@@ -574,7 +578,7 @@ export function FounderOperatorPreparation({
           </div>
           <div className={styles.workspaceNeeds}>
             <FounderActionInbox
-              mailSendingReleased={ownerPreviewExperience ? false : mailSendingReleased}
+              mailSendingReleased={previewLearningExperience ? false : mailSendingReleased}
             />
           </div>
         </section>
@@ -626,28 +630,28 @@ export function FounderOperatorPreparation({
 
       {!activated && workspaceAvailable ? (
         <FounderActionInbox
-          mailSendingReleased={ownerPreviewExperience ? false : mailSendingReleased}
+          mailSendingReleased={previewLearningExperience ? false : mailSendingReleased}
         />
       ) : null}
 
-      {!ownerPreviewExperience && workspaceAvailable && mailSendingReleased ? (
+      {!previewLearningExperience && workspaceAvailable && mailSendingReleased ? (
         <FounderMailSendingConnection />
       ) : null}
 
       {workspaceAvailable &&
       openAiReleased &&
-      (!ownerPreviewExperience || previewStatus.availableCapabilities.includes("OpenAI")) ? (
+      (!previewLearningExperience || previewStatus.availableCapabilities.includes("OpenAI")) ? (
         <FounderAiConnection />
       ) : null}
 
       {workspaceAvailable &&
       calendarReadingReleased &&
-      (!ownerPreviewExperience ||
+      (!previewLearningExperience ||
         previewStatus.availableCapabilities.includes("Calendar reading")) ? (
         <FounderCalendarConnection />
       ) : null}
 
-      {!ownerPreviewExperience &&
+      {!previewLearningExperience &&
       workspaceAvailable &&
       mailReadingReleased &&
       mailReleaseControls ? (
@@ -656,14 +660,14 @@ export function FounderOperatorPreparation({
 
       {!activated &&
       workspaceAvailable &&
-      !ownerPreviewExperience &&
+      !previewLearningExperience &&
       onboarding?.operation === "core" ? (
         <FounderCoreOperation />
       ) : null}
 
       {!activated &&
       workspaceAvailable &&
-      (ownerPreviewExperience || onboarding?.operation !== "core") ? (
+      (previewLearningExperience || onboarding?.operation !== "core") ? (
         <FounderLimitedOperation />
       ) : null}
 

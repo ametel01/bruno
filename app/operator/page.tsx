@@ -1,8 +1,10 @@
 import { FounderOperatorPreparation } from "@/app/operator/_components/founder-operator-preparation";
+import { FounderExternalBeta } from "@/app/operator/_components/founder-external-beta";
 import { FounderExternalBetaManifest } from "@/app/operator/_components/founder-external-beta-manifest";
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
+import { getFounderExternalBetaStatusForUser } from "@/src/server/founder-product-contract/external-beta-admission";
 import { getFounderInfrastructureRetirementStatusForUser } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import { getFounderExternalBetaManifestStatusForUser } from "@/src/server/founder-product-contract/external-beta-manifest";
 import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
@@ -53,10 +55,12 @@ export default async function FounderOperatorPage({
   }
 
   const operator = await getFounderOperatorForUser(applicationUser.userId);
-  const trustedPreviewInvitationToken = readTrustedPreviewInvitationToken(await searchParams);
+  const resolvedSearchParams = await searchParams;
+  const trustedPreviewInvitationToken = readTrustedPreviewInvitationToken(resolvedSearchParams);
+  const externalBetaInvitation = readExternalBetaInvitation(resolvedSearchParams);
   const applicationRevision = readFounderApplicationRevision();
   const authMode = resolveAuthMode(process.env).mode;
-  const requestedExperience = (await searchParams).experience;
+  const requestedExperience = resolvedSearchParams.experience;
   const experience = resolveFounderOperatorExperience({
     authMode,
     nodeEnvironment: process.env.NODE_ENV,
@@ -70,6 +74,7 @@ export default async function FounderOperatorPage({
     infrastructureRetirement,
     ownerPreviewAccess,
     externalBetaStatus,
+    externalBetaAccess,
   ] = await Promise.all([
     operator ? getFounderOnboardingForUser(applicationUser.userId) : Promise.resolve(undefined),
     applicationRevision
@@ -85,6 +90,11 @@ export default async function FounderOperatorPage({
           availableCapabilities: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
         }),
     getFounderExternalBetaManifestStatusForUser(applicationUser.userId, new Date()),
+    applicationRevision
+      ? getFounderExternalBetaStatusForUser(applicationUser.userId, new Date(), {
+          applicationRevision,
+        })
+      : Promise.resolve({ state: "unavailable" as const }),
   ]);
   const calendarReadingReleased = isFounderGoogleCalendarReleased();
   const mailReadingReleased = isFounderGoogleMailReadingReleased();
@@ -93,6 +103,15 @@ export default async function FounderOperatorPage({
 
   return (
     <FounderOperatorShell>
+      <FounderExternalBeta
+        initialStatus={externalBetaAccess}
+        {...(externalBetaInvitation
+          ? {
+              invitationToken: externalBetaInvitation.invitationToken,
+              workspaceReference: externalBetaInvitation.workspaceReference,
+            }
+          : {})}
+      />
       <FounderOperatorPreparation
         initialOperator={operator}
         {...(onboarding ? { initialOnboarding: onboarding } : {})}
@@ -124,6 +143,20 @@ export default async function FounderOperatorPage({
       <FounderExternalBetaManifest status={externalBetaStatus} />
     </FounderOperatorShell>
   );
+}
+
+function readExternalBetaInvitation(
+  searchParams: Record<string, string | string[] | undefined> | undefined,
+): { invitationToken: string; workspaceReference: string } | undefined {
+  const invitationToken = searchParams?.external_beta_invitation;
+  const workspaceReference = searchParams?.external_beta_workspace;
+  return typeof invitationToken === "string" &&
+    /^[A-Za-z0-9_-]{43,128}$/.test(invitationToken) &&
+    typeof workspaceReference === "string" &&
+    workspaceReference.length > 0 &&
+    workspaceReference.length <= 200
+    ? { invitationToken, workspaceReference }
+    : undefined;
 }
 
 function readTrustedPreviewInvitationToken(

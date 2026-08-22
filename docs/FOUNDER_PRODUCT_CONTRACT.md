@@ -184,6 +184,25 @@ Anthropic, or both, and has no Bruno-funded fallback. The Founder API and reusab
 publish only ordinary labels and Available or Paused state; cohort IDs, revisions, evidence digests,
 models, credentials, Hermes details, runners, and raw provider evidence remain server-only.
 
+External Beta begins only through an exact-candidate Release Decision after Trusted Preview's
+promotion gate and the complete five-capability manifest both pass. Each invitation is an opaque,
+single-workspace, named-Founder grant: Bruno stores only digests, rejects copying or transfer, and
+expires the pending invitation after exactly seven days. Admission requires the Founder to accept
+the Beta Compact before access starts. The Founder surface shows the External Beta stage, exact
+time remaining, capability availability, self-serve and reactive-support boundary, withdrawal,
+Founder Data Export, and Bruno Data Deletion. The cohort is free, never asks for a card, and has no
+conversion path. Access lasts exactly fourteen days and cannot be extended; expiry stops new work
+immediately and gives the existing retirement executor a fixed one-hour deadline while export and
+deletion remain available for retained Bruno-local data.
+
+Promotion remains a later human Release Decision, not an automated outcome. A qualifying cohort is
+five to ten independent Founders who each complete fourteen days and at least five recurring
+Lead-to-Client Loops without attended operation. A missed threshold cannot be repaired by extending
+access or reusing the cohort: assessment requires a new cohort. All External Beta observations are
+Product Hardening Evidence only and never Founder Acceptance Evidence. The registered admission,
+promotion, and Founder-surface tests exercise these boundaries in the Founder Product Contract
+invariant pack.
+
 Delayed or
 reordered commerce events cannot replace newer authority or extend a retirement clock; reactivation
 requires a newly pending Owner-bound Checkout Correlation. DigitalOcean cleanup is derived from

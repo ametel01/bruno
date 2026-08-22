@@ -5,6 +5,8 @@ import type { AuthModeDecision } from "@/src/auth/auth-mode";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   appMetadata,
+  founderExternalBetaInvitations,
+  founderPreviewQualifications,
   founderRecoveryArchives,
   founderReleaseDecisions,
   founderTrustedPreviewInvitations,
@@ -12,12 +14,14 @@ import {
   operators,
 } from "@/src/server/db/schema";
 import { readFounderApplicationRevision } from "./application-revision";
+import { FOUNDER_EXTERNAL_BETA_CAPABILITIES } from "./external-beta-qualification";
 import type { FounderProductContractTransaction } from "./operator-authority";
 import { FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY } from "./owner-preview-release-decision";
 import {
   FOUNDER_OWNER_PREVIEW_CAPABILITIES,
   type FounderOwnerPreviewCapability,
   type FounderOwnerPreviewCapabilityRequirement,
+  type FounderReleaseStageCapability,
 } from "./preview-qualification";
 import { reconcileFounderOwnerPreviewQualificationExpiryInTransaction } from "./release-stage-hold";
 import {
@@ -30,8 +34,8 @@ const OWNER_PREVIEW_ARCHIVE_WINDOW_MS = 24 * 60 * 60 * 1_000;
 
 export type FounderOwnerPreviewAccess = {
   admitted: boolean;
-  availableCapabilities: readonly FounderOwnerPreviewCapability[];
-  stage?: "owner_preview" | "trusted_preview" | null;
+  availableCapabilities: readonly FounderReleaseStageCapability[];
+  stage?: "owner_preview" | "trusted_preview" | "external_beta" | null;
   cohortSlot?: 1 | 2 | 3;
 };
 
@@ -45,19 +49,26 @@ export function requiresFounderReleaseStageAuthority(mode: AuthModeDecision["mod
 }
 
 export class FounderReleaseStageAccessError extends Error {
-  readonly code: "owner_preview_access_required" | "trusted_preview_access_required";
+  readonly code:
+    | "owner_preview_access_required"
+    | "trusted_preview_access_required"
+    | "external_beta_access_required";
   readonly status = 403 as const;
 
-  constructor(stage: "owner_preview" | "trusted_preview" = "owner_preview") {
+  constructor(stage: "owner_preview" | "trusted_preview" | "external_beta" = "owner_preview") {
     super(
-      stage === "trusted_preview"
-        ? "Trusted Preview is unavailable until Clerk identity, invitation admission, exact-revision authority, and current Recovery Archive protection are verified."
-        : "Owner Preview is unavailable until exact-revision admission and current Recovery Archive protection are verified.",
+      stage === "external_beta"
+        ? "External Beta access is unavailable until the identity- and workspace-bound invitation, Beta Compact, exact Release Decision, current capability manifest, access window, and Recovery Archive protection are verified."
+        : stage === "trusted_preview"
+          ? "Trusted Preview is unavailable until Clerk identity, invitation admission, exact-revision authority, and current Recovery Archive protection are verified."
+          : "Owner Preview is unavailable until exact-revision admission and current Recovery Archive protection are verified.",
     );
     this.code =
-      stage === "trusted_preview"
-        ? "trusted_preview_access_required"
-        : "owner_preview_access_required";
+      stage === "external_beta"
+        ? "external_beta_access_required"
+        : stage === "trusted_preview"
+          ? "trusted_preview_access_required"
+          : "owner_preview_access_required";
     this.name = "FounderReleaseStageAccessError";
   }
 }
@@ -97,8 +108,11 @@ export async function requireFounderOwnerPreviewAccessForUser(
   if (requirement === "workspace" || requirement === "workspace_with_mail") {
     const access = await getFounderOwnerPreviewAccessForUser(userId, now, dependencies);
     if (!access.admitted) throw new FounderReleaseStageAccessError(access.stage ?? "owner_preview");
-    if (requirement === "workspace_with_mail" && access.stage === "trusted_preview") {
-      throw new FounderReleaseStageAccessError("trusted_preview");
+    if (
+      requirement === "workspace_with_mail" &&
+      !access.availableCapabilities.includes("gmail_reading")
+    ) {
+      throw new FounderReleaseStageAccessError(access.stage ?? "owner_preview");
     }
     return;
   }
@@ -166,6 +180,8 @@ export async function getFounderOwnerPreviewAccessInTransaction(
     .limit(1);
   if (ownerMapping?.userId !== input.userId) {
     if (!ownerMapping) return unavailable;
+    const externalBeta = await getFounderExternalBetaAccessInTransaction(tx, input);
+    if (externalBeta) return externalBeta;
     return getFounderTrustedPreviewAccessInTransaction(tx, {
       ...input,
       cohortOwnerUserId: ownerMapping.userId,
@@ -292,6 +308,154 @@ export async function getFounderOwnerPreviewAccessInTransaction(
     };
   }
   return { admitted: true, availableCapabilities: [] };
+}
+
+async function getFounderExternalBetaAccessInTransaction(
+  tx: Pick<FounderProductContractTransaction, "select">,
+  input: { userId: string; now: Date; applicationRevision: string },
+): Promise<FounderOwnerPreviewAccess | null> {
+  const [membership] = await tx
+    .select({
+      operatorId: founderExternalBetaInvitations.participantOperatorId,
+      stageDecisionId: founderExternalBetaInvitations.stageDecisionId,
+      admissionDecisionId: founderExternalBetaInvitations.admissionDecisionId,
+      cohort: founderExternalBetaInvitations.cohort,
+      status: founderExternalBetaInvitations.status,
+      accessExpiresAt: founderExternalBetaInvitations.accessExpiresAt,
+    })
+    .from(founderExternalBetaInvitations)
+    .where(eq(founderExternalBetaInvitations.participantUserId, input.userId))
+    .limit(1);
+  if (!membership) return null;
+  const unavailable = {
+    admitted: false,
+    availableCapabilities: [],
+    stage: "external_beta",
+  } as const;
+  if (
+    membership.status !== "admitted" ||
+    !membership.operatorId ||
+    !membership.admissionDecisionId ||
+    !membership.accessExpiresAt ||
+    membership.accessExpiresAt <= input.now
+  ) {
+    return unavailable;
+  }
+  const [stageDecision] = await tx
+    .select({
+      runtimeRevision: founderReleaseDecisions.runtimeRevision,
+      applicationRevision: founderReleaseDecisions.applicationRevision,
+      cohort: founderReleaseDecisions.externalBetaCohort,
+    })
+    .from(founderReleaseDecisions)
+    .where(
+      and(
+        eq(founderReleaseDecisions.id, membership.stageDecisionId),
+        eq(founderReleaseDecisions.stage, "external_beta"),
+      ),
+    )
+    .limit(1);
+  if (
+    !stageDecision ||
+    stageDecision.applicationRevision !== input.applicationRevision ||
+    stageDecision.cohort !== membership.cohort
+  ) {
+    return unavailable;
+  }
+  const [authority] = await tx
+    .select({
+      operatorId: operators.id,
+      runtimeStatus: operatorRuntimes.status,
+      runtimeRevision: operatorRuntimes.configRevision,
+    })
+    .from(operators)
+    .innerJoin(operatorRuntimes, eq(operatorRuntimes.operatorId, operators.id))
+    .where(
+      and(
+        eq(operators.userId, input.userId),
+        eq(operators.id, membership.operatorId),
+        eq(operators.status, "active"),
+      ),
+    )
+    .limit(1);
+  if (!authority?.runtimeRevision) return unavailable;
+  const [decision] = await tx
+    .select({
+      outcome: founderReleaseDecisions.outcome,
+      applicationRevision: founderReleaseDecisions.applicationRevision,
+      runtimeRevision: founderReleaseDecisions.runtimeRevision,
+      capabilityManifest: founderReleaseDecisions.capabilityManifest,
+      externalBetaCohort: founderReleaseDecisions.externalBetaCohort,
+    })
+    .from(founderReleaseDecisions)
+    .where(
+      and(
+        eq(founderReleaseDecisions.id, membership.admissionDecisionId),
+        eq(founderReleaseDecisions.userId, input.userId),
+        eq(founderReleaseDecisions.operatorId, membership.operatorId),
+        eq(founderReleaseDecisions.stage, "external_beta"),
+      ),
+    )
+    .limit(1);
+  if (
+    !decision ||
+    (decision.outcome !== "enter" && decision.outcome !== "resume") ||
+    decision.applicationRevision !== input.applicationRevision ||
+    decision.runtimeRevision !== authority.runtimeRevision ||
+    decision.externalBetaCohort !== membership.cohort ||
+    decision.capabilityManifest.length !== FOUNDER_EXTERNAL_BETA_CAPABILITIES.length ||
+    !FOUNDER_EXTERNAL_BETA_CAPABILITIES.every((capability) =>
+      decision.capabilityManifest.includes(capability),
+    )
+  ) {
+    return unavailable;
+  }
+  const [archive] = await tx
+    .select({ id: founderRecoveryArchives.id })
+    .from(founderRecoveryArchives)
+    .where(
+      and(
+        eq(founderRecoveryArchives.userId, input.userId),
+        eq(founderRecoveryArchives.operatorId, membership.operatorId),
+        eq(founderRecoveryArchives.applicationRevision, input.applicationRevision),
+        eq(founderRecoveryArchives.runtimeRevision, authority.runtimeRevision),
+        eq(founderRecoveryArchives.status, "verified"),
+        eq(founderRecoveryArchives.formatVersion, 1),
+        eq(founderRecoveryArchives.restorableVerified, true),
+        lte(founderRecoveryArchives.observedAt, input.now),
+        gt(
+          founderRecoveryArchives.observedAt,
+          new Date(input.now.valueOf() - OWNER_PREVIEW_ARCHIVE_WINDOW_MS),
+        ),
+        gt(founderRecoveryArchives.expiresAt, input.now),
+      ),
+    )
+    .orderBy(desc(founderRecoveryArchives.observedAt))
+    .limit(1);
+  if (authority.runtimeStatus !== "ready" || !archive) {
+    return { admitted: true, availableCapabilities: [], stage: "external_beta" };
+  }
+  const qualificationRows = await tx
+    .select({ capability: founderPreviewQualifications.capability })
+    .from(founderPreviewQualifications)
+    .where(
+      and(
+        eq(founderPreviewQualifications.stage, "external_beta"),
+        eq(founderPreviewQualifications.cohort, membership.cohort),
+        eq(founderPreviewQualifications.applicationRevision, input.applicationRevision),
+        eq(founderPreviewQualifications.runtimeRevision, stageDecision.runtimeRevision),
+        gt(founderPreviewQualifications.expiresAt, input.now),
+        lte(founderPreviewQualifications.observedAt, input.now),
+      ),
+    );
+  const current = new Set(qualificationRows.map((row) => row.capability));
+  return {
+    admitted: true,
+    availableCapabilities: FOUNDER_EXTERNAL_BETA_CAPABILITIES.filter((capability) =>
+      current.has(capability),
+    ),
+    stage: "external_beta",
+  };
 }
 
 async function getFounderTrustedPreviewAccessInTransaction(
@@ -462,10 +626,20 @@ function qualificationIsCurrent(
 }
 
 function requirementsAvailable(
-  availableCapabilities: readonly FounderOwnerPreviewCapability[],
+  availableCapabilities: readonly FounderReleaseStageCapability[],
   requiredCapabilities: FounderOwnerPreviewCapabilityRequirement,
 ): boolean {
   if (requiredCapabilities === "forbidden") return false;
+  if (requiredCapabilities === "ai_provider") {
+    return availableCapabilities.includes("openai") || availableCapabilities.includes("anthropic");
+  }
+  if (requiredCapabilities === "core_operation") {
+    return (
+      (availableCapabilities.includes("openai") || availableCapabilities.includes("anthropic")) &&
+      availableCapabilities.includes("calendar_reading") &&
+      availableCapabilities.includes("gmail_reading")
+    );
+  }
   return (
     requiredCapabilities.length > 0 &&
     requiredCapabilities.every((capability) => availableCapabilities.includes(capability))

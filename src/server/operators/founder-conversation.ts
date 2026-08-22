@@ -12,9 +12,11 @@ import {
   operatorConversationWorks,
 } from "@/src/server/db/schema";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
-import type {
-  requireFounderOwnerPreviewAccessForUser,
-  requireFounderOwnerPreviewAccessInTransaction,
+import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
+import {
+  getFounderOwnerPreviewAccessInTransaction,
+  type requireFounderOwnerPreviewAccessForUser,
+  type requireFounderOwnerPreviewAccessInTransaction,
 } from "@/src/server/founder-product-contract/release-stage-access";
 import { withFounderOwnerPreviewWorkAuthority } from "@/src/server/founder-product-contract/work-authority";
 import {
@@ -303,9 +305,10 @@ export async function sendFounderConversationMessageForUser(
     }
 
     const routed = await connection.db.transaction(async (tx) => {
+      const checkedAt = now();
       const decision = await routeFounderAiProvider(tx, operator.id, {
-        now: now(),
-        allowedProviders: ["openai"],
+        now: checkedAt,
+        allowedProviders: await allowedConversationProviders(tx, userId, checkedAt, dependencies),
         ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
       });
       if (!decision) return null;
@@ -487,7 +490,7 @@ export async function resumeFounderConversationWorkForUser(
 
         const decision = await routeFounderAiProvider(tx, operator.id, {
           now: checkedAt,
-          allowedProviders: ["openai"],
+          allowedProviders: await allowedConversationProviders(tx, userId, checkedAt, dependencies),
           ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
         });
         if (!decision) return { kind: "unchanged" as const, conversation };
@@ -938,6 +941,26 @@ async function lockConversation(
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:conversation:${conversationId}`}, 0))`,
   );
+}
+
+async function allowedConversationProviders(
+  tx: FounderConversationTransaction,
+  userId: string,
+  now: Date,
+  dependencies: FounderConversationDependencies,
+): Promise<readonly FounderAiProvider[]> {
+  if (dependencies.requireOwnerPreviewAccess) return ["openai"];
+  const applicationRevision =
+    dependencies.applicationRevision ?? readFounderApplicationRevision() ?? "";
+  const access = await getFounderOwnerPreviewAccessInTransaction(tx, {
+    userId,
+    now,
+    applicationRevision,
+  });
+  return [
+    ...(access.availableCapabilities.includes("openai") ? (["openai"] as const) : []),
+    ...(access.availableCapabilities.includes("anthropic") ? (["anthropic"] as const) : []),
+  ];
 }
 
 export function createHermesConversationAdapter(
