@@ -103,7 +103,7 @@ test("Operator UI remains usable across the required browser matrix", async ({ p
       await expect(page.getByText(/Your exact access window ends/)).toBeVisible();
       await expect(page.getByText(/Free, no card, no renewal/)).toBeVisible();
       await expect(page.getByText(/Self-serve onboarding and ordinary use/)).toBeVisible();
-      await expect(page.getByText(/Product-hardening only/)).toBeVisible();
+      await expect(page.getByText(/Product-hardening only/).first()).toBeVisible();
       await expect(page.getByRole("link", { name: "Create Founder Data Export" })).toBeVisible();
       await expect(page.getByRole("link", { name: "Request Bruno Data Deletion" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Withdraw from External Beta" })).toBeVisible();
