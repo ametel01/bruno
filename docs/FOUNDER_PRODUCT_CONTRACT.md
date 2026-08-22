@@ -199,9 +199,12 @@ Promotion remains a later human Release Decision, not an automated outcome. A qu
 five to ten independent Founders who each complete fourteen days and at least five recurring
 Lead-to-Client Loops without attended operation. A missed threshold cannot be repaired by extending
 access or reusing the cohort: assessment requires a new cohort. All External Beta observations are
-Product Hardening Evidence only and never Founder Acceptance Evidence. The registered admission,
-promotion, and Founder-surface tests exercise these boundaries in the Founder Product Contract
-invariant pack.
+Product Hardening Evidence only and never Founder Acceptance Evidence. A signed top-level External
+Beta cohort lifecycle scenario exercises the actual invitation and Beta Compact admission seams,
+copied-account and wrong-workspace denial, visible exact boundaries and nonconversion, hard expiry,
+the real retirement reconciler and Infrastructure Retirement executor, and denied promotion that
+requires a new cohort. Focused admission, promotion, and Founder-surface tests support that signed
+scenario in the Founder Product Contract invariant pack.
 
 Delayed or
 reordered commerce events cannot replace newer authority or extend a retirement clock; reactivation

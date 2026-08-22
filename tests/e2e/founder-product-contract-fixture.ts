@@ -10,6 +10,11 @@ export type FounderProductContractFixture = {
   operatorId: string;
   runnerId: string;
   checkoutCorrelation: string;
+  externalBetaOwnerUserId: string;
+  externalBetaOwnerOperatorId: string;
+  externalBetaParticipantUserId: string;
+  externalBetaParticipantOperatorId: string;
+  externalBetaParticipantRunnerId: string;
 };
 
 export function signedFounderCommerceEvent(
@@ -48,6 +53,11 @@ export async function createFounderProductContractFixture(
   const credentialId = randomUUID();
   const expiredArchiveId = randomUUID();
   const checkoutCorrelation = `${randomUUID()}.${randomUUID()}`;
+  const externalBetaOwnerUserId = randomUUID();
+  const externalBetaOwnerOperatorId = randomUUID();
+  const externalBetaParticipantUserId = randomUUID();
+  const externalBetaParticipantOperatorId = randomUUID();
+  const externalBetaParticipantRunnerId = randomUUID();
   const createdAt = clock.now().toISOString();
   const readyAt = clock.advance(1_000).toISOString();
   const expiredArchiveObservedAt = new Date(clock.now().valueOf() - 31 * 24 * 60 * 60 * 1_000);
@@ -64,7 +74,98 @@ export async function createFounderProductContractFixture(
     await sql`insert into founder_recovery_archives (id, user_id, operator_id, status, format_version, storage_object_key, recovery_credential_object_key, ciphertext_digest, recovery_credential_digest, state_digest, restorable_verified, restore_verified_at, failure_code, observed_at, expires_at, created_at, deleted_at) values (${expiredArchiveId}, ${userId}, ${operatorId}, 'verified', 1, ${`founder-recovery/expired/${expiredArchiveId}.age`}, ${`founder-recovery/expired/${expiredArchiveId}.key`}, ${`sha256:${createHash("sha256").update(`expired:${userId}`).digest("hex")}`}, ${`sha256:${createHash("sha256").update(`expired-credential:${userId}`).digest("hex")}`}, ${`sha256:${createHash("sha256").update(`expired-state:${userId}`).digest("hex")}`}, true, ${expiredArchiveObservedAt.toISOString()}, null, ${expiredArchiveObservedAt.toISOString()}, ${expiredArchiveExpiresAt.toISOString()}, ${expiredArchiveObservedAt.toISOString()}, null)`;
   });
 
-  return { userId, operatorId, runnerId, checkoutCorrelation };
+  return {
+    userId,
+    operatorId,
+    runnerId,
+    checkoutCorrelation,
+    externalBetaOwnerUserId,
+    externalBetaOwnerOperatorId,
+    externalBetaParticipantUserId,
+    externalBetaParticipantOperatorId,
+    externalBetaParticipantRunnerId,
+  };
+}
+
+export async function prepareFounderExternalBetaContractFixture(
+  fixture: FounderProductContractFixture,
+  input: { runId: string; applicationRevision: string; now: Date },
+): Promise<void> {
+  const cohort = `external-beta-contract:${input.runId}`;
+  const expiresAt = new Date(input.now.valueOf() + 8 * 24 * 60 * 60 * 1_000).toISOString();
+  const ownerPreparationId = randomUUID();
+  const ownerRuntimeId = randomUUID();
+  const participantPreparationId = randomUUID();
+  const participantRuntimeId = randomUUID();
+  const participantCredentialId = randomUUID();
+  const createdAt = input.now.toISOString();
+  const capabilities = [
+    "openai",
+    "anthropic",
+    "calendar_reading",
+    "gmail_reading",
+    "gmail_sending",
+  ];
+
+  await withFounderProductContractDatabase(async (sql) => {
+    await sql`update users set clerk_user_id = ${`clerk:${fixture.userId}`}, updated_at = ${createdAt} where id = ${fixture.userId}`;
+    await sql`insert into users (id, clerk_user_id, created_at, updated_at) values (${fixture.externalBetaOwnerUserId}, ${`clerk:${fixture.externalBetaOwnerUserId}`}, ${createdAt}, ${createdAt})`;
+    await sql`insert into operators (id, user_id, status, created_at, updated_at) values (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaOwnerUserId}, 'active', ${createdAt}, ${createdAt})`;
+    await sql`insert into operator_preparations (id, operator_id, status, timezone, timezone_confirmed_at, started_at, completed_at, created_at, updated_at) values (${ownerPreparationId}, ${fixture.externalBetaOwnerOperatorId}, 'ready', 'Asia/Manila', ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt})`;
+    await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${ownerRuntimeId}, ${fixture.externalBetaOwnerOperatorId}, 'ready', 'connected', 'verified', 'founder-contract-v1', ${`external-beta-owner:${input.runId}`}, 1, ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt})`;
+
+    await sql`insert into users (id, clerk_user_id, created_at, updated_at) values (${fixture.externalBetaParticipantUserId}, ${`clerk:${fixture.externalBetaParticipantUserId}`}, ${createdAt}, ${createdAt})`;
+    await sql`insert into operators (id, user_id, status, created_at, updated_at) values (${fixture.externalBetaParticipantOperatorId}, ${fixture.externalBetaParticipantUserId}, 'active', ${createdAt}, ${createdAt})`;
+    await sql`insert into operator_preparations (id, operator_id, status, timezone, timezone_confirmed_at, started_at, completed_at, created_at, updated_at) values (${participantPreparationId}, ${fixture.externalBetaParticipantOperatorId}, 'ready', 'Asia/Manila', ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt})`;
+    await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${participantRuntimeId}, ${fixture.externalBetaParticipantOperatorId}, 'ready', 'connected', 'verified', 'founder-contract-v1', ${`external-beta-participant:${input.runId}`}, 1, ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt})`;
+    await sql`insert into runners (id, user_id, name, kind, status, provider, provider_resource_id, provider_firewall_id, region, size_slug, image, provisioning_status, provisioning_operation_key, provisioning_started_at, provisioning_completed_at, created_at, updated_at) values (${fixture.externalBetaParticipantRunnerId}, ${fixture.externalBetaParticipantUserId}, ${`external-beta-${fixture.externalBetaParticipantRunnerId}`}, 'digitalocean', 'online', 'digitalocean', ${`droplet-${fixture.externalBetaParticipantRunnerId}`}, ${`firewall-${fixture.externalBetaParticipantRunnerId}`}, 'sfo3', 's-1vcpu-1gb', 'ubuntu-24-04-x64', 'ready', ${`bruno-deploy-${fixture.externalBetaParticipantRunnerId.replaceAll("-", "")}`}, ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt})`;
+    await sql`insert into runner_credentials (id, runner_id, credential_hash, credential_prefix, status, created_at, updated_at) values (${participantCredentialId}, ${fixture.externalBetaParticipantRunnerId}, ${`sha256:${fixture.externalBetaParticipantRunnerId.replaceAll("-", "")}`}, 'fpct', 'active', ${createdAt}, ${createdAt})`;
+
+    await sql`insert into app_metadata (key, value) values ('founder_owner_preview_owner_user_id:v1', ${fixture.externalBetaOwnerUserId}) on conflict (key) do update set value = excluded.value, updated_at = ${createdAt}`;
+    await sql`delete from founder_preview_qualifications where cohort = ${cohort}`;
+    for (const [index, capability] of capabilities.entries()) {
+      await sql`insert into founder_preview_qualifications (stage, cohort, capability, application_revision, runtime_revision, evidence_digest, observed_at, expires_at, created_at) values ('external_beta', ${cohort}, ${capability}, ${input.applicationRevision}, 'founder-contract-v1', ${`sha256:${(500 + index).toString(16).padStart(64, "0")}`}, ${createdAt}, ${expiresAt}, ${createdAt})`;
+    }
+    await sql`insert into founder_release_decisions (user_id, operator_id, stage, outcome, application_revision, runtime_revision, capability_manifest, external_beta_cohort, evidence_digests, decided_at, created_at) values (${fixture.externalBetaOwnerUserId}, ${fixture.externalBetaOwnerOperatorId}, 'external_beta', 'enter', ${input.applicationRevision}, 'founder-contract-v1', ${sql.json(capabilities)}, ${cohort}, ${sql.json([`sha256:${"f".repeat(64)}`])}, ${createdAt}, ${createdAt})`;
+  });
+}
+
+export async function prepareFounderExternalBetaBrowserFixture(
+  fixture: FounderProductContractFixture,
+  input: { runId: string; applicationRevision: string; now: Date },
+): Promise<{ accessExpiresAt: string; retirementDueAt: string }> {
+  await prepareFounderExternalBetaContractFixture(fixture, input);
+  const cohort = `external-beta-contract:${input.runId}`;
+  const admittedAt = input.now.toISOString();
+  const invitationExpiresAt = new Date(
+    input.now.valueOf() + 7 * 24 * 60 * 60 * 1_000,
+  ).toISOString();
+  const accessExpiresAt = new Date(input.now.valueOf() + 14 * 24 * 60 * 60 * 1_000).toISOString();
+  const retirementDueAt = new Date(
+    new Date(accessExpiresAt).valueOf() + 60 * 60 * 1_000,
+  ).toISOString();
+  const capabilities = [
+    "openai",
+    "anthropic",
+    "calendar_reading",
+    "gmail_reading",
+    "gmail_sending",
+  ];
+
+  await withFounderProductContractDatabase(async (sql) => {
+    const [stageDecision] = await sql<
+      { id: string }[]
+    >`select id from founder_release_decisions where user_id = ${fixture.externalBetaOwnerUserId} and stage = 'external_beta' order by decided_at desc limit 1`;
+    if (!stageDecision) throw new Error("External Beta browser stage decision is unavailable.");
+    const [admissionDecision] = await sql<
+      { id: string }[]
+    >`insert into founder_release_decisions (user_id, operator_id, stage, outcome, application_revision, runtime_revision, capability_manifest, external_beta_cohort, evidence_digests, decided_at, created_at) values (${fixture.userId}, ${fixture.operatorId}, 'external_beta', 'enter', ${input.applicationRevision}, 'founder-contract-v1', ${sql.json(capabilities)}, ${cohort}, ${sql.json([`sha256:${"e".repeat(64)}`])}, ${admittedAt}, ${admittedAt}) returning id`;
+    if (!admissionDecision) {
+      throw new Error("External Beta browser admission decision was not persisted.");
+    }
+    await sql`insert into founder_external_beta_invitations (cohort_owner_user_id, stage_decision_id, cohort, cohort_slot, invitation_digest, invited_clerk_subject_digest, named_founder_digest, workspace_digest, independence_evidence_digest, status, participant_user_id, participant_operator_id, admission_decision_id, beta_compact_digest, invited_at, invitation_expires_at, admitted_at, access_expires_at, retirement_due_at, payment_method_collected, automatic_paid_conversion, created_at, updated_at) values (${fixture.externalBetaOwnerUserId}, ${stageDecision.id}, ${cohort}, 1, ${`sha256:${createHash("sha256").update(`browser-token:${input.runId}`).digest("hex")}`}, ${`sha256:${createHash("sha256").update(`clerk:clerk:${fixture.userId}`).digest("hex")}`}, ${`sha256:${createHash("sha256").update(`browser-founder:${input.runId}`).digest("hex")}`}, ${`sha256:${createHash("sha256").update(`browser-workspace:${input.runId}`).digest("hex")}`}, ${`sha256:${createHash("sha256").update(`browser-independence:${input.runId}`).digest("hex")}`}, 'admitted', ${fixture.userId}, ${fixture.operatorId}, ${admissionDecision.id}, ${`sha256:${createHash("sha256").update(`browser-compact:${input.runId}`).digest("hex")}`}, ${admittedAt}, ${invitationExpiresAt}, ${admittedAt}, ${accessExpiresAt}, ${retirementDueAt}, false, false, ${admittedAt}, ${admittedAt})`;
+  });
+  return { accessExpiresAt, retirementDueAt };
 }
 
 export async function deleteFounderProductContractFixture(
@@ -72,6 +173,11 @@ export async function deleteFounderProductContractFixture(
   options: { retainScenarioExecutions?: boolean } = {},
 ): Promise<void> {
   await withFounderProductContractDatabase(async (sql) => {
+    const allUserIds = [
+      fixture.userId,
+      fixture.externalBetaOwnerUserId,
+      fixture.externalBetaParticipantUserId,
+    ];
     const contractRunId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID;
     if (contractRunId) {
       await sql`delete from founder_preview_qualifications where cohort = ${`external-beta-contract:${contractRunId}`}`;
@@ -79,21 +185,26 @@ export async function deleteFounderProductContractFixture(
     if (!options.retainScenarioExecutions) {
       await sql`delete from founder_product_contract_scenario_executions where user_id = ${fixture.userId}`;
     }
-    await sql`delete from founder_infrastructure_retirements where user_id = ${fixture.userId}`;
+    await sql`delete from founder_infrastructure_retirements where user_id = any(${allUserIds})`;
+    await sql`delete from founder_external_beta_invitations where cohort_owner_user_id = ${fixture.externalBetaOwnerUserId} or participant_user_id = any(${[fixture.userId, fixture.externalBetaParticipantUserId]})`;
     await sql`delete from founder_product_entitlements where user_id = ${fixture.userId}`;
     await sql`delete from founder_commerce_events where user_id = ${fixture.userId}`;
     await sql`delete from founder_checkout_correlations where user_id = ${fixture.userId}`;
     await sql`delete from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId}`;
-    await sql`delete from founder_recovery_archives where user_id = ${fixture.userId}`;
-    await sql`delete from founder_release_decisions where user_id = ${fixture.userId}`;
-    await sql`delete from runner_credentials where runner_id in (select id from runners where user_id = ${fixture.userId})`;
-    await sql`delete from runners where user_id = ${fixture.userId}`;
+    await sql`delete from founder_recovery_archives where user_id = any(${allUserIds})`;
+    await sql`delete from founder_release_decisions where user_id = any(${allUserIds})`;
+    await sql`delete from runner_credentials where runner_id in (select id from runners where user_id = any(${allUserIds}))`;
+    await sql`delete from runners where user_id = any(${allUserIds})`;
     await sql`delete from operator_conversations where operator_id = ${fixture.operatorId}`;
     await sql`delete from operator_runtimes where operator_id = ${fixture.operatorId}`;
     await sql`delete from operator_preparations where operator_id = ${fixture.operatorId}`;
     await sql`delete from operators where id = ${fixture.operatorId}`;
     await sql`delete from users where id = ${fixture.userId}`;
-    await sql`delete from app_metadata where key = 'founder_owner_preview_owner_user_id:v1' and value = ${fixture.userId}`;
+    await sql`delete from operator_runtimes where operator_id in (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaParticipantOperatorId})`;
+    await sql`delete from operator_preparations where operator_id in (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaParticipantOperatorId})`;
+    await sql`delete from operators where id in (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaParticipantOperatorId})`;
+    await sql`delete from users where id in (${fixture.externalBetaOwnerUserId}, ${fixture.externalBetaParticipantUserId})`;
+    await sql`delete from app_metadata where key = 'founder_owner_preview_owner_user_id:v1' and value = any(${allUserIds})`;
   });
 }
 
@@ -142,7 +253,7 @@ export async function assertPersistedFounderLifecycleAuthority(
     expect(authority).toMatchObject({
       release_decisions: 3,
       release_decision_outcomes: ["enter", "hold", "resume"],
-      scenario_executions: 4,
+      scenario_executions: 5,
       commerce_events: 2,
       terminal_entitlements: 1,
       consumed_correlations: 1,

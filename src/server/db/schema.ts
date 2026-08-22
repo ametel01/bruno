@@ -63,6 +63,7 @@ export const founderRecoveryArchiveStatusEnum = pgEnum("founder_recovery_archive
 ]);
 export const founderProductContractScenarioEnum = pgEnum("founder_product_contract_scenario", [
   "release_stage_admission",
+  "external_beta_cohort_lifecycle",
   "product_entitlement_lifecycle",
   "recovery_archive_lifecycle",
   "infrastructure_retirement",

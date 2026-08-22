@@ -20,6 +20,7 @@ export const dynamic = "force-dynamic";
 
 const ACTIONS = new Set<FounderProductContractLifecycleAction>([
   "release_stage_admission",
+  "external_beta_cohort_lifecycle",
   "product_entitlement_lifecycle",
   "recovery_archive_lifecycle",
   "infrastructure_retirement",
@@ -143,6 +144,7 @@ export async function POST(request: Request): Promise<Response> {
         userId: applicationUser.userId,
         now,
         ...(body.commerceEvent ? { commerceEvent: body.commerceEvent } : {}),
+        ...(body.externalBetaContract ? { externalBetaContract: body.externalBetaContract } : {}),
       },
       { providers, commerceWebhookSecret, applicationRevision: identity.sourceRevision },
     );
@@ -160,12 +162,18 @@ export async function POST(request: Request): Promise<Response> {
       {
         error: {
           code: "lifecycle_transition_failed",
-          message: error instanceof Error ? error.message : "Lifecycle transition failed.",
+          message: lifecycleErrorMessage(error),
         },
       },
       { status: 409, headers: { "cache-control": "no-store" } },
     );
   }
+}
+
+function lifecycleErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return "Lifecycle transition failed.";
+  const cause = error.cause;
+  return cause instanceof Error ? `${error.message}: ${cause.message}` : error.message;
 }
 
 function deterministicBoundaryAvailable(): boolean {
@@ -200,6 +208,11 @@ async function readBody(request: Request): Promise<{
   runId: string;
   now: string;
   commerceEvent?: FounderCommerceEvent;
+  externalBetaContract?: {
+    cohortOwnerUserId: string;
+    participantUserId: string;
+    invitedClerkSubject: string;
+  };
   providerSubscriptionStatus: FounderCommerceStatus;
   providerFailures: readonly FounderLifecycleFailureOperation[];
 } | null> {
@@ -227,13 +240,16 @@ async function readBody(request: Request): Promise<{
       return null;
     }
     const commerceEvent = isCommerceEvent(value.commerceEvent) ? value.commerceEvent : undefined;
+    const externalBetaContract = readExternalBetaContract(value.externalBetaContract);
     if (value.action === "product_entitlement_lifecycle" && !commerceEvent) return null;
     if (value.action === "infrastructure_retirement" && !commerceEvent) return null;
+    if (value.action === "external_beta_cohort_lifecycle" && !externalBetaContract) return null;
     return {
       action: value.action as FounderProductContractLifecycleAction,
       runId: value.runId,
       now: value.now,
       ...(commerceEvent ? { commerceEvent } : {}),
+      ...(externalBetaContract ? { externalBetaContract } : {}),
       providerSubscriptionStatus:
         (value.providerSubscriptionStatus as FounderCommerceStatus | undefined) ?? "active",
       providerFailures: [
@@ -246,6 +262,37 @@ async function readBody(request: Request): Promise<{
   } catch {
     return null;
   }
+}
+
+function readExternalBetaContract(value: unknown): {
+  cohortOwnerUserId: string;
+  participantUserId: string;
+  invitedClerkSubject: string;
+} | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("cohortOwnerUserId" in value) ||
+    typeof value.cohortOwnerUserId !== "string" ||
+    !("participantUserId" in value) ||
+    typeof value.participantUserId !== "string" ||
+    !("invitedClerkSubject" in value) ||
+    typeof value.invitedClerkSubject !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value.cohortOwnerUserId,
+    ) ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value.participantUserId,
+    ) ||
+    !/^clerk:[0-9a-f-]{36}$/i.test(value.invitedClerkSubject)
+  ) {
+    return null;
+  }
+  return {
+    cohortOwnerUserId: value.cohortOwnerUserId,
+    participantUserId: value.participantUserId,
+    invitedClerkSubject: value.invitedClerkSubject,
+  };
 }
 
 function isCommerceEvent(value: unknown): value is FounderCommerceEvent {

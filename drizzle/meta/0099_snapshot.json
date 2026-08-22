@@ -18019,6 +18019,7 @@
       "schema": "public",
       "values": [
         "release_stage_admission",
+        "external_beta_cohort_lifecycle",
         "product_entitlement_lifecycle",
         "recovery_archive_lifecycle",
         "infrastructure_retirement"

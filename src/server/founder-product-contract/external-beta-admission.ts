@@ -76,6 +76,7 @@ export type FounderExternalBetaStatus =
       stage: "External Beta";
       admittedAt: string;
       accessExpiresAt: string;
+      workStoppedAt: string | null;
       remainingSeconds: number;
       support: "Self-serve onboarding and ordinary use, with reactive support";
       payment: "Free, no card, no renewal, and no automatic paid conversion";
@@ -565,6 +566,12 @@ export async function getFounderExternalBetaStatusForUser(
       stage: "External Beta",
       admittedAt: membership.admittedAt.toISOString(),
       accessExpiresAt: membership.accessExpiresAt.toISOString(),
+      workStoppedAt:
+        membership.status === "withdrawn"
+          ? (membership.withdrawnAt?.toISOString() ?? null)
+          : membership.status === "expired"
+            ? (membership.expiredAt ?? membership.accessExpiresAt).toISOString()
+            : null,
       remainingSeconds:
         membership.status === "admitted"
           ? Math.max(0, Math.ceil((membership.accessExpiresAt.valueOf() - now.valueOf()) / 1_000))

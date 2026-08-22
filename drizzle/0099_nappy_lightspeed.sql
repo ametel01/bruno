@@ -1,3 +1,4 @@
+ALTER TYPE "public"."founder_product_contract_scenario" ADD VALUE 'external_beta_cohort_lifecycle' AFTER 'release_stage_admission';--> statement-breakpoint
 CREATE TABLE "founder_external_beta_invitations" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"cohort_owner_user_id" uuid NOT NULL,

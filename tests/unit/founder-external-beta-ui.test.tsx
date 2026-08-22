@@ -34,6 +34,7 @@ describe("External Beta Founder surface", () => {
           stage: "External Beta",
           admittedAt: "2026-08-23T00:00:00.000Z",
           accessExpiresAt: "2026-09-06T00:00:00.000Z",
+          workStoppedAt: null,
           remainingSeconds: 13 * 86_400,
           support: "Self-serve onboarding and ordinary use, with reactive support",
           payment: "Free, no card, no renewal, and no automatic paid conversion",

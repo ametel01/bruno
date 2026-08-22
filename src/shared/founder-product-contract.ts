@@ -128,6 +128,7 @@ export const FOUNDER_PRODUCT_CONTRACT_UNIT_FILES = [
 
 export const FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS = [
   "release_stage_admission",
+  "external_beta_cohort_lifecycle",
   "product_entitlement_lifecycle",
   "recovery_archive_lifecycle",
   "infrastructure_retirement",

@@ -342,6 +342,12 @@ describe("External Beta admission", () => {
       withdrawnAt,
       accessExpiresAt: new Date(START.valueOf() + FOUNDER_EXTERNAL_BETA_ACCESS_MS),
     });
+    await expect(
+      getFounderExternalBetaStatusForUser(PARTICIPANT_ID, withdrawnAt, {
+        applicationRevision: APPLICATION_REVISION,
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({ state: "withdrawn", workStoppedAt: withdrawnAt.toISOString() });
   });
 
   function dependencies(now: Date) {

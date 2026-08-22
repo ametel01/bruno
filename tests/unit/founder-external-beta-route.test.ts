@@ -19,6 +19,7 @@ describe("Founder External Beta route", () => {
           stage: "External Beta" as const,
           admittedAt: "2026-08-23T00:00:00.000Z",
           accessExpiresAt: "2026-09-06T00:00:00.000Z",
+          workStoppedAt: null,
           retirementDueAt: "2026-09-06T01:00:00.000Z",
           remainingSeconds: 1,
           support: "Self-serve onboarding and ordinary use, with reactive support" as const,

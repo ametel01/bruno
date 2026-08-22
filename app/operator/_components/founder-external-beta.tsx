@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { FounderExternalBetaStatus } from "@/src/server/founder-product-contract/external-beta-admission";
+import { founderExternalBetaCapabilityLabel } from "@/src/shared/founder-external-beta";
 
 const EXTERNAL_BETA_COMPACT_VERSION = "bruno.external-beta-compact.v1" as const;
 
@@ -144,7 +145,7 @@ export function FounderExternalBeta({
       <p>
         {active
           ? `Your exact access window ends ${formatInstant(status.accessExpiresAt)}.`
-          : `New work stopped at ${formatInstant(status.accessExpiresAt)}. Infrastructure Retirement is required by ${formatInstant(status.retirementDueAt)}.`}
+          : `New work stopped at ${formatInstant(status.workStoppedAt ?? status.accessExpiresAt)}. Infrastructure Retirement is required by ${formatInstant(status.retirementDueAt)}.`}
       </p>
       <p>{status.support}.</p>
       <p>{status.payment}.</p>
@@ -184,21 +185,4 @@ function formatInstant(value: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
-}
-
-function founderExternalBetaCapabilityLabel(
-  capability: "openai" | "anthropic" | "calendar_reading" | "gmail_reading" | "gmail_sending",
-): string {
-  switch (capability) {
-    case "openai":
-      return "OpenAI";
-    case "anthropic":
-      return "Anthropic";
-    case "calendar_reading":
-      return "Calendar reading";
-    case "gmail_reading":
-      return "Gmail reading";
-    case "gmail_sending":
-      return "one-to-one Gmail sending";
-  }
 }
