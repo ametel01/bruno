@@ -75,8 +75,22 @@ state or authority. In deterministic mode the API installs stateful provider dou
 provider interfaces used by the lifecycle service. The service records immutable Release
 Decisions, single-use Owner-bound Checkout Correlations, signature-verified and idempotent Lemon
 Squeezy event receipts, reconciled Product Entitlements, 30-day restorable Recovery Archives,
-revoked runtime credentials, and exact-provider Infrastructure Retirement receipts. A Recovery
-Archive is a strict v1 allowlist containing only the logical Operator identity, preparation
+revoked runtime credentials, and exact-provider Infrastructure Retirement receipts.
+
+The Lemon Squeezy production boundary verifies the `X-Signature` HMAC over the exact bounded raw
+request body before decoding JSON. Because Lemon Squeezy does not document a webhook delivery ID,
+Bruno.Ai records the signed payload digest as an explicitly derived delivery key together with the
+provider resource identity, event name, and normalized provider timestamp. That receipt commits
+before current Subscription and linked Order reads. Provider unavailability therefore leaves a
+durable confirming-payment state rather than erasing evidence. Reconciliation grants access only
+for the configured test/live Store and Variant when the Subscription is active and the Order is
+fully paid and unrefunded. Duplicate and older receipts remain evidence but cannot replace newer
+provider authority or extend retirement. A one-hour unresolved payment creates a leased terminal
+refund intent, cancels future billing, confirms the full Order refund, closes the attempt, and
+retries exact Infrastructure Retirement. A later signed success receipt cannot cross that terminal
+fence; paid access requires a fresh Owner decision and Checkout Correlation.
+
+A Recovery Archive is a strict v1 allowlist containing only the logical Operator identity, preparation
 timezone, non-secret runtime configuration revision, and an explicit restoration plan that requires
 provider reauthorization and contains zero reusable credentials. The payload is encrypted with a
 per-archive data key; that key is wrapped by the dedicated server-only master key and stored as a

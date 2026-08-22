@@ -26,12 +26,20 @@ export const FOUNDER_PRODUCT_CONTRACT_INVARIANTS = [
   {
     id: "canonical_cross_device_decisions",
     kind: "automated",
-    evidence: ["tests/unit/founder-proposed-actions.test.ts"],
+    evidence: [
+      "tests/unit/founder-proposed-actions.test.ts",
+      "tests/unit/founder-commerce-db.test.ts",
+      "tests/unit/founder-commerce-routes.test.ts",
+    ],
   },
   {
     id: "exact_and_uncertain_effects",
     kind: "automated",
-    evidence: ["tests/unit/founder-mail-execution.test.ts"],
+    evidence: [
+      "tests/unit/founder-mail-execution.test.ts",
+      "tests/unit/lemon-squeezy-commerce.test.ts",
+      "tests/unit/founder-commerce-db.test.ts",
+    ],
   },
   {
     id: "privacy_lifecycle",
@@ -94,6 +102,10 @@ export const FOUNDER_PRODUCT_CONTRACT_UNIT_FILES = [
   "tests/unit/founder-recovery-archive-route.test.ts",
   "tests/unit/founder-product-entitlement-policy-db.test.ts",
   "tests/unit/founder-product-entitlement-policy.test.ts",
+  "tests/unit/lemon-squeezy-commerce.test.ts",
+  "tests/unit/founder-commerce-routes.test.ts",
+  "tests/unit/founder-commerce-db.test.ts",
+  "tests/unit/founder-payment-status.test.tsx",
   "tests/unit/founder-infrastructure-retirement.test.ts",
   "tests/unit/founder-recovery.test.ts",
   "tests/unit/founder-support.test.ts",

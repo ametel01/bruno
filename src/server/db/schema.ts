@@ -920,29 +920,64 @@ export const founderCheckoutCorrelations = pgTable(
       .references(() => users.id),
     correlationDigest: text("correlation_digest").notNull(),
     status: text("status").notNull().default("pending"),
+    providerCheckoutId: text("provider_checkout_id"),
+    providerSubscriptionId: text("provider_subscription_id"),
+    providerOrderId: text("provider_order_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    paymentDetectedAt: timestamp("payment_detected_at", { withTimezone: true }),
+    reconciliationDueAt: timestamp("reconciliation_due_at", { withTimezone: true }),
+    refundRequestedAt: timestamp("refund_requested_at", { withTimezone: true }),
+    refundLeaseToken: uuid("refund_lease_token"),
+    refundLeaseExpiresAt: timestamp("refund_lease_expires_at", { withTimezone: true }),
+    refundAttemptCount: integer("refund_attempt_count").notNull().default(0),
+    refundLastErrorCode: text("refund_last_error_code"),
+    refundedAt: timestamp("refunded_at", { withTimezone: true }),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    closureReason: text("closure_reason"),
   },
   (table) => [
     uniqueIndex("founder_checkout_correlations_digest_idx").on(table.correlationDigest),
+    uniqueIndex("founder_checkout_correlations_subscription_idx").on(table.providerSubscriptionId),
+    uniqueIndex("founder_checkout_correlations_order_idx").on(table.providerOrderId),
     check(
       "founder_checkout_correlations_digest_check",
       sql`${table.correlationDigest} ~ '^sha256:[a-f0-9]{64}$'`,
     ),
     check(
       "founder_checkout_correlations_status_check",
-      sql`${table.status} IN ('pending', 'consumed')`,
+      sql`${table.status} IN ('pending', 'consumed', 'refund_pending', 'closed')`,
     ),
     check(
       "founder_checkout_correlations_consumed_check",
-      sql`(${table.status} = 'pending' AND ${table.consumedAt} IS NULL) OR (${table.status} = 'consumed' AND ${table.consumedAt} IS NOT NULL)`,
+      sql`(${table.status} = 'pending' AND ${table.consumedAt} IS NULL AND ${table.closedAt} IS NULL AND ${table.closureReason} IS NULL) OR (${table.status} IN ('consumed', 'refund_pending') AND ${table.consumedAt} IS NOT NULL AND ${table.closedAt} IS NULL AND ${table.closureReason} IS NULL) OR (${table.status} = 'closed' AND ${table.consumedAt} IS NOT NULL AND ${table.closedAt} IS NOT NULL AND ${table.closureReason} IS NOT NULL)`,
+    ),
+    check(
+      "founder_checkout_correlations_payment_check",
+      sql`(${table.paymentDetectedAt} IS NULL AND ${table.reconciliationDueAt} IS NULL AND ${table.providerSubscriptionId} IS NULL AND ${table.providerOrderId} IS NULL) OR (${table.paymentDetectedAt} IS NOT NULL AND ${table.reconciliationDueAt} = ${table.paymentDetectedAt} + interval '1 hour' AND ${table.providerSubscriptionId} IS NOT NULL AND ${table.providerOrderId} IS NOT NULL)`,
+    ),
+    check(
+      "founder_checkout_correlations_refund_check",
+      sql`(${table.refundRequestedAt} IS NULL AND ${table.refundLeaseToken} IS NULL AND ${table.refundLeaseExpiresAt} IS NULL AND ${table.refundedAt} IS NULL AND ${table.refundAttemptCount} = 0) OR (${table.refundRequestedAt} IS NOT NULL AND ${table.refundAttemptCount} > 0 AND (${table.refundedAt} IS NULL OR ${table.refundedAt} >= ${table.refundRequestedAt}))`,
+    ),
+    check(
+      "founder_checkout_correlations_refund_lease_check",
+      sql`(${table.refundLeaseToken} IS NULL AND ${table.refundLeaseExpiresAt} IS NULL) OR (${table.status} = 'refund_pending' AND ${table.refundLeaseToken} IS NOT NULL AND ${table.refundLeaseExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "founder_checkout_correlations_closed_check",
+      sql`${table.status} <> 'closed' OR (${table.closureReason} = 'payment_without_access_refunded' AND ${table.refundedAt} IS NOT NULL)`,
     ),
     check(
       "founder_checkout_correlations_expiry_check",
       sql`${table.expiresAt} > ${table.createdAt}`,
     ),
     index("founder_checkout_correlations_user_status_idx").on(table.userId, table.status),
+    index("founder_checkout_correlations_reconciliation_due_idx").on(
+      table.status,
+      table.reconciliationDueAt,
+    ),
   ],
 );
 
@@ -958,11 +993,16 @@ export const founderCommerceEvents = pgTable(
       .notNull()
       .references(() => founderCheckoutCorrelations.id),
     providerSubscriptionId: text("provider_subscription_id").notNull(),
+    providerOrderId: text("provider_order_id").notNull(),
     eventType: text("event_type").notNull(),
     payloadDigest: text("payload_digest").notNull(),
     signatureVerified: boolean("signature_verified").notNull(),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+    applicationStatus: text("application_status").notNull().default("pending"),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+    lastErrorCode: text("last_error_code"),
   },
   (table) => [
     uniqueIndex("founder_commerce_events_provider_event_id_idx").on(table.providerEventId),
@@ -973,6 +1013,10 @@ export const founderCommerceEvents = pgTable(
     check(
       "founder_commerce_events_signature_verified_check",
       sql`${table.signatureVerified} = true`,
+    ),
+    check(
+      "founder_commerce_events_application_check",
+      sql`(${table.applicationStatus} = 'pending' AND ${table.appliedAt} IS NULL) OR (${table.applicationStatus} IN ('applied', 'ignored') AND ${table.appliedAt} IS NOT NULL AND ${table.lastErrorCode} IS NULL)`,
     ),
     index("founder_commerce_events_user_occurred_idx").on(table.userId, table.occurredAt),
   ],
@@ -991,6 +1035,9 @@ export const founderProductEntitlements = pgTable(
     providerSubscriptionId: text("provider_subscription_id").notNull(),
     status: founderProductEntitlementStatusEnum("status").notNull(),
     reconciledProviderStatus: text("reconciled_provider_status").notNull(),
+    providerStateUpdatedAt: timestamp("provider_state_updated_at", {
+      withTimezone: true,
+    }).notNull(),
     reconciledAt: timestamp("reconciled_at", { withTimezone: true }).notNull(),
     retirementDueAt: timestamp("retirement_due_at", { withTimezone: true }),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),

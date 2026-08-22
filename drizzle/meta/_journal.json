@@ -680,6 +680,13 @@
       "when": 1787428456725,
       "tag": "0096_material_valkyrie",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1787429933111,
+      "tag": "0097_issue_380_lemon_squeezy_entitlement",
+      "breakpoints": true
     }
   ]
 }
