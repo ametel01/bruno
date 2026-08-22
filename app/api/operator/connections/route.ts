@@ -1,3 +1,5 @@
+import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import type { getFounderAiConnectionForUser } from "@/src/server/operators/founder-ai-connection";
 import {
   disconnectFounderAnthropicForUser,
@@ -42,23 +44,18 @@ export async function GET(
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
 
   const provider = readProvider(new URL(request.url).searchParams.get("provider"));
+  if (provider === "anthropic") return ownerPreviewUnavailableResponse("Anthropic");
+  const accessError = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+  );
+  if (accessError) return accessError;
   if (provider === "openai" && !(dependencies.isOpenAiReleased ?? isFounderOpenAiReleased)()) {
     return providerNotReleasedResponse("openai");
   }
-  if (
-    provider === "anthropic" &&
-    !(dependencies.isAnthropicReleased ?? isFounderAnthropicReleased)()
-  ) {
-    return providerNotReleasedResponse("anthropic");
-  }
-  const connection =
-    provider === "anthropic"
-      ? await (dependencies.recheckAnthropicConnection ?? recheckFounderAnthropicConnectionForUser)(
-          applicationUser.userId,
-        )
-      : dependencies.getConnection
-        ? await dependencies.getConnection(applicationUser.userId)
-        : await recheckFounderOpenAiConnectionForUser(applicationUser.userId);
+  const connection = dependencies.getConnection
+    ? await dependencies.getConnection(applicationUser.userId)
+    : await recheckFounderOpenAiConnectionForUser(applicationUser.userId);
   return Response.json({ connection }, { headers: noStoreHeaders() });
 }
 
@@ -84,6 +81,16 @@ export async function POST(
     payload && typeof payload === "object" && "provider" in payload ? payload.provider : null,
   );
   try {
+    if (provider === "anthropic" && action !== "disconnect") {
+      return ownerPreviewUnavailableResponse("Anthropic");
+    }
+    if (provider === "openai" && action !== "disconnect") {
+      const accessError = await requireFounderOperatorWorkspaceAccess(
+        applicationUser.userId,
+        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+      );
+      if (accessError) return accessError;
+    }
     if (
       provider === "openai" &&
       action !== "disconnect" &&
@@ -204,6 +211,18 @@ function providerNotReleasedResponse(provider: "openai" | "anthropic"): Response
       error: {
         code: "provider_not_released",
         message: `${provider === "anthropic" ? "Anthropic" : "OpenAI"} is unavailable until current Connected Acceptance passes.`,
+      },
+    },
+    { status: 409, headers: noStoreHeaders() },
+  );
+}
+
+function ownerPreviewUnavailableResponse(capability: string): Response {
+  return Response.json(
+    {
+      error: {
+        code: "owner_preview_capability_unavailable",
+        message: `${capability} is unavailable during Owner Preview.`,
       },
     },
     { status: 409, headers: noStoreHeaders() },

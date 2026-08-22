@@ -72,7 +72,9 @@ Clerk pages, sessions, or automatic legacy-user claiming. The production cutover
 with `clerk`; the operator password and Basic-auth code are removed only after hosted Clerk and
 ownership acceptance passes. Both `operator` and `clerk` production modes enforce the same persisted
 Owner Preview Release Decision and Recovery Archive access boundary; only explicit development mode
-uses the local bypass.
+uses the local bypass. Authentication alone is not admission: the first qualified entry binds one
+internal user as the Bruno.Ai Owner, later candidates fail closed, and runtime preparation never
+creates an Owner Preview decision without the Owner's explicit entry action.
 
 ## Clerk mode
 

@@ -3,6 +3,7 @@ import { createFounderProductContractClock } from "@/src/testing/founder-product
 import {
   createFounderProductContractFixture,
   deleteFounderProductContractFixture,
+  readFounderReleaseDecisions,
   readFounderScenarioExecutions,
   withPinnedFounderDevelopmentUser,
 } from "./founder-product-contract-fixture";
@@ -42,6 +43,13 @@ test("unavailable Recovery Archive storage remains a durable failed run after us
           message: expect.stringContaining("exact candidate contains a failed lifecycle scenario"),
         },
       });
+      expect(await readFounderReleaseDecisions(fixture.userId)).toEqual([
+        {
+          outcome: "deny",
+          application_revision: requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION"),
+          runtime_revision: "founder-contract-v1",
+        },
+      ]);
     });
   } finally {
     await deleteFounderProductContractFixture(fixture, { retainScenarioExecutions: true });

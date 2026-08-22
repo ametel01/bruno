@@ -3,6 +3,7 @@ import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 import { admitFounderOperatorToOwnerPreview } from "@/src/server/founder-product-contract/owner-preview-admission";
 import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
+import { projectFounderOwnerPreviewStatus } from "@/src/server/founder-product-contract/owner-preview-status";
 import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
 import {
   getFounderOwnerPreviewAccessForUser,
@@ -88,6 +89,7 @@ export async function GET(
         ownerPreviewAccess,
         FOUNDER_OWNER_PREVIEW_CAPABILITIES,
       ),
+      ownerPreview: projectFounderOwnerPreviewStatus(ownerPreviewAccess),
     },
     { headers: noStoreHeaders() },
   );
@@ -118,34 +120,58 @@ export async function POST(
       applicationUser.userId,
     );
     const authMode = dependencies.authMode ?? resolveAuthMode(process.env).mode;
-    const ownerPreviewAdmission =
-      dependencies.admitOwnerPreview ??
-      (requiresFounderReleaseStageAuthority(authMode) ? admitFounderOperatorToOwnerPreview : null);
-    if (result.runtime.status === "ready" && ownerPreviewAdmission) {
-      try {
-        await ownerPreviewAdmission(applicationUser.userId);
-      } catch {
-        return Response.json(
-          {
-            error: {
-              code: "owner_preview_unavailable",
-              message:
-                "Owner Preview is waiting for current qualification and verified Recovery Archive protection. Try preparation again.",
-            },
-          },
-          { status: 503, headers: noStoreHeaders() },
-        );
-      }
-    }
+    const ownerPreviewAccess = requiresFounderReleaseStageAuthority(authMode)
+      ? await (dependencies.getOwnerPreviewAccess ?? getFounderOwnerPreviewAccessForUser)(
+          applicationUser.userId,
+          new Date(),
+        )
+      : { admitted: true, availableCapabilities: FOUNDER_OWNER_PREVIEW_CAPABILITIES };
     return Response.json(
       {
         operator: result.operator,
         runtime: result.runtime,
-        ownerPreviewAdmitted: result.runtime.status === "ready",
-        ownerPreviewWorkAllowed: result.runtime.status === "ready",
+        ownerPreviewAdmitted: ownerPreviewAccess.admitted,
+        ownerPreviewWorkAllowed: hasFounderOwnerPreviewCapabilities(
+          ownerPreviewAccess,
+          FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+        ),
+        ownerPreview: projectFounderOwnerPreviewStatus(ownerPreviewAccess),
       },
       { headers: noStoreHeaders() },
     );
+  }
+
+  if (readAction(payload) === "enter_owner_preview") {
+    try {
+      await (dependencies.admitOwnerPreview ?? admitFounderOperatorToOwnerPreview)(
+        applicationUser.userId,
+      );
+      const ownerPreviewAccess = await (
+        dependencies.getOwnerPreviewAccess ?? getFounderOwnerPreviewAccessForUser
+      )(applicationUser.userId, new Date());
+      return Response.json(
+        {
+          ownerPreviewAdmitted: ownerPreviewAccess.admitted,
+          ownerPreviewWorkAllowed: hasFounderOwnerPreviewCapabilities(
+            ownerPreviewAccess,
+            FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+          ),
+          ownerPreview: projectFounderOwnerPreviewStatus(ownerPreviewAccess),
+        },
+        { headers: noStoreHeaders() },
+      );
+    } catch {
+      return Response.json(
+        {
+          error: {
+            code: "owner_preview_unavailable",
+            message:
+              "Owner Preview was denied because its exact-revision qualification and recovery protection are incomplete or unavailable.",
+          },
+        },
+        { status: 503, headers: noStoreHeaders() },
+      );
+    }
   }
 
   const timezone = readTimezone(payload);
@@ -176,12 +202,14 @@ function readTimezone(payload: unknown): string | null {
   return typeof timezone === "string" ? timezone : null;
 }
 
-function readAction(payload: unknown): "prepare" | null {
+function readAction(payload: unknown): "prepare" | "enter_owner_preview" | null {
   if (!payload || typeof payload !== "object" || !("action" in payload)) {
     return null;
   }
 
-  return payload.action === "prepare" ? "prepare" : null;
+  return payload.action === "prepare" || payload.action === "enter_owner_preview"
+    ? payload.action
+    : null;
 }
 
 function authenticationResponse(status: 401 | 503): Response {

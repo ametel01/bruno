@@ -1,7 +1,8 @@
-import { isFounderGoogleMailReadingReleased } from "@/src/server/operators/founder-google-reading-release";
 import {
   disconnectFounderGoogleMailForUser,
   FounderMailConnectionError,
+} from "@/src/server/operators/founder-mail-connection";
+import type {
   getFounderGoogleMailConnectionForUser,
   getFounderGoogleMailOfferDispositionForUser,
   selectFounderGoogleMailResourcesForUser,
@@ -35,17 +36,7 @@ export async function GET(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
-  if (!(dependencies.isMailReadingReleased ?? isFounderGoogleMailReadingReleased)()) {
-    return providerNotReleasedResponse();
-  }
-
-  const connection = await (dependencies.getConnection ?? getFounderGoogleMailConnectionForUser)(
-    applicationUser.userId,
-  );
-  const offerDisposition = await (
-    dependencies.getOfferDisposition ?? getFounderGoogleMailOfferDispositionForUser
-  )(applicationUser.userId);
-  return Response.json({ connection, offerDisposition }, { headers: noStoreHeaders() });
+  return ownerPreviewUnavailableResponse();
 }
 
 export async function POST(
@@ -66,47 +57,12 @@ export async function POST(
   }
 
   const action = readAction(payload);
+  if (action !== "disconnect") return ownerPreviewUnavailableResponse();
   try {
-    if (
-      action !== "disconnect" &&
-      !(dependencies.isMailReadingReleased ?? isFounderGoogleMailReadingReleased)()
-    ) {
-      return providerNotReleasedResponse();
-    }
-    if (action === "start") {
-      const result = await (
-        dependencies.startAuthorization ?? startFounderGoogleMailAuthorizationForUser
-      )(applicationUser.userId);
-      return Response.json(result, { headers: noStoreHeaders() });
-    }
-    if (action === "offer") {
-      const disposition = readOfferDisposition(payload);
-      if (!disposition) return validationResponse("Choose whether to review Gmail reading now.");
-      const offerDisposition = await (
-        dependencies.setOfferDisposition ?? setFounderGoogleMailOfferDispositionForUser
-      )(applicationUser.userId, disposition);
-      return Response.json({ connection: null, offerDisposition }, { headers: noStoreHeaders() });
-    }
-    if (action === "select") {
-      const resourceIds = readResourceIds(payload);
-      if (!resourceIds) return validationResponse("Choose at least one Gmail label.");
-      const connection = await (
-        dependencies.selectResources ?? selectFounderGoogleMailResourcesForUser
-      )(applicationUser.userId, resourceIds);
-      return Response.json({ connection }, { headers: noStoreHeaders() });
-    }
-    if (action === "verify") {
-      const connection = await (dependencies.verifyConnection ?? verifyFounderGoogleMailForUser)(
-        applicationUser.userId,
-      );
-      return Response.json({ connection }, { headers: noStoreHeaders() });
-    }
-    if (action === "disconnect") {
-      const connection = await (
-        dependencies.disconnectConnection ?? disconnectFounderGoogleMailForUser
-      )(applicationUser.userId);
-      return Response.json({ connection }, { headers: noStoreHeaders() });
-    }
+    const connection = await (
+      dependencies.disconnectConnection ?? disconnectFounderGoogleMailForUser
+    )(applicationUser.userId);
+    return Response.json({ connection }, { headers: noStoreHeaders() });
   } catch (error) {
     if (error instanceof FounderMailConnectionError) {
       return Response.json(
@@ -116,8 +72,6 @@ export async function POST(
     }
     throw error;
   }
-
-  return validationResponse("Choose a supported Gmail reading action.");
 }
 
 function readAction(
@@ -132,19 +86,6 @@ function readAction(
     action === "disconnect"
     ? action
     : null;
-}
-
-function readOfferDisposition(payload: unknown): "enabled" | "dismissed" | null {
-  if (!isRecord(payload)) return null;
-  return payload.disposition === "enabled" || payload.disposition === "dismissed"
-    ? payload.disposition
-    : null;
-}
-
-function readResourceIds(payload: unknown): string[] | null {
-  if (!isRecord(payload) || !Array.isArray(payload.resourceIds)) return null;
-  const ids = payload.resourceIds.filter((value): value is string => typeof value === "string");
-  return ids.length > 0 ? ids : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -173,12 +114,12 @@ function validationResponse(message: string): Response {
   );
 }
 
-function providerNotReleasedResponse(): Response {
+function ownerPreviewUnavailableResponse(): Response {
   return Response.json(
     {
       error: {
-        code: "mail_reading_not_released",
-        message: "Gmail reading is not available in this Bruno release.",
+        code: "owner_preview_capability_unavailable",
+        message: "Gmail reading is unavailable during Owner Preview.",
       },
     },
     { status: 409, headers: noStoreHeaders() },

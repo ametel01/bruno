@@ -1,7 +1,8 @@
-import { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
 import {
   disconnectFounderGoogleMailSendingForUser,
   FounderMailSendingConnectionError,
+} from "@/src/server/operators/founder-mail-sending-connection";
+import type {
   getFounderGoogleMailSendingConnectionForUser,
   getFounderGoogleMailSendingOfferForUser,
   startFounderGoogleMailSendingAuthorizationForUser,
@@ -27,14 +28,7 @@ export async function GET(_request: Request, _context?: unknown, dependencies: D
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!user.ok) return authenticationResponse(user.status);
-  if (!(dependencies.isMailSendingReleased ?? isFounderGoogleMailSendingReleased)()) {
-    return providerNotReleasedResponse();
-  }
-  const [connection, offerAvailable] = await Promise.all([
-    (dependencies.getConnection ?? getFounderGoogleMailSendingConnectionForUser)(user.userId),
-    (dependencies.getOffer ?? getFounderGoogleMailSendingOfferForUser)(user.userId),
-  ]);
-  return Response.json({ connection, offerAvailable }, { headers: noStoreHeaders() });
+  return ownerPreviewUnavailableResponse();
 }
 
 export async function POST(request: Request, _context?: unknown, dependencies: Dependencies = {}) {
@@ -49,38 +43,16 @@ export async function POST(request: Request, _context?: unknown, dependencies: D
     return validationResponse("Request body must be valid JSON.");
   }
   const action = isRecord(payload) && typeof payload.action === "string" ? payload.action : null;
+  if (action !== "disconnect") return ownerPreviewUnavailableResponse();
   try {
-    if (
-      action !== "disconnect" &&
-      !(dependencies.isMailSendingReleased ?? isFounderGoogleMailSendingReleased)()
-    ) {
-      return providerNotReleasedResponse();
-    }
-    if (action === "start")
-      return Response.json(
-        await (
-          dependencies.startAuthorization ?? startFounderGoogleMailSendingAuthorizationForUser
+    return Response.json(
+      {
+        connection: await (
+          dependencies.disconnectConnection ?? disconnectFounderGoogleMailSendingForUser
         )(user.userId),
-        { headers: noStoreHeaders() },
-      );
-    if (action === "verify")
-      return Response.json(
-        {
-          connection: await (
-            dependencies.verifyConnection ?? verifyFounderGoogleMailSendingForUser
-          )(user.userId),
-        },
-        { headers: noStoreHeaders() },
-      );
-    if (action === "disconnect")
-      return Response.json(
-        {
-          connection: await (
-            dependencies.disconnectConnection ?? disconnectFounderGoogleMailSendingForUser
-          )(user.userId),
-        },
-        { headers: noStoreHeaders() },
-      );
+      },
+      { headers: noStoreHeaders() },
+    );
   } catch (error) {
     if (error instanceof FounderMailSendingConnectionError)
       return Response.json(
@@ -89,7 +61,6 @@ export async function POST(request: Request, _context?: unknown, dependencies: D
       );
     throw error;
   }
-  return validationResponse("Choose a supported Mail Sending action.");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -115,12 +86,12 @@ function validationResponse(message: string) {
     { status: 400, headers: noStoreHeaders() },
   );
 }
-function providerNotReleasedResponse() {
+function ownerPreviewUnavailableResponse() {
   return Response.json(
     {
       error: {
-        code: "mail_sending_not_released",
-        message: "Gmail sending is not available in this Bruno release.",
+        code: "owner_preview_capability_unavailable",
+        message: "Gmail sending is unavailable during Owner Preview.",
       },
     },
     { status: 409, headers: noStoreHeaders() },

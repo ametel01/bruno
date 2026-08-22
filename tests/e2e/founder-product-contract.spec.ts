@@ -27,6 +27,11 @@ test("Operator UI remains usable across the required browser matrix", async ({ p
       await expect(page.getByRole("heading", { name: "Bruno.Ai Operator" })).toBeVisible();
       await expect(page.getByText("Your Operator is ready.")).toBeVisible();
       await expect(page.getByText("Next step: Connect your Ready AI Connection")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Owner Preview" })).toBeVisible();
+      await expect(page.getByText("Available now: OpenAI and Calendar reading.")).toBeVisible();
+      await expect(page.getByText(/Gmail|Anthropic|Core Operation/)).toHaveCount(0);
+      await expect(page.getByText(/Support is fully attended/)).toBeVisible();
+      await expect(page.getByText(/never promotes Bruno automatically/)).toBeVisible();
 
       const forbiddenTechnicalControl =
         /agent template|manage api keys?|connect telegram|numeric allowlist|cron expression|runner management|deployment configuration|view raw logs?|open terminal/i;

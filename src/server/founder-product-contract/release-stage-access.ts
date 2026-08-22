@@ -4,12 +4,14 @@ import { and, desc, eq, gt, inArray, lte } from "drizzle-orm";
 import type { AuthModeDecision } from "@/src/auth/auth-mode";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  appMetadata,
   founderRecoveryArchives,
   founderReleaseDecisions,
   operatorRuntimes,
   operators,
 } from "@/src/server/db/schema";
 import { readFounderApplicationRevision } from "./application-revision";
+import { FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY } from "./owner-preview-release-decision";
 import type { FounderProductContractTransaction } from "./operator-authority";
 import {
   FOUNDER_OWNER_PREVIEW_CAPABILITIES,
@@ -123,6 +125,12 @@ export async function getFounderOwnerPreviewAccessInTransaction(
 ): Promise<FounderOwnerPreviewAccess> {
   const unavailable = { admitted: false, availableCapabilities: [] } as const;
   if (!/^[a-f0-9]{40}$/.test(input.applicationRevision)) return unavailable;
+  const [ownerMapping] = await tx
+    .select({ userId: appMetadata.value })
+    .from(appMetadata)
+    .where(eq(appMetadata.key, FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY))
+    .limit(1);
+  if (ownerMapping?.userId !== input.userId) return unavailable;
   const [authority] = await tx
     .select({
       operatorId: operators.id,

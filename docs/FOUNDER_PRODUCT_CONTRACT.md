@@ -85,8 +85,11 @@ their digests and authenticated encryption, parses the strict allowlist, and reb
 durable state before recording `restorable_verified`. A manifest or ciphertext-only check cannot
 satisfy this boundary. In addition to exact-revision identity and OpenAI/Calendar Preview
 Qualification, production preparation records the Owner Preview `enter` Release Decision only after
-this verified-restorable archive exists; unavailable storage returns a fail-closed preparation
-response without admission authority. Founder workspace reads require a prior exact-revision Owner
+this verified-restorable archive exists. Runtime preparation never admits automatically: the mapped
+Bruno.Ai Owner must choose the explicit Owner Preview entry control. Missing, stale, mismatched, or
+incomplete evidence records an immutable exact-candidate `deny` decision with sanitized digests;
+unavailable storage returns a fail-closed response without admission authority. Founder workspace
+reads require a prior exact-revision Owner
 Preview admission. New work and effect-starting application boundaries additionally recheck that
 their required capabilities remain available under the latest exact-revision decision and that its
 verified archive remains within the 24-hour currency window. A Hold records its affected capability
@@ -102,8 +105,15 @@ persisted per capability and reconciled into a scoped Hold at access boundaries;
 with no provable expiry migrate fail-closed. Cumulative Holds retain prior affected-capability
 evidence. Full and partial Holds continue daily Recovery Archive refresh from the last admitted
 durable checkpoint, including while runtime recovery needs attention, so protection does not lapse. Safe
-operation reads are pure projections; reconciliation writes require a current work boundary. Core
-Operation and Gmail effects remain unavailable throughout Calendar-only Owner Preview, including at
+operation reads are pure projections; reconciliation writes require a current work boundary. The
+Founder-visible projection names Owner Preview, its currently available capabilities, its fully
+attended support boundary, and its Learning Round evidence classification. Promotion evidence is a
+read-only assessment bound to the latest persisted exact-candidate `enter` or `resume`: seven
+consecutive daily briefs plus timestamped desktop and phone activation, interruption recovery,
+provider reauthorization and disconnect, export, deletion, and zero release
+blockers can make the record eligible for a later human Release Decision, but never create one and
+never count as Founder Acceptance. Core Operation, Gmail reading, Gmail sending, and Anthropic
+remain unavailable throughout Calendar-only Owner Preview, including at
 their deep application seams and when retained Mail state exists. Provider subscription state
 applies bounded retirement deadlines and immediately
 pauses new work for unpaid, expired, and refunded entitlement. The Proposed Action claim and Gmail

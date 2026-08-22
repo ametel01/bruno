@@ -134,7 +134,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                 verified: true,
               });
             }
-            clock.advance(1);
+            clock.advance(id === "release_stage_admission" ? 3 : 1);
             return { status: "passed", ...body.outcome.cleanup };
           });
         }

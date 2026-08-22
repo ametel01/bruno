@@ -901,7 +901,7 @@ export const founderReleaseDecisions = pgTable(
     ),
     check(
       "founder_release_decisions_owner_preview_qualification_expiry_check",
-      sql`${table.stage} <> 'owner_preview' OR (${table.openAiQualificationExpiresAt} IS NOT NULL AND ${table.calendarQualificationExpiresAt} IS NOT NULL)`,
+      sql`${table.stage} <> 'owner_preview' OR ${table.outcome} = 'deny' OR (${table.openAiQualificationExpiresAt} IS NOT NULL AND ${table.calendarQualificationExpiresAt} IS NOT NULL)`,
     ),
     index("founder_release_decisions_user_stage_idx").on(
       table.userId,

@@ -1,3 +1,5 @@
+import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
   disconnectFounderGoogleCalendarForUser,
   FounderCalendarConnectionError,
@@ -31,6 +33,11 @@ export async function GET(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessError = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarRelationshipEvidence,
+  );
+  if (accessError) return accessError;
   if (!(dependencies.isCalendarReleased ?? isFounderGoogleCalendarReleased)()) {
     return providerNotReleasedResponse();
   }
@@ -60,6 +67,13 @@ export async function POST(
 
   const action = readAction(payload);
   try {
+    if (action !== "disconnect") {
+      const accessError = await requireFounderOperatorWorkspaceAccess(
+        applicationUser.userId,
+        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarRelationshipEvidence,
+      );
+      if (accessError) return accessError;
+    }
     if (
       action !== "disconnect" &&
       !(dependencies.isCalendarReleased ?? isFounderGoogleCalendarReleased)()
