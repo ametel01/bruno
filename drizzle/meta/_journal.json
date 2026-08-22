@@ -708,6 +708,13 @@
       "when": 1787433773079,
       "tag": "0100_issue_380_checkout_generation_fence",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1787433803583,
+      "tag": "0101_issue_380_superseded_refund_fence",
+      "breakpoints": true
     }
   ]
 }

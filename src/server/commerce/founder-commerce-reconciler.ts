@@ -30,6 +30,8 @@ type RefundClaim = {
   leaseToken: string;
 };
 
+type Transaction = Parameters<Parameters<DatabaseConnection["db"]["transaction"]>[0]>[0];
+
 export type FounderCommerceReconciliationResult = {
   processed: number;
   outcome:
@@ -152,21 +154,11 @@ async function claimRefund(connection: DatabaseConnection, now: Date): Promise<R
       .for("update", { skipLocked: true });
     if (!candidate?.providerSubscriptionId || !candidate.providerOrderId) return null;
     await lockFounderProductContractLifecycleInTransaction(tx, candidate.userId);
-    const [entitlement] = await tx
-      .select({
-        status: founderProductEntitlements.status,
-        checkoutCorrelationId: founderCommerceEvents.checkoutCorrelationId,
-      })
-      .from(founderProductEntitlements)
-      .innerJoin(
-        founderCommerceEvents,
-        eq(founderCommerceEvents.id, founderProductEntitlements.sourceEventId),
-      )
-      .where(eq(founderProductEntitlements.userId, candidate.userId))
-      .limit(1);
-    if (entitlement?.checkoutCorrelationId === candidate.id && entitlement.status === "verified") {
+    const authority = await readCurrentEntitlementAuthority(tx, candidate.userId);
+    if (authority?.checkoutCorrelationId === candidate.id && authority.status === "verified") {
       return null;
     }
+    const superseded = authority !== null && authority.generation > candidate.generation;
     const leaseToken = randomUUID();
     await tx
       .update(founderCheckoutCorrelations)
@@ -179,15 +171,17 @@ async function claimRefund(connection: DatabaseConnection, now: Date): Promise<R
         refundLastErrorCode: null,
       })
       .where(eq(founderCheckoutCorrelations.id, candidate.id));
-    await tx
-      .update(operators)
-      .set({
-        externalActionPause: true,
-        externalActionPauseReason: ENTITLEMENT_PAUSE_REASON,
-        externalActionPausedAt: now,
-        updatedAt: now,
-      })
-      .where(eq(operators.userId, candidate.userId));
+    if (!superseded) {
+      await tx
+        .update(operators)
+        .set({
+          externalActionPause: true,
+          externalActionPauseReason: ENTITLEMENT_PAUSE_REASON,
+          externalActionPausedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(operators.userId, candidate.userId));
+    }
     return {
       id: candidate.id,
       userId: candidate.userId,
@@ -220,7 +214,7 @@ async function executeRefundClaim(
     }
     if (!isFullRefund(order)) throw new Error("refund_unconfirmed");
 
-    const closed = await connection.db.transaction(async (tx) => {
+    const closure = await connection.db.transaction(async (tx) => {
       await lockFounderProductContractLifecycleInTransaction(tx, claim.userId);
       const [attempt] = await tx
         .select()
@@ -229,8 +223,10 @@ async function executeRefundClaim(
         .limit(1)
         .for("update");
       if (attempt?.status !== "refund_pending" || attempt.refundLeaseToken !== claim.leaseToken) {
-        return false;
+        return { closed: false, retireInfrastructure: false };
       }
+      const authority = await readCurrentEntitlementAuthority(tx, claim.userId);
+      const superseded = authority !== null && authority.generation > attempt.generation;
       const [source] = await tx
         .select({ id: founderCommerceEvents.id })
         .from(founderCommerceEvents)
@@ -246,26 +242,17 @@ async function executeRefundClaim(
           refundLeaseExpiresAt: null,
           refundedAt: input.now,
           closedAt: input.now,
-          closureReason: "payment_without_access_refunded",
+          closureReason: superseded
+            ? "payment_without_access_refunded_superseded"
+            : "payment_without_access_refunded",
           refundLastErrorCode: null,
         })
         .where(eq(founderCheckoutCorrelations.id, claim.id));
-      await tx
-        .insert(founderProductEntitlements)
-        .values({
-          userId: claim.userId,
-          sourceEventId: source.id,
-          providerSubscriptionId: claim.subscriptionId,
-          status: "refunded",
-          reconciledProviderStatus: "refunded",
-          providerStateUpdatedAt: input.now,
-          reconciledAt: input.now,
-          retirementDueAt: input.now,
-          updatedAt: input.now,
-        })
-        .onConflictDoUpdate({
-          target: founderProductEntitlements.userId,
-          set: {
+      if (!superseded) {
+        await tx
+          .insert(founderProductEntitlements)
+          .values({
+            userId: claim.userId,
             sourceEventId: source.id,
             providerSubscriptionId: claim.subscriptionId,
             status: "refunded",
@@ -274,11 +261,24 @@ async function executeRefundClaim(
             reconciledAt: input.now,
             retirementDueAt: input.now,
             updatedAt: input.now,
-          },
-        });
-      return true;
+          })
+          .onConflictDoUpdate({
+            target: founderProductEntitlements.userId,
+            set: {
+              sourceEventId: source.id,
+              providerSubscriptionId: claim.subscriptionId,
+              status: "refunded",
+              reconciledProviderStatus: "refunded",
+              providerStateUpdatedAt: input.now,
+              reconciledAt: input.now,
+              retirementDueAt: input.now,
+              updatedAt: input.now,
+            },
+          });
+      }
+      return { closed: true, retireInfrastructure: !superseded };
     });
-    if (!closed) return true;
+    if (!closure.closed || !closure.retireInfrastructure) return true;
     try {
       await executeFounderInfrastructureRetirement(
         {
@@ -311,6 +311,29 @@ async function executeRefundClaim(
       );
     return false;
   }
+}
+
+async function readCurrentEntitlementAuthority(tx: Transaction, userId: string) {
+  const [entitlement] = await tx
+    .select({
+      status: founderProductEntitlements.status,
+      checkoutCorrelationId: founderCommerceEvents.checkoutCorrelationId,
+    })
+    .from(founderProductEntitlements)
+    .innerJoin(
+      founderCommerceEvents,
+      eq(founderCommerceEvents.id, founderProductEntitlements.sourceEventId),
+    )
+    .where(eq(founderProductEntitlements.userId, userId))
+    .limit(1);
+  if (!entitlement) return null;
+  const [correlation] = await tx
+    .select({ generation: founderCheckoutCorrelations.generation })
+    .from(founderCheckoutCorrelations)
+    .where(eq(founderCheckoutCorrelations.id, entitlement.checkoutCorrelationId))
+    .limit(1);
+  if (!correlation) throw new Error("Current commerce authority disappeared.");
+  return { ...entitlement, generation: correlation.generation };
 }
 
 function isFullRefund(order: { status: string; refundedAmount: number; total: number }): boolean {

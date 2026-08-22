@@ -224,6 +224,43 @@ describe("persisted Founder commerce authority", () => {
       providerSubscriptionId: "790",
       status: "verified",
     });
+
+    const retirementProvider = {
+      createRecoveryArchive: vi.fn(),
+      deleteRecoveryArchive: vi.fn(),
+      digitalOcean: {
+        observeOwnedSet: vi.fn(),
+        deleteFirewall: vi.fn(),
+        deleteDroplet: vi.fn(),
+      },
+      calls: () => [],
+    } as unknown as FounderInfrastructureRetirementProvider;
+    await expect(
+      reconcileNextFounderCommerce({
+        now: new Date("2026-08-23T01:01:00.000Z"),
+        applicationRevision: "a".repeat(40),
+        commerceProvider: provider,
+        retirementProvider,
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ processed: 1, outcome: "refund_confirmed" });
+    expect(provider.refundOrder).toHaveBeenCalledTimes(1);
+    expect((await connection.db.select().from(founderProductEntitlements))[0]).toMatchObject({
+      providerSubscriptionId: "790",
+      status: "verified",
+    });
+    expect((await connection.db.select().from(operators))[0]).toMatchObject({
+      externalActionPause: false,
+    });
+    expect(
+      (await connection.db.select().from(founderCheckoutCorrelations)).find(
+        (attempt) => attempt.generation === 1,
+      ),
+    ).toMatchObject({
+      status: "closed",
+      closureReason: "payment_without_access_refunded_superseded",
+    });
+    expect(retirementProvider.createRecoveryArchive).not.toHaveBeenCalled();
   });
 
   it("refunds once after one hour, terminally fences late success, and requires fresh checkout", async () => {
