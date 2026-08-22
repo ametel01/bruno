@@ -10,6 +10,7 @@ describe("Founder Recovery Archive cron route", () => {
       deleted: 2,
     });
     const provider = {} as never;
+    const applicationRevision = "b".repeat(40);
 
     const response = await GET(
       new Request("http://localhost/api/internal/operator/recovery-archives", {
@@ -20,6 +21,7 @@ describe("Founder Recovery Archive cron route", () => {
         readCron: () => ({ ok: true, secret: "cron-secret" }),
         authorize: () => true,
         createProvider: () => provider,
+        readApplicationRevision: () => applicationRevision,
         reconcile,
       },
     );
@@ -33,7 +35,9 @@ describe("Founder Recovery Archive cron route", () => {
       failed: 0,
       deleted: 2,
     });
-    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({ provider }));
+    expect(reconcile).toHaveBeenCalledWith(
+      expect.objectContaining({ applicationRevision, provider }),
+    );
   });
 
   it("fails closed for missing authority, provider configuration, and request controls", async () => {
@@ -55,7 +59,15 @@ describe("Founder Recovery Archive cron route", () => {
       GET(base, undefined, {
         readCron: () => ({ ok: true, secret: "cron-secret" }),
         authorize: () => true,
+        readApplicationRevision: () => null,
+      }),
+    ).resolves.toMatchObject({ status: 503 });
+    await expect(
+      GET(base, undefined, {
+        readCron: () => ({ ok: true, secret: "cron-secret" }),
+        authorize: () => true,
         createProvider: () => null,
+        readApplicationRevision: () => "b".repeat(40),
       }),
     ).resolves.toMatchObject({ status: 503 });
     await expect(

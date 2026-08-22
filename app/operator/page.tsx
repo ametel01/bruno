@@ -1,12 +1,14 @@
 import { FounderOperatorPreparation } from "@/app/operator/_components/founder-operator-preparation";
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
+import { requireExecutingFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
+import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
+import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
 import {
   getFounderOwnerPreviewAccessForUser,
   hasFounderOwnerPreviewCapabilities,
   requiresFounderReleaseStageAuthority,
 } from "@/src/server/founder-product-contract/release-stage-access";
-import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
 import { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
 import {
   isFounderGoogleCalendarReleased,
@@ -18,7 +20,6 @@ import {
 } from "@/src/server/operators/founder-mail-connection";
 import { getFounderOnboardingForUser } from "@/src/server/operators/founder-onboarding";
 import { isFounderOpenAiReleased } from "@/src/server/operators/founder-openai-release";
-import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
 import { getFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import { buildFounderTimezoneOptions } from "@/src/shared/founder-timezones";
@@ -40,9 +41,12 @@ export default async function FounderOperatorPage() {
   }
 
   const operator = await getFounderOperatorForUser(applicationUser.userId);
+  const applicationRevision = requireExecutingFounderApplicationRevision();
   const [onboarding, recoveryArchive, ownerPreviewAccess] = await Promise.all([
     operator ? getFounderOnboardingForUser(applicationUser.userId) : Promise.resolve(undefined),
-    getFounderRecoveryArchiveStatusForUser(applicationUser.userId, new Date()),
+    getFounderRecoveryArchiveStatusForUser(applicationUser.userId, new Date(), {
+      applicationRevision,
+    }),
     requiresFounderReleaseStageAuthority(resolveAuthMode(process.env).mode)
       ? getFounderOwnerPreviewAccessForUser(applicationUser.userId, new Date())
       : Promise.resolve({

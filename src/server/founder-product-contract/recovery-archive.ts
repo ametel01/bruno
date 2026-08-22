@@ -216,19 +216,20 @@ export async function persistFounderRecoveryArchiveIntentInTransaction(
 }
 
 export async function fulfillRecoveryArchiveIntent(
-  input: Pick<ArchiveLifecycleInput, "action" | "userId" | "now">,
+  input: Pick<ArchiveLifecycleInput, "action" | "userId" | "now" | "applicationRevision">,
   providers: FounderRecoveryArchiveProvider,
   connection: DatabaseConnection,
   archiveId: string,
   operatorId: string,
   failClosed: boolean,
   clock: () => Date,
-  expectedRuntimeRevision?: string,
+  expectedRuntimeRevision: string,
 ): Promise<void> {
+  assertApplicationRevision(input.applicationRevision);
   try {
     const state = await loadFounderRecoveryArchiveDurableState(connection, operatorId, {
       allowNonReadyCheckpoint: input.action === "scheduled_archive",
-      ...(expectedRuntimeRevision === undefined ? {} : { expectedRuntimeRevision }),
+      expectedRuntimeRevision,
     });
     const archive = await providers.createRecoveryArchive({
       archiveIntentId: archiveId,
@@ -256,9 +257,8 @@ export async function fulfillRecoveryArchiveIntent(
         and(
           eq(founderRecoveryArchives.id, archiveId),
           eq(founderRecoveryArchives.status, "pending"),
-          expectedRuntimeRevision === undefined
-            ? undefined
-            : eq(founderRecoveryArchives.runtimeRevision, expectedRuntimeRevision),
+          eq(founderRecoveryArchives.applicationRevision, input.applicationRevision),
+          eq(founderRecoveryArchives.runtimeRevision, expectedRuntimeRevision),
         ),
       )
       .returning({ id: founderRecoveryArchives.id });
@@ -290,9 +290,8 @@ export async function fulfillRecoveryArchiveIntent(
         and(
           eq(founderRecoveryArchives.id, archiveId),
           eq(founderRecoveryArchives.status, "pending"),
-          expectedRuntimeRevision === undefined
-            ? undefined
-            : eq(founderRecoveryArchives.runtimeRevision, expectedRuntimeRevision),
+          eq(founderRecoveryArchives.applicationRevision, input.applicationRevision),
+          eq(founderRecoveryArchives.runtimeRevision, expectedRuntimeRevision),
         ),
       );
     if (failClosed) throw error;
@@ -402,11 +401,13 @@ async function recordRejectedRecoveryArchivePublicationCleanup(
 }
 
 export async function reconcileFounderRecoveryArchives(input: {
+  applicationRevision: string;
   now: Date;
   provider: FounderRecoveryArchiveProvider;
   createConnection?: () => DatabaseConnection;
   clock?: () => Date;
 }): Promise<{ eligible: number; created: number; failed: number; deleted: number }> {
+  assertApplicationRevision(input.applicationRevision);
   const connection =
     input.createConnection?.() ??
     (await import("@/src/server/db/client")).createDatabaseConnection();
@@ -415,7 +416,6 @@ export async function reconcileFounderRecoveryArchives(input: {
     const decisions = await connection.db
       .select({
         userId: founderReleaseDecisions.userId,
-        applicationRevision: founderReleaseDecisions.applicationRevision,
         stage: founderReleaseDecisions.stage,
         outcome: founderReleaseDecisions.outcome,
         capabilityManifest: founderReleaseDecisions.capabilityManifest,
@@ -465,19 +465,12 @@ export async function reconcileFounderRecoveryArchives(input: {
         latestAdmittedDecisionByUser.set(admission.userId, admission);
       }
     }
-    const eligibleAdmissions = [...latestAdmittedDecisionByUser.values()]
+    const eligibleUsers = [...latestAdmittedDecisionByUser.values()]
       .filter(
         (decision) =>
           (latestRetirementByUser.get(decision.userId) ?? new Date(0)) < decision.decidedAt,
       )
-      .map((decision) => ({
-        userId: decision.userId,
-        applicationRevision: decision.applicationRevision,
-      }));
-    const eligibleUsers = eligibleAdmissions.map((admission) => admission.userId);
-    const applicationRevisionByUser = new Map(
-      eligibleAdmissions.map((admission) => [admission.userId, admission.applicationRevision]),
-    );
+      .map((decision) => decision.userId);
     const retainedArchives = await connection.db
       .select({ userId: founderRecoveryArchives.userId })
       .from(founderRecoveryArchives)
@@ -499,15 +492,11 @@ export async function reconcileFounderRecoveryArchives(input: {
           connection,
         );
         if (eligible.has(userId)) {
-          const applicationRevision = applicationRevisionByUser.get(userId);
-          if (!applicationRevision) {
-            throw new Error("Scheduled Recovery Archive application revision is unavailable.");
-          }
           const statusBeforeCreation = await getFounderRecoveryArchiveStatusForUser(
             userId,
             input.now,
             {
-              applicationRevision,
+              applicationRevision: input.applicationRevision,
               createConnection: () => connection,
             },
           );
@@ -526,7 +515,7 @@ export async function reconcileFounderRecoveryArchives(input: {
               action: "scheduled_archive",
               userId,
               now: input.now,
-              applicationRevision,
+              applicationRevision: input.applicationRevision,
             },
             input.provider,
             connection,
@@ -548,13 +537,11 @@ export async function getFounderRecoveryArchiveStatusForUser(
   userId: string,
   now: Date,
   dependencies: {
-    applicationRevision?: string;
+    applicationRevision: string;
     createConnection?: () => DatabaseConnection;
-  } = {},
+  },
 ): Promise<FounderRecoveryArchiveStatusDto> {
-  if (dependencies.applicationRevision !== undefined) {
-    assertApplicationRevision(dependencies.applicationRevision);
-  }
+  assertApplicationRevision(dependencies.applicationRevision);
   const connection =
     dependencies.createConnection?.() ??
     (await import("@/src/server/db/client")).createDatabaseConnection();
@@ -582,9 +569,7 @@ export async function getFounderRecoveryArchiveStatusForUser(
               eq(founderRecoveryArchives.userId, userId),
               eq(founderRecoveryArchives.operatorId, authority.operatorId),
               eq(founderRecoveryArchives.runtimeRevision, authority.runtimeRevision),
-              dependencies.applicationRevision === undefined
-                ? undefined
-                : eq(founderRecoveryArchives.applicationRevision, dependencies.applicationRevision),
+              eq(founderRecoveryArchives.applicationRevision, dependencies.applicationRevision),
               eq(founderRecoveryArchives.status, "verified"),
               eq(founderRecoveryArchives.formatVersion, 1),
               eq(founderRecoveryArchives.restorableVerified, true),

@@ -141,6 +141,7 @@ describe("Founder Infrastructure Retirement deadline", () => {
         id: archiveId,
         userId: USER_ID,
         operatorId: OPERATOR_ID,
+        applicationRevision: "a".repeat(40),
         runtimeRevision: "runtime-retirement-v1",
         status: "pending",
         storageObjectKey: `founder-recovery/${USER_ID}/${archiveId}.age`,
@@ -200,6 +201,76 @@ describe("Founder Infrastructure Retirement deadline", () => {
         .from(founderRecoveryArchives)
         .where(eq(founderRecoveryArchives.id, archiveId)),
     ).resolves.toEqual([{ status: "failed", failureCode: "archive_create_failed" }]);
+  });
+
+  it.each([
+    { label: "prior-revision", applicationRevision: "a".repeat(40) },
+    { label: "legacy-null-revision", applicationRevision: null },
+  ])("fences a retirement retry from a $label Recovery Archive intent", async ({
+    applicationRevision,
+  }) => {
+    const input = await retirementInput(`application-fence-${applicationRevision ?? "legacy"}`);
+    const archiveId = "00000000-0000-4000-8000-000000003744";
+    await connection.db.insert(founderRecoveryArchives).values({
+      id: archiveId,
+      userId: USER_ID,
+      operatorId: OPERATOR_ID,
+      applicationRevision,
+      runtimeRevision: "runtime-retirement-v1",
+      status: "pending",
+      storageObjectKey: `founder-recovery/${USER_ID}/${archiveId}.age`,
+      recoveryCredentialObjectKey: `founder-recovery/${USER_ID}/${archiveId}.key`,
+      restorableVerified: false,
+      observedAt: NOW,
+      expiresAt: new Date(NOW.valueOf() + 30 * 24 * 60 * 60 * 1_000),
+      createdAt: NOW,
+    });
+    await connection.db.insert(founderInfrastructureRetirements).values({
+      userId: USER_ID,
+      runnerId: RUNNER_ID,
+      recoveryArchiveId: archiveId,
+      idempotencyKey: `sha256:${"2".repeat(64)}`,
+      providerResourceId: "droplet-retirement-373",
+      providerFirewallId: "firewall-retirement-373",
+      status: "in_progress",
+      resourcesBefore: 2,
+      resourcesAfter: null,
+      workStoppedAt: NOW,
+      credentialsDisabledAt: NOW,
+      attemptCount: 1,
+      leaseToken: "expired-application-retry-lease",
+      leaseExpiresAt: new Date(NOW.valueOf() - 1),
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    let archiveCalls = 0;
+    const providers = retirementProviders({
+      async createRecoveryArchive(archiveInput) {
+        archiveCalls += 1;
+        return archiveProvider.createRecoveryArchive(archiveInput);
+      },
+    });
+
+    await expect(
+      executeFounderProductContractLifecycleAction(input, {
+        providers,
+        commerceWebhookSecret: COMMERCE_SECRET,
+        applicationRevision: "b".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({ cleanup: { resourcesAfter: 0 } });
+    expect(archiveCalls).toBe(0);
+    await expect(
+      connection.db
+        .select({
+          status: founderRecoveryArchives.status,
+          failureCode: founderRecoveryArchives.failureCode,
+        })
+        .from(founderRecoveryArchives)
+        .where(eq(founderRecoveryArchives.id, archiveId)),
+    ).resolves.toEqual([
+      { status: "failed", failureCode: "archive_application_revision_mismatch" },
+    ]);
   });
 
   function retirementProviders(

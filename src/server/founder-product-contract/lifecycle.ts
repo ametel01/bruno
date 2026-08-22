@@ -257,7 +257,7 @@ async function executeInfrastructureRetirement(
 
   const archiveFulfillment = prepared.archiveNeedsExecution
     ? fulfillRecoveryArchiveIntent(
-        input,
+        { ...input, applicationRevision: dependencies.applicationRevision },
         dependencies.providers,
         connection,
         prepared.recoveryArchiveId,
@@ -416,13 +416,22 @@ async function prepareInfrastructureRetirement(
       const [archive] = await tx
         .select({
           status: founderRecoveryArchives.status,
+          applicationRevision: founderRecoveryArchives.applicationRevision,
           runtimeRevision: founderRecoveryArchives.runtimeRevision,
         })
         .from(founderRecoveryArchives)
         .where(eq(founderRecoveryArchives.id, recoveryArchiveId))
         .limit(1);
       if (!archive) throw new Error("Infrastructure Retirement Recovery Archive is missing.");
-      if (archive.status === "pending" && !archive.runtimeRevision) {
+      if (
+        archive.status === "pending" &&
+        archive.applicationRevision !== dependencies.applicationRevision
+      ) {
+        await tx
+          .update(founderRecoveryArchives)
+          .set({ status: "failed", failureCode: "archive_application_revision_mismatch" })
+          .where(eq(founderRecoveryArchives.id, recoveryArchiveId));
+      } else if (archive.status === "pending" && !archive.runtimeRevision) {
         await tx
           .update(founderRecoveryArchives)
           .set({ status: "failed", failureCode: "archive_runtime_revision_unavailable" })

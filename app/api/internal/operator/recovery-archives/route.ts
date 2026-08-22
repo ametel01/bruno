@@ -1,4 +1,5 @@
 import { isAuthorizedCronRequest, readCronSecretConfig } from "@/src/server/env";
+import { readExecutingFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 import { createEncryptedFounderRecoveryArchiveProvider } from "@/src/server/founder-product-contract/encrypted-recovery-archive-provider";
 import { reconcileFounderRecoveryArchives } from "@/src/server/founder-product-contract/recovery-archive";
 import type { FounderRecoveryArchiveProvider } from "@/src/server/founder-product-contract/recovery-archive-provider";
@@ -12,7 +13,9 @@ type RouteDependencies = {
   readCron?: typeof readCronSecretConfig;
   authorize?: typeof isAuthorizedCronRequest;
   createProvider?: () => FounderRecoveryArchiveProvider | null;
+  readApplicationRevision?: () => string | null;
   reconcile?: (input: {
+    applicationRevision: string;
     now: Date;
     provider: FounderRecoveryArchiveProvider;
   }) => Promise<ReconciliationResult>;
@@ -36,6 +39,12 @@ export async function GET(
   if (new URL(request.url).search.length > 0 || request.body !== null) {
     return errorResponse(400, "recovery_archive_request_invalid");
   }
+  const applicationRevision = (
+    dependencies.readApplicationRevision ?? readExecutingFounderApplicationRevision
+  )();
+  if (!applicationRevision) {
+    return errorResponse(503, "recovery_archive_configuration_invalid");
+  }
 
   let provider: FounderRecoveryArchiveProvider | null;
   try {
@@ -47,6 +56,7 @@ export async function GET(
 
   try {
     const result = await (dependencies.reconcile ?? reconcileFounderRecoveryArchives)({
+      applicationRevision,
       now: new Date(),
       provider,
     });

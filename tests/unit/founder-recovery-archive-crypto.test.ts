@@ -210,6 +210,47 @@ describe("encrypted Founder Recovery Archive provider", () => {
     ).resolves.toMatchObject({ ok: false });
   });
 
+  it("fails publication when bucket versioning changes during archive upload", async () => {
+    const underlyingStorage = new FakeBackupObjectStorage("founder-recovery-test");
+    let safetyChecks = 0;
+    const storage = {
+      upload: (input: Parameters<typeof underlyingStorage.upload>[0]) =>
+        underlyingStorage.upload(input),
+      download: (input: Parameters<typeof underlyingStorage.download>[0]) =>
+        underlyingStorage.download(input),
+      delete: (input: Parameters<typeof underlyingStorage.delete>[0]) =>
+        underlyingStorage.delete(input),
+      exists: (input: Parameters<typeof underlyingStorage.exists>[0]) =>
+        underlyingStorage.exists(input),
+      async verifyDeletionSafety() {
+        safetyChecks += 1;
+        return safetyChecks === 1
+          ? ({ ok: true, versioning: "disabled" } as const)
+          : ({
+              ok: false,
+              status: "failed",
+              message: "Bucket versioning changed during archive publication.",
+            } as const);
+      },
+    };
+    const provider = new EncryptedFounderRecoveryArchiveProvider({
+      storage,
+      masterKey: MASTER_KEY,
+      restoreBoundary: { rebuild: async (state) => structuredClone(state) },
+    });
+
+    await expect(
+      provider.createRecoveryArchive({
+        archiveIntentId: randomUUID(),
+        userId: USER_ID,
+        operatorId: OPERATOR_ID,
+        observedAt: OBSERVED_AT,
+        state: durableState(),
+      }),
+    ).rejects.toThrow("cannot prove permanent object deletion");
+    expect(safetyChecks).toBe(2);
+  });
+
   it("fails deletion when bucket versioning changes during the deletion attempt", async () => {
     const underlyingStorage = new FakeBackupObjectStorage("founder-recovery-test");
     let safetyChecks = 0;
@@ -224,7 +265,7 @@ describe("encrypted Founder Recovery Archive provider", () => {
         underlyingStorage.exists(input),
       async verifyDeletionSafety() {
         safetyChecks += 1;
-        return safetyChecks <= 2
+        return safetyChecks <= 3
           ? ({ ok: true, versioning: "disabled" } as const)
           : ({
               ok: false,
@@ -255,7 +296,7 @@ describe("encrypted Founder Recovery Archive provider", () => {
         idempotencyKey: created.deletionIdempotencyKey,
       }),
     ).rejects.toThrow("cannot prove permanent object deletion");
-    expect(safetyChecks).toBe(3);
+    expect(safetyChecks).toBe(4);
   });
 
   it("requires storage and a 256-bit server-only master key together", () => {

@@ -27,6 +27,7 @@ vi.mock("@/src/server/users/configured-application-user", () => ({
 }));
 
 const USER_ID = "00000000-0000-4000-8000-000000003381";
+const APPLICATION_REVISION = "b".repeat(40);
 const OPERATOR = {
   id: "00000000-0000-4000-8000-000000003391",
   userId: USER_ID,
@@ -132,6 +133,7 @@ describe("Founder Operator route", () => {
     const response = await GET(new Request("http://localhost/api/operator"), undefined, {
       authMode: "development",
       getRecoveryArchiveStatus: mocks.getRecoveryArchiveStatus,
+      readApplicationRevision: () => APPLICATION_REVISION,
     });
     const body = await response.json();
 
@@ -148,7 +150,9 @@ describe("Founder Operator route", () => {
     });
     expect(mocks.getOperator).toHaveBeenCalledWith(USER_ID);
     expect(mocks.ensureOperator).not.toHaveBeenCalled();
-    expect(mocks.getRecoveryArchiveStatus).toHaveBeenCalledWith(USER_ID, expect.any(Date));
+    expect(mocks.getRecoveryArchiveStatus).toHaveBeenCalledWith(USER_ID, expect.any(Date), {
+      applicationRevision: APPLICATION_REVISION,
+    });
   });
 
   it("returns an empty projection without creating workspace state before preparation", async () => {
@@ -157,6 +161,7 @@ describe("Founder Operator route", () => {
 
     const response = await GET(new Request("http://localhost/api/operator"), undefined, {
       getRecoveryArchiveStatus: mocks.getRecoveryArchiveStatus,
+      readApplicationRevision: () => APPLICATION_REVISION,
     });
 
     expect(response.status).toBe(200);
@@ -172,6 +177,7 @@ describe("Founder Operator route", () => {
       authMode: "operator",
       getOwnerPreviewAccess: mocks.getOwnerPreviewAccess,
       getRecoveryArchiveStatus: mocks.getRecoveryArchiveStatus,
+      readApplicationRevision: () => APPLICATION_REVISION,
     });
 
     expect(response.status).toBe(200);
@@ -180,6 +186,24 @@ describe("Founder Operator route", () => {
       ownerPreviewWorkAllowed: false,
     });
     expect(mocks.getOwnerPreviewAccess).toHaveBeenCalledWith(USER_ID, expect.any(Date));
+  });
+
+  it("fails closed when the executing application revision is unavailable", async () => {
+    const { GET } = await import("@/app/api/operator/route");
+
+    const response = await GET(new Request("http://localhost/api/operator"), undefined, {
+      getRecoveryArchiveStatus: mocks.getRecoveryArchiveStatus,
+      readApplicationRevision: () => null,
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "operator_configuration_unavailable",
+        message: "Founder workspace protection cannot be verified for this application release.",
+      },
+    });
+    expect(mocks.getRecoveryArchiveStatus).not.toHaveBeenCalled();
   });
 
   it("confirms a plain-language timezone for the authenticated Owner", async () => {

@@ -149,6 +149,7 @@ export class EncryptedFounderRecoveryArchiveProvider implements FounderRecoveryA
       if (digest(new TextEncoder().encode(JSON.stringify(restored))) !== stateDigest) {
         throw new Error("Recovery Archive restore check rebuilt different durable state.");
       }
+      await requirePermanentDeletionSafety(this.storage);
       return {
         storageObjectKey: archiveObjectKey,
         recoveryCredentialObjectKey: credentialObjectKey,

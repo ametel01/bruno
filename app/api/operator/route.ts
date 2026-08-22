@@ -1,13 +1,14 @@
 import type { AuthModeDecision } from "@/src/auth/auth-mode";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
+import { readExecutingFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 import { admitFounderOperatorToOwnerPreview } from "@/src/server/founder-product-contract/owner-preview-admission";
+import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
+import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
 import {
   getFounderOwnerPreviewAccessForUser,
   hasFounderOwnerPreviewCapabilities,
   requiresFounderReleaseStageAuthority,
 } from "@/src/server/founder-product-contract/release-stage-access";
-import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
-import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
 import {
   confirmFounderTimezoneForUser,
   FounderOperatorTimezoneError,
@@ -24,6 +25,7 @@ type OperatorRouteDependencies = {
   prepareRuntime?: typeof prepareFounderOperatorRuntimeForUser;
   getRecoveryArchiveStatus?: typeof getFounderRecoveryArchiveStatusForUser;
   getOwnerPreviewAccess?: typeof getFounderOwnerPreviewAccessForUser;
+  readApplicationRevision?: () => string | null;
   authMode?: AuthModeDecision["mode"];
 };
 
@@ -49,9 +51,23 @@ export async function GET(
   const operator = await (dependencies.getOperator ?? getFounderOperatorForUser)(
     applicationUser.userId,
   );
+  const applicationRevision = (
+    dependencies.readApplicationRevision ?? readExecutingFounderApplicationRevision
+  )();
+  if (!applicationRevision) {
+    return Response.json(
+      {
+        error: {
+          code: "operator_configuration_unavailable",
+          message: "Founder workspace protection cannot be verified for this application release.",
+        },
+      },
+      { status: 503, headers: noStoreHeaders() },
+    );
+  }
   const recoveryArchive = await (
     dependencies.getRecoveryArchiveStatus ?? getFounderRecoveryArchiveStatusForUser
-  )(applicationUser.userId, new Date());
+  )(applicationUser.userId, new Date(), { applicationRevision });
   const authMode = dependencies.authMode ?? resolveAuthMode(process.env).mode;
   const ownerPreviewAccess = requiresFounderReleaseStageAuthority(authMode)
     ? await (dependencies.getOwnerPreviewAccess ?? getFounderOwnerPreviewAccessForUser)(

@@ -95,6 +95,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     );
 
     const status = await getFounderRecoveryArchiveStatusForUser(USER_ID, START, {
+      applicationRevision: APPLICATION_REVISION,
       createConnection: () => connection,
     });
     expect(status).toEqual({
@@ -107,6 +108,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       deletion: null,
     });
     expect(JSON.stringify(status)).not.toMatch(/objectKey|digest|credential|ciphertext/i);
+    await expect(
+      getFounderRecoveryArchiveStatusForUser(USER_ID, START, {
+        applicationRevision: "b".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({ state: "due", lastVerifiedAt: null, restoreVerifiedAt: null });
 
     await expect(
       createDurableRecoveryArchive(
@@ -156,6 +163,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
     await expect(
       getFounderRecoveryArchiveStatusForUser(USER_ID, failedAt, {
+        applicationRevision: APPLICATION_REVISION,
         createConnection: () => connection,
       }),
     ).resolves.toMatchObject({
@@ -207,6 +215,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     ).resolves.toEqual({ admitted: true, availableCapabilities: [] });
     await expect(
       getFounderRecoveryArchiveStatusForUser(USER_ID, refreshedAt, {
+        applicationRevision: APPLICATION_REVISION,
         createConnection: () => connection,
       }),
     ).resolves.toMatchObject({ state: "due" });
@@ -627,6 +636,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     const refreshAt = new Date(START.valueOf() + 23 * 60 * 60 * 1_000);
     await expect(
       reconcileFounderRecoveryArchives({
+        applicationRevision: APPLICATION_REVISION,
         now: refreshAt,
         provider,
         createConnection: () => connection,
@@ -922,6 +932,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
     await expect(
       reconcileFounderRecoveryArchives({
+        applicationRevision: APPLICATION_REVISION,
         now: new Date(START.valueOf() + 22 * 60 * 60 * 1_000),
         provider,
         createConnection: () => connection,
@@ -930,6 +941,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
     await expect(
       reconcileFounderRecoveryArchives({
+        applicationRevision: APPLICATION_REVISION,
         now: new Date(START.valueOf() + 23 * 60 * 60 * 1_000),
         provider,
         createConnection: () => connection,
@@ -939,7 +951,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     expect(await connection.db.select().from(founderRecoveryArchives)).toHaveLength(2);
   });
 
-  it("refreshes immediately when the admitted application revision changes", async () => {
+  it("labels scheduled restoration proof with the executing application revision", async () => {
     await createDurableRecoveryArchive(
       {
         action: "release_stage_admission",
@@ -951,26 +963,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       connection,
       () => START,
     );
-    const applicationRevision = "1".repeat(40);
-    const admittedAt = new Date(START.valueOf() + 60_000);
-    await connection.db.insert(founderReleaseDecisions).values({
-      userId: USER_ID,
-      operatorId: OPERATOR_ID,
-      stage: "owner_preview",
-      outcome: "resume",
-      applicationRevision,
-      runtimeRevision: "runtime-v1",
-      capabilityManifest: ["openai", "calendar_reading"],
-      openAiQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
-      calendarQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
-      evidenceDigests: [`sha256:${"2".repeat(64)}`],
-      decidedAt: admittedAt,
-      createdAt: admittedAt,
-    });
+    const executingApplicationRevision = "1".repeat(40);
 
     await expect(
       reconcileFounderRecoveryArchives({
-        now: new Date(admittedAt.valueOf() + 60_000),
+        applicationRevision: executingApplicationRevision,
+        now: new Date(START.valueOf() + 60_000),
         provider,
         createConnection: () => connection,
       }),
@@ -982,7 +980,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       .orderBy(founderRecoveryArchives.observedAt);
     expect(archives).toEqual([
       { applicationRevision: APPLICATION_REVISION },
-      { applicationRevision },
+      { applicationRevision: executingApplicationRevision },
     ]);
   });
 
@@ -1005,6 +1003,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     });
     await expect(
       reconcileFounderRecoveryArchives({
+        applicationRevision: APPLICATION_REVISION,
         now: new Date(START.valueOf() + 24 * 60 * 60 * 1_000),
         provider,
         createConnection: () => connection,
@@ -1028,11 +1027,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     });
     await expect(
       reconcileFounderRecoveryArchives({
+        applicationRevision: APPLICATION_REVISION,
         now: new Date(START.valueOf() + 24 * 60 * 60 * 1_000 + 1_000),
         provider,
         createConnection: () => connection,
       }),
-    ).resolves.toEqual({ eligible: 1, created: 1, failed: 0, deleted: 0 });
+    ).resolves.toEqual({ eligible: 1, created: 0, failed: 0, deleted: 0 });
   });
 
   it("reserves one archive intent while its provider upload is still pending", async () => {
@@ -1238,6 +1238,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     const expiresAt = new Date(START.valueOf() + 30 * 24 * 60 * 60 * 1_000);
     await expect(
       reconcileFounderRecoveryArchives({
+        applicationRevision: APPLICATION_REVISION,
         now: expiresAt,
         provider,
         createConnection: () => connection,
@@ -1279,6 +1280,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
     await expect(
       reconcileFounderRecoveryArchives({
+        applicationRevision: APPLICATION_REVISION,
         now: expiresAt,
         provider,
         createConnection: () => connection,
@@ -1483,6 +1485,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
     await expect(
       reconcileFounderRecoveryArchives({
+        applicationRevision: APPLICATION_REVISION,
         now: expiresAt,
         provider,
         createConnection: () => connection,
@@ -1525,6 +1528,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
     await expect(
       reconcileFounderRecoveryArchives({
+        applicationRevision: APPLICATION_REVISION,
         now: new Date(START.valueOf() + 25 * 60 * 60 * 1_000),
         provider,
         createConnection: () => connection,
@@ -1587,6 +1591,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
     await expect(
       reconcileFounderRecoveryArchives({
+        applicationRevision: APPLICATION_REVISION,
         now: new Date(START.valueOf() + 24 * 60 * 60 * 1_000),
         provider,
         createConnection: () => connection,
@@ -1611,6 +1616,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     });
     await expect(
       reconcileFounderRecoveryArchives({
+        applicationRevision: APPLICATION_REVISION,
         now: new Date(readmittedAt.valueOf() + 1_000),
         provider,
         createConnection: () => connection,
