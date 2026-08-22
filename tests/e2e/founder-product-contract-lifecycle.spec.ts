@@ -95,6 +95,13 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
             const body = (await response.json()) as {
               outcome: {
                 providerCalls: string[];
+                externalBetaManifest?: {
+                  state: string;
+                  availableCapabilities: string[];
+                  providerChoice: string;
+                  capacityBoundary: string;
+                  safeWorkCheckpointsPreserved: boolean;
+                };
                 cleanup: {
                   resourcesBefore: number;
                   resourcesAfter: number;
@@ -123,7 +130,31 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
               );
               if (id === "release_stage_admission") {
                 expect(body.outcome.providerCalls).toEqual(
-                  expect.arrayContaining(["archive.delete", "archive.delete_credentials"]),
+                  expect.arrayContaining([
+                    "openAI.verify_connection",
+                    "anthropic.verify_connection",
+                    "google.verify_calendar_reading",
+                    "google.verify_gmail_reading",
+                    "google.verify_gmail_sending",
+                    "archive.delete",
+                    "archive.delete_credentials",
+                  ]),
+                );
+                expect(body.outcome.externalBetaManifest).toEqual({
+                  state: "ready",
+                  availableCapabilities: [
+                    "openai",
+                    "anthropic",
+                    "calendar_reading",
+                    "gmail_reading",
+                    "gmail_sending",
+                  ],
+                  providerChoice: "Connect OpenAI, Anthropic, or both",
+                  capacityBoundary: "Uses only your connected provider accounts",
+                  safeWorkCheckpointsPreserved: true,
+                });
+                expect(JSON.stringify(body.outcome.externalBetaManifest)).not.toMatch(
+                  /model|credential|token|runner|hermes|digest|revision/i,
                 );
               }
             }

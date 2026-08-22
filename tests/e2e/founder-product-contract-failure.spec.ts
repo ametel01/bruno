@@ -3,6 +3,7 @@ import { createFounderProductContractClock } from "@/src/testing/founder-product
 import {
   createFounderProductContractFixture,
   deleteFounderProductContractFixture,
+  readFounderExternalBetaQualifications,
   readFounderReleaseDecisions,
   readFounderScenarioExecutions,
   withPinnedFounderDevelopmentUser,
@@ -63,6 +64,39 @@ test("unavailable Recovery Archive storage remains a durable failed run after us
       cleanup_verified: false,
     },
   ]);
+});
+
+test("one unavailable capability denies the complete External Beta manifest", async ({
+  request,
+}) => {
+  const clock = createFounderProductContractClock(
+    requiredEnvironment("BRUNO_FOUNDER_CONTRACT_OBSERVED_AT"),
+  );
+  const runId = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID");
+  const fixture = await createFounderProductContractFixture(clock);
+
+  try {
+    await withPinnedFounderDevelopmentUser(fixture.userId, async () => {
+      const failed = await request.post("/api/operator/founder-product-contract/lifecycle", {
+        data: {
+          action: "release_stage_admission",
+          runId,
+          now: clock.now().toISOString(),
+          providerFailure: "google.verify_gmail_reading",
+        },
+      });
+      expect(failed.status()).toBe(409);
+      await expect(failed.json()).resolves.toMatchObject({
+        error: {
+          code: "lifecycle_transition_failed",
+          message: "google.verify_gmail_reading failed deterministically.",
+        },
+      });
+      expect(await readFounderExternalBetaQualifications(runId)).toEqual([]);
+    });
+  } finally {
+    await deleteFounderProductContractFixture(fixture);
+  }
 });
 
 test("a corrupt Recovery Archive fails admission before it can be certified", async ({

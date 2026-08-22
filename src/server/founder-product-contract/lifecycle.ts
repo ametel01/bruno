@@ -6,6 +6,13 @@ import { expireFounderRecoveryArchivesForUser } from "./archive-expiry";
 import { founderProductContractDigest } from "./digest";
 import { reconcileFounderCommerceEvent } from "./entitlement";
 import { executeFounderInfrastructureRetirement } from "./infrastructure-retirement";
+import { persistFounderExternalBetaQualificationsInTransaction } from "./external-beta-manifest";
+import {
+  FOUNDER_EXTERNAL_BETA_CAPABILITIES,
+  FOUNDER_EXTERNAL_BETA_QUALIFICATION_MAX_AGE_MS,
+  FOUNDER_EXTERNAL_BETA_QUALIFICATION_SCHEMA,
+  type FounderExternalBetaQualification,
+} from "./external-beta-qualification";
 import {
   lockFounderProductContractLifecycleInTransaction,
   requireReadyFounderOperatorAuthorityInTransaction,
@@ -46,7 +53,9 @@ export type FounderLifecycleProviderBoundary = FounderRecoveryArchiveProvider & 
   verifyCapabilityProviders(): Promise<{
     openAI: true;
     anthropic: true;
-    google: true;
+    calendarReading: true;
+    gmailReading: true;
+    gmailSending: true;
   }>;
   readSubscription(input: { subscriptionId: string }): Promise<{ status: FounderCommerceStatus }>;
   digitalOcean: DigitalOceanOwnedSetProvider;
@@ -66,6 +75,13 @@ export type FounderLifecycleOutcome = {
   observedAt: string;
   providerCalls: readonly string[];
   cleanup: FounderLifecycleCleanup;
+  externalBetaManifest?: {
+    state: "ready";
+    availableCapabilities: readonly string[];
+    providerChoice: "Connect OpenAI, Anthropic, or both";
+    capacityBoundary: "Uses only your connected provider accounts";
+    safeWorkCheckpointsPreserved: true;
+  };
 };
 
 type LifecycleInput = {
@@ -140,9 +156,25 @@ export async function executeFounderProductContractLifecycleAction(
           });
           if (!identity.subject) throw new Error("Clerk identity authentication was inconclusive.");
           const capabilities = await dependencies.providers.verifyCapabilityProviders();
-          if (!capabilities.openAI || !capabilities.google) {
-            throw new Error("Owner Preview provider qualification was inconclusive.");
+          if (
+            !capabilities.openAI ||
+            !capabilities.anthropic ||
+            !capabilities.calendarReading ||
+            !capabilities.gmailReading ||
+            !capabilities.gmailSending
+          ) {
+            throw new Error("External Beta provider qualification was inconclusive.");
           }
+          const externalBetaQualifications = contractExternalBetaQualifications({
+            runId: input.runId,
+            applicationRevision: dependencies.applicationRevision,
+            runtimeRevision,
+            observedAt: input.now,
+          });
+          await persistFounderExternalBetaQualificationsInTransaction(
+            tx,
+            externalBetaQualifications,
+          );
           if (!lifecycleArchiveId) throw new Error("A verified Recovery Archive is required.");
           const qualificationEvidenceDigests = [
             founderProductContractDigest(
@@ -246,6 +278,17 @@ export async function executeFounderProductContractLifecycleAction(
         observedAt: input.now.toISOString(),
         providerCalls: dependencies.providers.calls(),
         cleanup,
+        ...(input.action === "release_stage_admission"
+          ? {
+              externalBetaManifest: {
+                state: "ready" as const,
+                availableCapabilities: FOUNDER_EXTERNAL_BETA_CAPABILITIES,
+                providerChoice: "Connect OpenAI, Anthropic, or both" as const,
+                capacityBoundary: "Uses only your connected provider accounts" as const,
+                safeWorkCheckpointsPreserved: true as const,
+              },
+            }
+          : {}),
       };
     });
   } catch (error) {
@@ -267,6 +310,30 @@ export async function executeFounderProductContractLifecycleAction(
   } finally {
     if (ownsConnection) await connection.close();
   }
+}
+
+function contractExternalBetaQualifications(input: {
+  runId: string;
+  applicationRevision: string;
+  runtimeRevision: string;
+  observedAt: Date;
+}): readonly FounderExternalBetaQualification[] {
+  return FOUNDER_EXTERNAL_BETA_CAPABILITIES.map((capability) => ({
+    schemaVersion: FOUNDER_EXTERNAL_BETA_QUALIFICATION_SCHEMA,
+    outcome: "passed",
+    stage: "external_beta",
+    cohort: `external-beta-contract:${input.runId}`,
+    capability,
+    applicationRevision: input.applicationRevision,
+    runtimeRevision: input.runtimeRevision,
+    evidenceDigest: founderProductContractDigest(
+      JSON.stringify({ kind: "external_beta_qualification", capability, runId: input.runId }),
+    ),
+    observedAt: input.observedAt.toISOString(),
+    expiresAt: new Date(
+      input.observedAt.valueOf() + FOUNDER_EXTERNAL_BETA_QUALIFICATION_MAX_AGE_MS,
+    ).toISOString(),
+  }));
 }
 
 type Transaction = Parameters<Parameters<DatabaseConnection["db"]["transaction"]>[0]>[0];
