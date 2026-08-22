@@ -242,9 +242,9 @@ export async function requireRetirementDue(
   tx: Transaction,
   userId: string,
   now: Date,
-): Promise<void> {
+): Promise<Date> {
   const [entitlement] = await tx
-    .select({ id: founderProductEntitlements.id })
+    .select({ retirementDueAt: founderProductEntitlements.retirementDueAt })
     .from(founderProductEntitlements)
     .where(
       and(
@@ -261,6 +261,10 @@ export async function requireRetirementDue(
     )
     .limit(1);
   if (!entitlement) throw new Error("Product Entitlement retirement is not due.");
+  if (!entitlement.retirementDueAt) {
+    throw new Error("Product Entitlement retirement deadline is unavailable.");
+  }
+  return entitlement.retirementDueAt;
 }
 
 async function consumeOrVerifyCheckoutCorrelation(

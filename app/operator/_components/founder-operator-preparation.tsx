@@ -5,6 +5,7 @@ import type { FounderMailConnectionDto } from "@/src/server/operators/founder-ma
 import type { FounderOnboardingDto } from "@/src/server/operators/founder-onboarding";
 import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
 import type { FounderRecoveryArchiveStatusDto } from "@/src/server/founder-product-contract/recovery-archive";
+import type { FounderInfrastructureRetirementStatusDto } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import {
   DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
   type FounderTimezoneOption,
@@ -24,6 +25,7 @@ export function FounderOperatorPreparation({
   initialOperator,
   initialOnboarding,
   initialRecoveryArchive,
+  initialInfrastructureRetirement,
   ownerPreviewAdmitted = false,
   ownerPreviewWorkAllowed = ownerPreviewAdmitted,
   timezoneOptions = DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
@@ -36,6 +38,7 @@ export function FounderOperatorPreparation({
   initialOperator: FounderOperatorDto | null;
   initialOnboarding?: FounderOnboardingDto;
   initialRecoveryArchive?: FounderRecoveryArchiveStatusDto;
+  initialInfrastructureRetirement?: FounderInfrastructureRetirementStatusDto;
   ownerPreviewAdmitted?: boolean;
   ownerPreviewWorkAllowed?: boolean;
   timezoneOptions?: ReadonlyArray<FounderTimezoneOption>;
@@ -524,6 +527,46 @@ export function FounderOperatorPreparation({
           {initialRecoveryArchive.deletion?.status === "failed" ? (
             <p className={styles.hint}>Expired Recovery Archive deletion needs attention.</p>
           ) : null}
+        </section>
+      ) : null}
+
+      {initialInfrastructureRetirement &&
+      initialInfrastructureRetirement.state !== "unavailable" ? (
+        <section className={styles.card} aria-labelledby="infrastructure-retirement-title">
+          <div className={styles.cardHeading}>
+            <div>
+              <p className={styles.kicker}>Infrastructure retirement</p>
+              <h3 id="infrastructure-retirement-title">
+                {initialInfrastructureRetirement.state === "completed"
+                  ? "Runtime cost stopped"
+                  : "Runtime removal is still being verified"}
+              </h3>
+            </div>
+            <span className={styles.confirmed}>
+              {initialInfrastructureRetirement.state === "completed" ? "Verified" : "In progress"}
+            </span>
+          </div>
+          <p className={styles.hint}>
+            {initialInfrastructureRetirement.state === "completed"
+              ? "DigitalOcean independently confirmed that the exact Droplet and firewall are absent."
+              : "Bruno has stopped new work and disabled runtime access. Retirement is not complete until DigitalOcean independently confirms that the exact Droplet and firewall are absent."}
+          </p>
+          {initialInfrastructureRetirement.archive.outcome === "failed" ? (
+            <p className={styles.error} role="status">
+              The final Recovery Archive failed. This is a critical preservation failure, but it did
+              not keep billable infrastructure running beyond its destruction boundary.
+            </p>
+          ) : null}
+          {initialInfrastructureRetirement.needsAttention ? (
+            <p className={styles.error} role="status">
+              Provider verification needs another automatic attempt. Bruno will keep checking the
+              same exact resource; it will not broaden deletion scope.
+            </p>
+          ) : null}
+          <p className={styles.hint}>
+            Droplet: {initialInfrastructureRetirement.provider.droplet}. Firewall:{" "}
+            {initialInfrastructureRetirement.provider.firewall}.
+          </p>
         </section>
       ) : null}
 

@@ -6,6 +6,7 @@ const USER_ID = "00000000-0000-4000-8000-000000003381";
 const mocks = vi.hoisted(() => ({
   getOnboarding: vi.fn(),
   getOperator: vi.fn(),
+  getInfrastructureRetirementStatus: vi.fn(),
   getOwnerPreviewAccess: vi.fn(),
   getRecoveryArchiveStatus: vi.fn(),
   readApplicationRevision: vi.fn(),
@@ -32,6 +33,10 @@ vi.mock("@/src/server/founder-product-contract/recovery-archive", async (importO
     await importOriginal<typeof import("@/src/server/founder-product-contract/recovery-archive")>();
   return { ...actual, getFounderRecoveryArchiveStatusForUser: mocks.getRecoveryArchiveStatus };
 });
+
+vi.mock("@/src/server/founder-product-contract/infrastructure-retirement", () => ({
+  getFounderInfrastructureRetirementStatusForUser: mocks.getInfrastructureRetirementStatus,
+}));
 
 vi.mock("@/src/server/founder-product-contract/release-stage-access", () => ({
   getFounderOwnerPreviewAccessForUser: mocks.getOwnerPreviewAccess,
@@ -73,6 +78,7 @@ describe("Founder Operator page", () => {
       },
     });
     mocks.getOnboarding.mockResolvedValue(undefined);
+    mocks.getInfrastructureRetirementStatus.mockResolvedValue({ state: "unavailable" });
     mocks.readApplicationRevision.mockReturnValue(null);
     mocks.getRecoveryArchiveStatus.mockRejectedValue(
       new Error("Missing revision must not query archive status."),

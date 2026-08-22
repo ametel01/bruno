@@ -666,6 +666,13 @@
       "when": 1787420021801,
       "tag": "0094_odd_wrecking_crew",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1787425903797,
+      "tag": "0095_gorgeous_mister_sinister",
+      "breakpoints": true
     }
   ]
 }

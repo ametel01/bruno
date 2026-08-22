@@ -181,6 +181,47 @@ describe("Founder Operator preparation shell", () => {
     expect(html).not.toContain("Recovery Archive is being prepared");
   });
 
+  it("never presents a delete request as completed Infrastructure Retirement", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: OPERATOR,
+        initialInfrastructureRetirement: {
+          state: "in_progress",
+          receiptId: "retirement-374",
+          attemptCount: 2,
+          hardDestructionDueAt: "2026-08-22T00:00:00.000Z",
+          workStoppedAt: "2026-08-22T00:00:00.000Z",
+          credentialsDisabledAt: "2026-08-22T00:00:00.000Z",
+          archive: { outcome: "failed", criticalFailure: true },
+          exactResource: {
+            provider: "digitalocean",
+            dropletId: "droplet-374",
+            firewallId: "firewall-374",
+          },
+          provider: {
+            droplet: "absent",
+            firewall: "unknown",
+            lastCheckedAt: "2026-08-22T00:00:01.000Z",
+            absenceVerifiedAt: null,
+          },
+          billableRuntime: {
+            startedAt: "2026-08-20T00:00:00.000Z",
+            endedAt: null,
+            seconds: null,
+          },
+          needsAttention: true,
+        },
+      }),
+    );
+
+    expect(html).toContain("Runtime removal is still being verified");
+    expect(html).toContain("In progress");
+    expect(html).toContain("not complete until DigitalOcean independently confirms");
+    expect(html).toContain("critical preservation failure");
+    expect(html).toContain("same exact resource");
+    expect(html).not.toContain("Runtime cost stopped");
+  });
+
   it("anchors the next incomplete onboarding step in the Founder workspace", () => {
     const html = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {

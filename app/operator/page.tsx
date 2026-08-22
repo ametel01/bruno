@@ -2,6 +2,7 @@ import { FounderOperatorPreparation } from "@/app/operator/_components/founder-o
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
+import { getFounderInfrastructureRetirementStatusForUser } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
 import {
   getFounderRecoveryArchiveStatusForUser,
@@ -45,20 +46,22 @@ export default async function FounderOperatorPage() {
 
   const operator = await getFounderOperatorForUser(applicationUser.userId);
   const applicationRevision = readFounderApplicationRevision();
-  const [onboarding, recoveryArchive, ownerPreviewAccess] = await Promise.all([
-    operator ? getFounderOnboardingForUser(applicationUser.userId) : Promise.resolve(undefined),
-    applicationRevision
-      ? getFounderRecoveryArchiveStatusForUser(applicationUser.userId, new Date(), {
-          applicationRevision,
-        })
-      : Promise.resolve(unavailableFounderRecoveryArchiveStatus()),
-    requiresFounderReleaseStageAuthority(resolveAuthMode(process.env).mode)
-      ? getFounderOwnerPreviewAccessForUser(applicationUser.userId, new Date())
-      : Promise.resolve({
-          admitted: true,
-          availableCapabilities: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
-        }),
-  ]);
+  const [onboarding, recoveryArchive, infrastructureRetirement, ownerPreviewAccess] =
+    await Promise.all([
+      operator ? getFounderOnboardingForUser(applicationUser.userId) : Promise.resolve(undefined),
+      applicationRevision
+        ? getFounderRecoveryArchiveStatusForUser(applicationUser.userId, new Date(), {
+            applicationRevision,
+          })
+        : Promise.resolve(unavailableFounderRecoveryArchiveStatus()),
+      getFounderInfrastructureRetirementStatusForUser(applicationUser.userId),
+      requiresFounderReleaseStageAuthority(resolveAuthMode(process.env).mode)
+        ? getFounderOwnerPreviewAccessForUser(applicationUser.userId, new Date())
+        : Promise.resolve({
+            admitted: true,
+            availableCapabilities: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+          }),
+    ]);
   const calendarReadingReleased = isFounderGoogleCalendarReleased();
   const mailReadingReleased = isFounderGoogleMailReadingReleased();
   const mailSendingReleased = isFounderGoogleMailSendingReleased();
@@ -70,6 +73,7 @@ export default async function FounderOperatorPage() {
         initialOperator={operator}
         {...(onboarding ? { initialOnboarding: onboarding } : {})}
         initialRecoveryArchive={recoveryArchive}
+        initialInfrastructureRetirement={infrastructureRetirement}
         ownerPreviewAdmitted={ownerPreviewAccess.admitted}
         ownerPreviewWorkAllowed={hasFounderOwnerPreviewCapabilities(
           ownerPreviewAccess,

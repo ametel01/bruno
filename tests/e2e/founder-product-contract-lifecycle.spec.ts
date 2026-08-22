@@ -133,6 +133,29 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                 resourcesAfter: 0,
                 verified: true,
               });
+              const statusResponse = await application.request({
+                method: "GET",
+                path: "/api/operator",
+              });
+              expect(statusResponse.status).toBe(200);
+              await expect(statusResponse.json()).resolves.toMatchObject({
+                infrastructureRetirement: {
+                  state: "completed",
+                  attemptCount: 1,
+                  archive: { outcome: "failed", criticalFailure: true },
+                  provider: {
+                    droplet: "absent",
+                    firewall: "absent",
+                    absenceVerifiedAt: clock.now().toISOString(),
+                  },
+                  billableRuntime: {
+                    startedAt: clock.now().toISOString(),
+                    endedAt: clock.now().toISOString(),
+                    seconds: 0,
+                  },
+                  needsAttention: false,
+                },
+              });
             }
             clock.advance(1);
             return { status: "passed", ...body.outcome.cleanup };

@@ -1,6 +1,7 @@
 import type { AuthModeDecision } from "@/src/auth/auth-mode";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
+import { getFounderInfrastructureRetirementStatusForUser } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import { admitFounderOperatorToOwnerPreview } from "@/src/server/founder-product-contract/owner-preview-admission";
 import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
 import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
@@ -24,6 +25,7 @@ type OperatorRouteDependencies = {
   confirmTimezone?: typeof confirmFounderTimezoneForUser;
   prepareRuntime?: typeof prepareFounderOperatorRuntimeForUser;
   getRecoveryArchiveStatus?: typeof getFounderRecoveryArchiveStatusForUser;
+  getInfrastructureRetirementStatus?: typeof getFounderInfrastructureRetirementStatusForUser;
   getOwnerPreviewAccess?: typeof getFounderOwnerPreviewAccessForUser;
   readApplicationRevision?: () => string | null;
   authMode?: AuthModeDecision["mode"];
@@ -65,9 +67,17 @@ export async function GET(
       { status: 503, headers: noStoreHeaders() },
     );
   }
-  const recoveryArchive = await (
-    dependencies.getRecoveryArchiveStatus ?? getFounderRecoveryArchiveStatusForUser
-  )(applicationUser.userId, new Date(), { applicationRevision });
+  const [recoveryArchive, infrastructureRetirement] = await Promise.all([
+    (dependencies.getRecoveryArchiveStatus ?? getFounderRecoveryArchiveStatusForUser)(
+      applicationUser.userId,
+      new Date(),
+      { applicationRevision },
+    ),
+    (
+      dependencies.getInfrastructureRetirementStatus ??
+      getFounderInfrastructureRetirementStatusForUser
+    )(applicationUser.userId),
+  ]);
   const authMode = dependencies.authMode ?? resolveAuthMode(process.env).mode;
   const ownerPreviewAccess = requiresFounderReleaseStageAuthority(authMode)
     ? await (dependencies.getOwnerPreviewAccess ?? getFounderOwnerPreviewAccessForUser)(
@@ -83,6 +93,7 @@ export async function GET(
     {
       operator,
       recoveryArchive,
+      infrastructureRetirement,
       ownerPreviewAdmitted: ownerPreviewAccess.admitted,
       ownerPreviewWorkAllowed: hasFounderOwnerPreviewCapabilities(
         ownerPreviewAccess,
