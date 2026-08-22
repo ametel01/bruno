@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getOnboarding: vi.fn(),
   getOperator: vi.fn(),
   getInfrastructureRetirementStatus: vi.fn(),
+  getExternalBetaStatus: vi.fn(),
   getOwnerPreviewAccess: vi.fn(),
   getRecoveryArchiveStatus: vi.fn(),
   readApplicationRevision: vi.fn(),
@@ -36,6 +37,10 @@ vi.mock("@/src/server/founder-product-contract/recovery-archive", async (importO
 
 vi.mock("@/src/server/founder-product-contract/infrastructure-retirement", () => ({
   getFounderInfrastructureRetirementStatusForUser: mocks.getInfrastructureRetirementStatus,
+}));
+
+vi.mock("@/src/server/founder-product-contract/external-beta-manifest", () => ({
+  getFounderExternalBetaManifestStatusForUser: mocks.getExternalBetaStatus,
 }));
 
 vi.mock("@/src/server/founder-product-contract/release-stage-access", () => ({
@@ -79,6 +84,20 @@ describe("Founder Operator page", () => {
     });
     mocks.getOnboarding.mockResolvedValue(undefined);
     mocks.getInfrastructureRetirementStatus.mockResolvedValue({ state: "unavailable" });
+    mocks.getExternalBetaStatus.mockResolvedValue({
+      stage: "External Beta",
+      state: "limited",
+      capabilities: [
+        { name: "OpenAI", state: "paused" },
+        { name: "Anthropic", state: "available" },
+        { name: "Calendar reading", state: "available" },
+        { name: "Gmail reading", state: "available" },
+        { name: "one-to-one Gmail sending", state: "available" },
+      ],
+      providerChoice: "Connect OpenAI, Anthropic, or both",
+      capacityBoundary: "Uses only your connected provider accounts",
+      workContinuity: "Unaffected work stays available from a safe checkpoint",
+    });
     mocks.readApplicationRevision.mockReturnValue(null);
     mocks.getRecoveryArchiveStatus.mockRejectedValue(
       new Error("Missing revision must not query archive status."),
@@ -93,6 +112,10 @@ describe("Founder Operator page", () => {
     expect(html).toContain("Confirm timezone");
     expect(html).toContain("Recovery Archive unavailable");
     expect(html).toContain("Unavailable");
+    expect(html).toContain("External Beta");
+    expect(html).toContain("Some work is paused while its connection is checked.");
+    expect(html).toContain("OpenAI</dt><dd>Paused");
+    expect(html).not.toMatch(/model|credential|token|runner|hermes|digest|revision/i);
     expect(mocks.getRecoveryArchiveStatus).not.toHaveBeenCalled();
   });
 });
