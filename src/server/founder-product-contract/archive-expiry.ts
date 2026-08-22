@@ -3,11 +3,11 @@ import "server-only";
 import { and, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import {
-  founderRecoveryArchives,
   founderRecoveryArchiveDeletionReceipts,
+  founderRecoveryArchives,
 } from "@/src/server/db/schema";
-import type { FounderRecoveryArchiveDeletionProvider } from "./recovery-archive-provider";
 import { founderProductContractDigest } from "./digest";
+import type { FounderRecoveryArchiveDeletionProvider } from "./recovery-archive-provider";
 
 export async function expireFounderRecoveryArchivesForUser(
   userId: string,
@@ -24,6 +24,7 @@ export async function expireFounderRecoveryArchivesForUser(
       const [archive] = await tx
         .select({
           id: founderRecoveryArchives.id,
+          status: founderRecoveryArchives.status,
           storageObjectKey: founderRecoveryArchives.storageObjectKey,
           recoveryCredentialObjectKey: founderRecoveryArchives.recoveryCredentialObjectKey,
         })
@@ -85,6 +86,7 @@ export async function expireFounderRecoveryArchivesForUser(
         });
       return {
         archiveId: archive.id,
+        archiveStatus: archive.status,
         storageObjectKey: archive.storageObjectKey,
         recoveryCredentialObjectKey,
         idempotencyKey,
@@ -97,7 +99,10 @@ export async function expireFounderRecoveryArchivesForUser(
         throw new Error("Recovery Archive and credential absence were not both confirmed.");
       }
       await connection.db.transaction(async (tx) => {
-        await tx
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${userId}`}, 0))`,
+        );
+        const [expiredArchive] = await tx
           .update(founderRecoveryArchives)
           .set({
             status: "deleted",
@@ -108,7 +113,17 @@ export async function expireFounderRecoveryArchivesForUser(
             failureCode: null,
             deletedAt: now,
           })
-          .where(eq(founderRecoveryArchives.id, work.archiveId));
+          .where(
+            and(
+              eq(founderRecoveryArchives.id, work.archiveId),
+              eq(founderRecoveryArchives.status, work.archiveStatus),
+              isNull(founderRecoveryArchives.deletedAt),
+            ),
+          )
+          .returning({ id: founderRecoveryArchives.id });
+        if (!expiredArchive) {
+          throw new Error("Recovery Archive changed while deletion was being verified.");
+        }
         await tx
           .update(founderRecoveryArchiveDeletionReceipts)
           .set({

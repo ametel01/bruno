@@ -3,20 +3,24 @@ import "server-only";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import {
   createBackupObjectStorage,
-  readBackupStorageConfig,
   type DeletableBackupObjectStorage,
+  readBackupStorageConfig,
 } from "@/src/server/backups/backup-storage";
 import { founderProductContractDigest } from "./digest";
 import {
   assertFounderRecoveryArchiveDeletionIdentity,
-  founderRecoveryArchiveObjectIdentity,
   type FounderRecoveryArchiveCreationInput,
   type FounderRecoveryArchiveCreationOutcome,
   type FounderRecoveryArchiveDeletionIdentity,
   type FounderRecoveryArchiveDeletionOutcome,
   type FounderRecoveryArchiveDurableState,
   type FounderRecoveryArchiveProvider,
+  founderRecoveryArchiveObjectIdentity,
 } from "./recovery-archive-provider";
+import {
+  type FounderRecoveryArchiveRestoreBoundary,
+  IsolatedFounderRecoveryArchiveRestoreBoundary,
+} from "./recovery-archive-restoration";
 
 const ARCHIVE_CONTENT_TYPE = "application/vnd.bruno.recovery-archive.encrypted+json";
 const CREDENTIAL_CONTENT_TYPE = "application/vnd.bruno.recovery-credential.wrapped+json";
@@ -51,6 +55,7 @@ type ProviderDependencies = {
   storage: DeletableBackupObjectStorage;
   masterKey: Uint8Array;
   onOperation?: (operation: ProviderOperation) => void;
+  restoreBoundary?: FounderRecoveryArchiveRestoreBoundary;
 };
 
 type VerifyRecoveryArchiveInput = {
@@ -68,6 +73,7 @@ export class EncryptedFounderRecoveryArchiveProvider implements FounderRecoveryA
   private readonly storage: DeletableBackupObjectStorage;
   private readonly masterKey: Uint8Array;
   private readonly onOperation: (operation: ProviderOperation) => void;
+  private readonly restoreBoundary: FounderRecoveryArchiveRestoreBoundary;
 
   constructor(dependencies: ProviderDependencies) {
     if (dependencies.masterKey.byteLength !== 32) {
@@ -76,6 +82,8 @@ export class EncryptedFounderRecoveryArchiveProvider implements FounderRecoveryA
     this.storage = dependencies.storage;
     this.masterKey = new Uint8Array(dependencies.masterKey);
     this.onOperation = dependencies.onOperation ?? (() => undefined);
+    this.restoreBoundary =
+      dependencies.restoreBoundary ?? new IsolatedFounderRecoveryArchiveRestoreBoundary();
   }
 
   async createRecoveryArchive(
@@ -201,7 +209,7 @@ export class EncryptedFounderRecoveryArchiveProvider implements FounderRecoveryA
       if (digest(plaintext) !== input.stateDigest) {
         throw new Error("Recovery Archive restored state digest did not match.");
       }
-      return parseDurableState(parseJson(plaintext));
+      return await this.restoreBoundary.rebuild(parseDurableState(parseJson(plaintext)));
     } finally {
       dataKey.fill(0);
     }

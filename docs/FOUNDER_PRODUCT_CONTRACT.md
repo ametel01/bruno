@@ -83,7 +83,9 @@ per-archive data key; that key is wrapped by the dedicated server-only master ke
 separate recovery-only object. The create operation downloads both objects immediately, verifies
 their digests and authenticated encryption, parses the strict allowlist, and rebuilds the eligible
 durable state before recording `restorable_verified`. A manifest or ciphertext-only check cannot
-satisfy this boundary. Provider
+satisfy this boundary. Production preparation records the Owner Preview `enter` Release Decision
+only after this verified-restorable archive exists; unavailable storage returns a fail-closed
+preparation response without admission authority. Provider
 subscription state applies bounded retirement deadlines and immediately pauses new work for unpaid,
 expired, and refunded entitlement. The Proposed Action claim and Gmail execution transactions pass
 their captured operation time into this entitlement guard, so the deadline controls the real effect
@@ -106,7 +108,9 @@ requires a newly pending Owner-bound Checkout Correlation. DigitalOcean cleanup 
 authoritative owned-set observations before and after firewall-first deletion. The in-progress
 retirement receipt and credential revocation commit before destructive provider effects, so
 failures remain retryable against the same resource identity. Archive creation or expiry failure is
-recorded but does not block infrastructure destruction. These deterministic provider results prove
+recorded but does not block infrastructure destruction. S3-compatible request and response-body
+operations use a 10-second abort deadline, including creation, restore verification, expiry, and
+deletion-safety checks. These deterministic provider results prove
 Bruno's application behavior only; they never substitute for separately
 bound live-provider or moderated Founder evidence required for General Release. Scenarios advance
 time explicitly, never sleep, and record an allowlisted cleanup outcome without resource

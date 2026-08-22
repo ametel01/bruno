@@ -1,13 +1,15 @@
+import { admitFounderOperatorToOwnerPreview } from "@/src/server/founder-product-contract/owner-preview-admission";
+import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
 import {
   confirmFounderTimezoneForUser,
   ensureFounderOperatorForUser,
   FounderOperatorTimezoneError,
 } from "@/src/server/operators/founder-operator";
 import { prepareFounderOperatorRuntimeForUser } from "@/src/server/operators/founder-operator-runtime";
-import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 type OperatorRouteDependencies = {
+  admitOwnerPreview?: typeof admitFounderOperatorToOwnerPreview;
   requireApplicationUser?: typeof requireConfiguredApplicationUser;
   ensureOperator?: typeof ensureFounderOperatorForUser;
   confirmTimezone?: typeof confirmFounderTimezoneForUser;
@@ -68,6 +70,24 @@ export async function POST(
     const result = await (dependencies.prepareRuntime ?? prepareFounderOperatorRuntimeForUser)(
       applicationUser.userId,
     );
+    if (result.runtime.status === "ready") {
+      try {
+        await (dependencies.admitOwnerPreview ?? admitFounderOperatorToOwnerPreview)(
+          applicationUser.userId,
+        );
+      } catch {
+        return Response.json(
+          {
+            error: {
+              code: "recovery_archive_unavailable",
+              message:
+                "Owner Preview is waiting for verified recovery protection. Try preparation again.",
+            },
+          },
+          { status: 503, headers: noStoreHeaders() },
+        );
+      }
+    }
     return Response.json(
       { operator: result.operator, runtime: result.runtime },
       { headers: noStoreHeaders() },

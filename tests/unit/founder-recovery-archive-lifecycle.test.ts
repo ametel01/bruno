@@ -14,7 +14,9 @@ import {
   runners,
   users,
 } from "@/src/server/db/schema";
+import { expireFounderRecoveryArchivesForUser } from "@/src/server/founder-product-contract/archive-expiry";
 import { EncryptedFounderRecoveryArchiveProvider } from "@/src/server/founder-product-contract/encrypted-recovery-archive-provider";
+import { admitFounderOperatorToOwnerPreview } from "@/src/server/founder-product-contract/owner-preview-admission";
 import {
   createDurableRecoveryArchive,
   getFounderRecoveryArchiveStatusForUser,
@@ -96,11 +98,42 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
           createRecoveryArchive: async () => {
             throw new Error("a current archive must be reused");
           },
+          deleteRecoveryArchive: (input) => provider.deleteRecoveryArchive(input),
         },
         connection,
       ),
     ).resolves.toBe(archiveId);
     expect(await connection.db.select().from(founderRecoveryArchives)).toHaveLength(1);
+  });
+
+  it("admits a production Operator only after persisting its initial verified archive", async () => {
+    const result = await admitFounderOperatorToOwnerPreview(USER_ID, {
+      applicationRevision: "9".repeat(40),
+      createConnection: () => connection,
+      createProvider: () => provider,
+      now: () => START,
+    });
+
+    await expect(
+      connection.db
+        .select()
+        .from(founderRecoveryArchives)
+        .where(eq(founderRecoveryArchives.id, result.archiveId)),
+    ).resolves.toEqual([expect.objectContaining({ status: "verified", restorableVerified: true })]);
+    await expect(
+      connection.db
+        .select()
+        .from(founderReleaseDecisions)
+        .where(eq(founderReleaseDecisions.applicationRevision, "9".repeat(40))),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        stage: "owner_preview",
+        outcome: "enter",
+        applicationRevision: "9".repeat(40),
+        runtimeRevision: "runtime-v1",
+        capabilityManifest: ["recovery_archive_v1"],
+      }),
+    ]);
   });
 
   it("creates at most one verified archive per 24-hour window", async () => {
@@ -152,6 +185,8 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         }
         return provider.createRecoveryArchive(input);
       },
+      deleteRecoveryArchive: (input: Parameters<typeof provider.deleteRecoveryArchive>[0]) =>
+        provider.deleteRecoveryArchive(input),
     };
 
     const first = createDurableRecoveryArchive(
@@ -192,6 +227,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
           await dailyUploadReleased;
           return provider.createRecoveryArchive(input);
         },
+        deleteRecoveryArchive: (input) => provider.deleteRecoveryArchive(input),
       },
       connection,
     );
@@ -258,6 +294,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
           createRecoveryArchive: async () => {
             throw new Error("object storage unavailable");
           },
+          deleteRecoveryArchive: (input) => provider.deleteRecoveryArchive(input),
         },
         connection,
       ),
@@ -364,6 +401,133 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       .from(founderRecoveryArchives)
       .where(eq(founderRecoveryArchives.id, keylessIntentId));
     expect(keylessIntent).toMatchObject({ status: "pending", storageObjectKey: null });
+  });
+
+  it("removes objects published after expiry already certified their absence", async () => {
+    const underlyingStorage = new FakeBackupObjectStorage("founder-recovery-late-publication");
+    let markUploadStarted: (() => void) | undefined;
+    let releaseUpload: (() => void) | undefined;
+    const uploadStarted = new Promise<void>((resolve) => {
+      markUploadStarted = resolve;
+    });
+    const uploadReleased = new Promise<void>((resolve) => {
+      releaseUpload = resolve;
+    });
+    let shouldBlockUpload = true;
+    const blockingStorage = {
+      async upload(input: Parameters<typeof underlyingStorage.upload>[0]) {
+        if (shouldBlockUpload) {
+          shouldBlockUpload = false;
+          markUploadStarted?.();
+          await uploadReleased;
+        }
+        return underlyingStorage.upload(input);
+      },
+      download: (input: Parameters<typeof underlyingStorage.download>[0]) =>
+        underlyingStorage.download(input),
+      delete: (input: Parameters<typeof underlyingStorage.delete>[0]) =>
+        underlyingStorage.delete(input),
+      exists: (input: Parameters<typeof underlyingStorage.exists>[0]) =>
+        underlyingStorage.exists(input),
+      verifyDeletionSafety: () => underlyingStorage.verifyDeletionSafety(),
+    };
+    const lateProvider = new EncryptedFounderRecoveryArchiveProvider({
+      storage: blockingStorage,
+      masterKey: new Uint8Array(32).fill(91),
+    });
+    const creation = createDurableRecoveryArchive(
+      { action: "release_stage_admission", userId: USER_ID, now: START },
+      lateProvider,
+      connection,
+    );
+    await uploadStarted;
+    const [pending] = await connection.db.select().from(founderRecoveryArchives);
+    if (!pending?.storageObjectKey || !pending.recoveryCredentialObjectKey) {
+      throw new Error("Expected persisted publication identities.");
+    }
+    const expiresAt = new Date(START.valueOf() + 30 * 24 * 60 * 60 * 1_000);
+
+    await expect(
+      expireFounderRecoveryArchivesForUser(USER_ID, expiresAt, lateProvider, connection),
+    ).resolves.toBe(1);
+    releaseUpload?.();
+    await expect(creation).rejects.toThrow("Recovery Archive intent is no longer pending.");
+
+    await expect(underlyingStorage.exists({ key: pending.storageObjectKey })).resolves.toEqual({
+      ok: true,
+      exists: false,
+    });
+    await expect(
+      underlyingStorage.exists({ key: pending.recoveryCredentialObjectKey }),
+    ).resolves.toEqual({ ok: true, exists: false });
+    await expect(
+      connection.db
+        .select()
+        .from(founderRecoveryArchiveDeletionReceipts)
+        .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, pending.id)),
+    ).resolves.toEqual([expect.objectContaining({ status: "completed" })]);
+  });
+
+  it("does not certify stale absence after an in-flight publication becomes verified", async () => {
+    const archiveId = await connection.db.transaction((tx) =>
+      persistFounderRecoveryArchiveIntentInTransaction(tx, {
+        userId: USER_ID,
+        operatorId: OPERATOR_ID,
+        now: START,
+      }),
+    );
+    const expiresAt = new Date(START.valueOf() + 30 * 24 * 60 * 60 * 1_000);
+    const digest = `sha256:${"a".repeat(64)}`;
+
+    await expect(
+      expireFounderRecoveryArchivesForUser(
+        USER_ID,
+        expiresAt,
+        {
+          deleteRecoveryArchive: async () => {
+            await connection.db
+              .update(founderRecoveryArchives)
+              .set({
+                status: "verified",
+                formatVersion: 1,
+                ciphertextDigest: digest,
+                recoveryCredentialDigest: digest,
+                stateDigest: digest,
+                restorableVerified: true,
+                restoreVerifiedAt: expiresAt,
+              })
+              .where(eq(founderRecoveryArchives.id, archiveId));
+            return { archiveAbsent: true, recoveryCredentialsAbsent: true };
+          },
+        },
+        connection,
+      ),
+    ).rejects.toThrow("Recovery Archive changed while deletion was being verified.");
+
+    await expect(
+      connection.db
+        .select()
+        .from(founderRecoveryArchives)
+        .where(eq(founderRecoveryArchives.id, archiveId)),
+    ).resolves.toEqual([expect.objectContaining({ status: "verified", deletedAt: null })]);
+    await expect(
+      connection.db
+        .select()
+        .from(founderRecoveryArchiveDeletionReceipts)
+        .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, archiveId)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        status: "pending",
+        archiveProviderConfirmed: false,
+        recoveryCredentialsConfirmed: false,
+        completedAt: null,
+        failureCode: "archive_delete_failed",
+      }),
+    ]);
+
+    await expect(
+      expireFounderRecoveryArchivesForUser(USER_ID, expiresAt, provider, connection),
+    ).resolves.toBe(1);
   });
 
   it("deletes expired archives after the latest release decision becomes ineligible", async () => {

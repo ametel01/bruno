@@ -17,6 +17,7 @@ import {
 import { expireFounderRecoveryArchivesForUser } from "./archive-expiry";
 import { requireOperationalEntitlement } from "./entitlement";
 import type { FounderProductContractLifecycleAction } from "./lifecycle";
+import { requireReadyFounderOperatorAuthorityInTransaction } from "./operator-authority";
 import {
   assertFounderRecoveryArchiveDeletionIdentity,
   type FounderRecoveryArchiveCreationProvider,
@@ -53,49 +54,14 @@ export type FounderRecoveryArchiveStatusDto = {
 
 export async function createDurableRecoveryArchive(
   input: ArchiveLifecycleInput,
-  providers: FounderRecoveryArchiveCreationProvider,
+  providers: FounderRecoveryArchiveProvider,
   connection: DatabaseConnection,
 ): Promise<string> {
   const intent = await connection.db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${input.userId}`}, 0))`,
+    const { operatorId } = await requireReadyFounderOperatorAuthorityInTransaction(
+      tx,
+      input.userId,
     );
-    const [operator] = await tx
-      .select({
-        id: operators.id,
-        createdAt: operators.createdAt,
-        mailOfferDisposition: operators.mailOfferDisposition,
-        externalActionPause: operators.externalActionPause,
-      })
-      .from(operators)
-      .where(and(eq(operators.userId, input.userId), eq(operators.status, "active")))
-      .limit(1)
-      .for("update");
-    if (!operator) throw new Error("An active persisted Operator is required.");
-    const [preparation] = await tx
-      .select({
-        status: operatorPreparations.status,
-        timezone: operatorPreparations.timezone,
-        timezoneConfirmedAt: operatorPreparations.timezoneConfirmedAt,
-      })
-      .from(operatorPreparations)
-      .where(eq(operatorPreparations.operatorId, operator.id))
-      .limit(1);
-    if (
-      preparation?.status !== "ready" ||
-      !preparation.timezone ||
-      !preparation.timezoneConfirmedAt
-    ) {
-      throw new Error("A ready persisted Operator preparation is required.");
-    }
-    const [runtime] = await tx
-      .select({ status: operatorRuntimes.status, configRevision: operatorRuntimes.configRevision })
-      .from(operatorRuntimes)
-      .where(eq(operatorRuntimes.operatorId, operator.id))
-      .limit(1);
-    if (runtime?.status !== "ready" || !runtime.configRevision) {
-      throw new Error("A ready persisted Operator runtime is required.");
-    }
     if (input.action === "recovery_archive_lifecycle") {
       await requireOperationalEntitlement(tx, input.userId, input.now);
     }
@@ -118,14 +84,14 @@ export async function createDurableRecoveryArchive(
         )
         .orderBy(desc(founderRecoveryArchives.observedAt))
         .limit(1);
-      if (current) return { archiveId: current.id, operatorId: operator.id, alreadyCurrent: true };
+      if (current) return { archiveId: current.id, operatorId, alreadyCurrent: true };
     }
     const archiveId = await persistFounderRecoveryArchiveIntentInTransaction(tx, {
       userId: input.userId,
-      operatorId: operator.id,
+      operatorId,
       now: input.now,
     });
-    return { archiveId, operatorId: operator.id, alreadyCurrent: false };
+    return { archiveId, operatorId, alreadyCurrent: false };
   });
 
   if (intent.alreadyCurrent) return intent.archiveId;
@@ -217,7 +183,7 @@ export async function persistFounderRecoveryArchiveIntentInTransaction(
 
 export async function fulfillRecoveryArchiveIntent(
   input: Pick<ArchiveLifecycleInput, "userId" | "now">,
-  providers: FounderRecoveryArchiveCreationProvider,
+  providers: FounderRecoveryArchiveProvider,
   connection: DatabaseConnection,
   archiveId: string,
   operatorId: string,
@@ -254,7 +220,16 @@ export async function fulfillRecoveryArchiveIntent(
         ),
       )
       .returning({ id: founderRecoveryArchives.id });
-    if (!verified) throw new Error("Recovery Archive intent is no longer pending.");
+    if (!verified) {
+      await cleanupRejectedRecoveryArchivePublication(
+        input.userId,
+        archiveId,
+        archive,
+        providers,
+        connection,
+      );
+      throw new Error("Recovery Archive intent is no longer pending.");
+    }
   } catch (error) {
     await connection.db
       .update(founderRecoveryArchives)
@@ -275,6 +250,65 @@ export async function fulfillRecoveryArchiveIntent(
         ),
       );
     if (failClosed) throw error;
+  }
+}
+
+async function cleanupRejectedRecoveryArchivePublication(
+  userId: string,
+  archiveId: string,
+  archive: Awaited<ReturnType<FounderRecoveryArchiveProvider["createRecoveryArchive"]>>,
+  providers: FounderRecoveryArchiveProvider,
+  connection: DatabaseConnection,
+): Promise<void> {
+  try {
+    const deleted = await providers.deleteRecoveryArchive({
+      archiveId,
+      storageObjectKey: archive.storageObjectKey,
+      recoveryCredentialObjectKey: archive.recoveryCredentialObjectKey,
+      idempotencyKey: archive.deletionIdempotencyKey,
+    });
+    if (!deleted.archiveAbsent || !deleted.recoveryCredentialsAbsent) {
+      throw new Error("Rejected Recovery Archive publication absence was not verified.");
+    }
+  } catch {
+    await connection.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${userId}`}, 0))`,
+      );
+      const [reopened] = await tx
+        .update(founderRecoveryArchives)
+        .set({
+          status: "failed",
+          formatVersion: null,
+          storageObjectKey: archive.storageObjectKey,
+          recoveryCredentialObjectKey: archive.recoveryCredentialObjectKey,
+          ciphertextDigest: null,
+          recoveryCredentialDigest: null,
+          stateDigest: null,
+          restorableVerified: false,
+          restoreVerifiedAt: null,
+          failureCode: "archive_late_publication_cleanup_failed",
+          deletedAt: null,
+        })
+        .where(
+          and(
+            eq(founderRecoveryArchives.id, archiveId),
+            eq(founderRecoveryArchives.status, "deleted"),
+          ),
+        )
+        .returning({ id: founderRecoveryArchives.id });
+      if (!reopened) return;
+      await tx
+        .update(founderRecoveryArchiveDeletionReceipts)
+        .set({
+          status: "pending",
+          archiveProviderConfirmed: false,
+          recoveryCredentialsConfirmed: false,
+          completedAt: null,
+          failureCode: "archive_late_publication_cleanup_failed",
+        })
+        .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, archiveId));
+    });
   }
 }
 

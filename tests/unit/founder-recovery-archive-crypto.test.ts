@@ -4,8 +4,8 @@ import { FakeBackupObjectStorage } from "@/src/server/backups/backup-storage";
 import {
   createEncryptedFounderRecoveryArchiveProvider,
   EncryptedFounderRecoveryArchiveProvider,
-  readFounderRecoveryArchiveMasterKey,
   type FounderRecoveryArchiveDurableState,
+  readFounderRecoveryArchiveMasterKey,
 } from "@/src/server/founder-product-contract/encrypted-recovery-archive-provider";
 
 const USER_ID = "00000000-0000-4000-8000-000000003730";
@@ -16,9 +16,16 @@ const MASTER_KEY = new Uint8Array(32).fill(37);
 describe("encrypted Founder Recovery Archive provider", () => {
   it("stores ciphertext and a separate wrapped recovery credential, then rebuilds durable state", async () => {
     const storage = new FakeBackupObjectStorage("founder-recovery-test");
+    const rebuiltStates: FounderRecoveryArchiveDurableState[] = [];
     const provider = new EncryptedFounderRecoveryArchiveProvider({
       storage,
       masterKey: MASTER_KEY,
+      restoreBoundary: {
+        async rebuild(state) {
+          rebuiltStates.push(state);
+          return structuredClone(state);
+        },
+      },
     });
     const archiveId = randomUUID();
 
@@ -63,6 +70,7 @@ describe("encrypted Founder Recovery Archive provider", () => {
         stateDigest: created.stateDigest,
       }),
     ).resolves.toEqual(durableState());
+    expect(rebuiltStates).toEqual([durableState(), durableState()]);
   });
 
   it("rejects raw credentials and corrupt ciphertext instead of certifying a manifest", async () => {

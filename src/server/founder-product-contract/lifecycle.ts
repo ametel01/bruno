@@ -5,8 +5,6 @@ import {
   founderInfrastructureRetirements,
   founderRecoveryArchives,
   founderReleaseDecisions,
-  operatorPreparations,
-  operatorRuntimes,
   operators,
   runnerCredentials,
   runners,
@@ -19,6 +17,10 @@ import { digitalOceanRunnerFirewallName } from "@/src/server/runners/runner-prov
 import { expireFounderRecoveryArchivesForUser } from "./archive-expiry";
 import { founderProductContractDigest } from "./digest";
 import { reconcileFounderCommerceEvent, requireRetirementDue } from "./entitlement";
+import {
+  requireActiveFounderOperatorAuthorityInTransaction,
+  requireReadyFounderOperatorAuthorityInTransaction,
+} from "./operator-authority";
 import {
   createDurableRecoveryArchive,
   fulfillRecoveryArchiveIntent,
@@ -121,7 +123,8 @@ export async function executeFounderProductContractLifecycleAction(
         ? await createDurableRecoveryArchive(input, dependencies.providers, connection)
         : null;
     return await connection.db.transaction(async (tx) => {
-      const { operatorId, runtimeRevision } = await requireReadyLifecycleOperator(tx, input.userId);
+      const { operatorId, runtimeRevision } =
+        await requireReadyFounderOperatorAuthorityInTransaction(tx, input.userId);
 
       const cleanup = emptyCleanup(input.now);
       switch (input.action) {
@@ -183,35 +186,6 @@ export async function executeFounderProductContractLifecycleAction(
 
 type Transaction = Parameters<Parameters<DatabaseConnection["db"]["transaction"]>[0]>[0];
 
-async function requireReadyLifecycleOperator(
-  tx: Transaction,
-  userId: string,
-): Promise<{ operatorId: string; runtimeRevision: string }> {
-  await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${userId}`}, 0))`,
-  );
-  const [operator] = await tx
-    .select({ id: operators.id })
-    .from(operators)
-    .where(and(eq(operators.userId, userId), eq(operators.status, "active")))
-    .limit(1)
-    .for("update");
-  if (!operator) throw new Error("An active persisted Operator is required.");
-
-  const [preparation] = await tx
-    .select({ status: operatorPreparations.status })
-    .from(operatorPreparations)
-    .where(eq(operatorPreparations.operatorId, operator.id))
-    .limit(1);
-  if (preparation?.status !== "ready") {
-    throw new Error("A ready persisted Operator preparation is required.");
-  }
-  return {
-    operatorId: operator.id,
-    runtimeRevision: await requireReadyRuntimeRevision(tx, operator.id),
-  };
-}
-
 async function requireReleaseDecision(
   tx: Transaction,
   userId: string,
@@ -235,17 +209,6 @@ async function requireReleaseDecision(
   if (!decision) throw new Error("An exact-revision Release Decision is required.");
 }
 
-async function requireReadyRuntimeRevision(tx: Transaction, operatorId: string): Promise<string> {
-  const [runtime] = await tx
-    .select({ configRevision: operatorRuntimes.configRevision })
-    .from(operatorRuntimes)
-    .where(and(eq(operatorRuntimes.operatorId, operatorId), eq(operatorRuntimes.status, "ready")))
-    .orderBy(desc(operatorRuntimes.updatedAt))
-    .limit(1);
-  if (!runtime?.configRevision) throw new Error("A ready persisted runtime revision is required.");
-  return runtime.configRevision;
-}
-
 type RetirementWork = {
   receiptId: string;
   leaseToken: string;
@@ -267,16 +230,16 @@ async function executeInfrastructureRetirement(
     return lifecycleOutcome(input, dependencies.providers, prepared.cleanup);
   }
 
-  if (prepared.archiveNeedsExecution) {
-    await fulfillRecoveryArchiveIntent(
-      input,
-      dependencies.providers,
-      connection,
-      prepared.recoveryArchiveId,
-      prepared.operatorId,
-      false,
-    );
-  }
+  const archiveFulfillment = prepared.archiveNeedsExecution
+    ? fulfillRecoveryArchiveIntent(
+        input,
+        dependencies.providers,
+        connection,
+        prepared.recoveryArchiveId,
+        prepared.operatorId,
+        false,
+      )
+    : Promise.resolve();
 
   try {
     const firewall = await dependencies.providers.digitalOcean.deleteFirewall(prepared.expectation);
@@ -293,6 +256,8 @@ async function executeInfrastructureRetirement(
     throw error;
   }
 
+  await archiveFulfillment;
+
   return lifecycleOutcome(input, dependencies.providers, {
     resourcesBefore: prepared.resourcesBefore,
     resourcesAfter: 0,
@@ -307,12 +272,9 @@ async function prepareInfrastructureRetirement(
   connection: DatabaseConnection,
 ): Promise<RetirementWork | { cleanup: FounderLifecycleCleanup }> {
   return connection.db.transaction(async (tx) => {
-    const { operatorId, runtimeRevision } = await requireReadyLifecycleOperator(tx, input.userId);
-    await requireReleaseDecision(
+    const { operatorId } = await requireActiveFounderOperatorAuthorityInTransaction(
       tx,
       input.userId,
-      dependencies.applicationRevision,
-      runtimeRevision,
     );
     await requireRetirementDue(tx, input.userId, input.now);
 

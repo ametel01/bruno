@@ -3,12 +3,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { EnvValidationError } from "@/src/env/validation";
 import {
-  FakeBackupObjectStorage,
-  S3CompatibleBackupObjectStorage,
   backupStorageFailure,
   buildBackupStorageUri,
   createBackupObjectStorage,
+  FakeBackupObjectStorage,
   readBackupStorageConfig,
+  S3CompatibleBackupObjectStorage,
 } from "@/src/server/backups/backup-storage";
 
 const COMPLETE_ENV = {
@@ -278,6 +278,38 @@ describe("backup object storage boundary", () => {
     expect(result).toEqual(backupStorageFailure("upload"));
     expect(JSON.stringify(result)).not.toContain("backup-secret-key");
     expect(JSON.stringify(result)).not.toContain("nyc3.digitaloceanspaces.com");
+  });
+
+  it("bounds every S3-compatible request with an abort deadline", async () => {
+    const requests: Request[] = [];
+    const storage = new S3CompatibleBackupObjectStorage(COMPLETE_ENV_CONFIG, {
+      requestTimeoutMs: 5,
+      fetchImplementation: async (input) => {
+        const request = input instanceof Request ? input : new Request(input);
+        requests.push(request);
+        return new Promise<Response>((_resolve, reject) => {
+          request.signal.addEventListener("abort", () => reject(request.signal.reason), {
+            once: true,
+          });
+        });
+      },
+    });
+
+    const bounded = Promise.all([
+      storage.upload({ key: "agents/agent-1/backup.json", body: new Uint8Array([1]) }),
+      storage.download({ key: "agents/agent-1/backup.json" }),
+      storage.delete({ key: "agents/agent-1/backup.json" }),
+      storage.exists({ key: "agents/agent-1/backup.json" }),
+      storage.verifyDeletionSafety(),
+    ]);
+    const result = await Promise.race([
+      bounded,
+      new Promise<"unbounded">((resolve) => setTimeout(() => resolve("unbounded"), 100)),
+    ]);
+
+    expect(result).not.toBe("unbounded");
+    expect(requests).toHaveLength(5);
+    expect(requests.every((request) => request.signal.aborted)).toBe(true);
   });
 
   it("keeps backup object storage credentials out of shared validation and client components", async () => {

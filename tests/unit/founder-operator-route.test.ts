@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  admitOwnerPreview: vi.fn(),
   confirmTimezone: vi.fn(),
   ensureOperator: vi.fn(),
   getRecoveryArchiveStatus: vi.fn(),
@@ -44,6 +45,7 @@ const OPERATOR = {
 
 describe("Founder Operator route", () => {
   beforeEach(() => {
+    mocks.admitOwnerPreview.mockResolvedValue({ archiveId: "archive-373" });
     mocks.requireApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
     mocks.ensureOperator.mockResolvedValue(OPERATOR);
     mocks.getRecoveryArchiveStatus.mockResolvedValue({
@@ -102,6 +104,7 @@ describe("Founder Operator route", () => {
   });
 
   afterEach(() => {
+    mocks.admitOwnerPreview.mockReset();
     mocks.confirmTimezone.mockReset();
     mocks.ensureOperator.mockReset();
     mocks.getRecoveryArchiveStatus.mockReset();
@@ -185,7 +188,10 @@ describe("Founder Operator route", () => {
         body: JSON.stringify({ action: "prepare" }),
       }),
       undefined,
-      { prepareRuntime: mocks.prepareRuntime },
+      {
+        admitOwnerPreview: mocks.admitOwnerPreview,
+        prepareRuntime: mocks.prepareRuntime,
+      },
     );
 
     expect(response.status).toBe(200);
@@ -193,5 +199,30 @@ describe("Founder Operator route", () => {
       runtime: { status: "ready", transportState: "connected", safetyState: "verified" },
     });
     expect(mocks.prepareRuntime).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.admitOwnerPreview).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it("fails Owner Preview admission closed when no verified Recovery Archive can be created", async () => {
+    const { POST } = await import("@/app/api/operator/route");
+    mocks.admitOwnerPreview.mockRejectedValueOnce(
+      new Error("Recovery Archive storage unavailable"),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/operator", {
+        method: "POST",
+        body: JSON.stringify({ action: "prepare" }),
+      }),
+      undefined,
+      {
+        admitOwnerPreview: mocks.admitOwnerPreview,
+        prepareRuntime: mocks.prepareRuntime,
+      },
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: { code: "recovery_archive_unavailable" },
+    });
   });
 });

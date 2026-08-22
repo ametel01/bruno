@@ -54,6 +54,7 @@ export type S3CompatibleBackupStorageConfig = {
 };
 
 type FetchImplementation = typeof fetch;
+const DEFAULT_S3_REQUEST_TIMEOUT_MS = 10_000;
 
 type StoredBackupArtifact = {
   body: Uint8Array;
@@ -179,13 +180,18 @@ export class FakeBackupObjectStorage implements DeletableBackupObjectStorage {
 export class S3CompatibleBackupObjectStorage implements DeletableBackupObjectStorage {
   private readonly endpoint: URL;
   private readonly fetchImplementation: FetchImplementation;
+  private readonly requestTimeoutMs: number;
 
   constructor(
     private readonly config: S3CompatibleBackupStorageConfig,
-    dependencies: { fetchImplementation?: FetchImplementation } = {},
+    dependencies: { fetchImplementation?: FetchImplementation; requestTimeoutMs?: number } = {},
   ) {
     this.endpoint = new URL(config.endpointUrl);
     this.fetchImplementation = dependencies.fetchImplementation ?? fetch;
+    this.requestTimeoutMs = dependencies.requestTimeoutMs ?? DEFAULT_S3_REQUEST_TIMEOUT_MS;
+    if (!Number.isFinite(this.requestTimeoutMs) || this.requestTimeoutMs <= 0) {
+      throw new Error("S3-compatible request timeout must be positive and finite.");
+    }
   }
 
   async upload(input: BackupStorageUploadInput): Promise<BackupStorageUploadResult> {
@@ -204,7 +210,7 @@ export class S3CompatibleBackupObjectStorage implements DeletableBackupObjectSto
     });
 
     try {
-      const response = await this.fetchImplementation(request);
+      const response = await this.executeRequest(request, async (value) => value);
 
       if (!response.ok) {
         return backupStorageFailure("upload");
@@ -234,7 +240,11 @@ export class S3CompatibleBackupObjectStorage implements DeletableBackupObjectSto
     });
 
     try {
-      const response = await this.fetchImplementation(request);
+      const response = await this.executeRequest(request, async (value) => ({
+        ok: value.ok,
+        body: await value.arrayBuffer(),
+        contentType: value.headers.get("content-type"),
+      }));
 
       if (!response.ok) {
         return backupStorageFailure("download");
@@ -243,8 +253,8 @@ export class S3CompatibleBackupObjectStorage implements DeletableBackupObjectSto
       return {
         ok: true,
         storageUri: buildBackupStorageUri(this.config.bucket, keyResult.key),
-        body: new Uint8Array(await response.arrayBuffer()),
-        contentType: response.headers.get("content-type"),
+        body: new Uint8Array(response.body),
+        contentType: response.contentType,
       };
     } catch {
       return backupStorageFailure("download");
@@ -255,8 +265,9 @@ export class S3CompatibleBackupObjectStorage implements DeletableBackupObjectSto
     const keyResult = validateBackupArtifactKey(input.key);
     if (!keyResult.ok) return backupStorageFailure("delete");
     try {
-      const response = await this.fetchImplementation(
+      const response = await this.executeRequest(
         this.createSignedRequest({ method: "DELETE", key: keyResult.key, body: new Uint8Array() }),
+        async (value) => value,
       );
       return response.ok ? { ok: true } : backupStorageFailure("delete");
     } catch {
@@ -268,8 +279,9 @@ export class S3CompatibleBackupObjectStorage implements DeletableBackupObjectSto
     const keyResult = validateBackupArtifactKey(input.key);
     if (!keyResult.ok) return backupStorageFailure("exists");
     try {
-      const response = await this.fetchImplementation(
+      const response = await this.executeRequest(
         this.createSignedRequest({ method: "HEAD", key: keyResult.key, body: new Uint8Array() }),
+        async (value) => value,
       );
       if (response.status === 404) return { ok: true, exists: false };
       return response.ok ? { ok: true, exists: true } : backupStorageFailure("exists");
@@ -280,22 +292,41 @@ export class S3CompatibleBackupObjectStorage implements DeletableBackupObjectSto
 
   async verifyDeletionSafety(): Promise<BackupStorageDeletionSafetyResult> {
     try {
-      const response = await this.fetchImplementation(
+      const response = await this.executeRequest(
         this.createSignedRequest({
           method: "GET",
           key: "",
           query: "versioning=",
           body: new Uint8Array(),
         }),
+        async (value) => ({ ok: value.ok, body: await value.text() }),
       );
       if (!response.ok) return backupStorageFailure("deletion_safety");
-      const configuration = await response.text();
-      if (!isUnversionedBucketConfiguration(configuration)) {
+      if (!isUnversionedBucketConfiguration(response.body)) {
         return backupStorageFailure("deletion_safety");
       }
       return { ok: true, versioning: "disabled" };
     } catch {
       return backupStorageFailure("deletion_safety");
+    }
+  }
+
+  private async executeRequest<T>(
+    request: Request,
+    readResponse: (response: Response) => Promise<T>,
+  ): Promise<T> {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new Error("S3-compatible request deadline exceeded.")),
+      this.requestTimeoutMs,
+    );
+    try {
+      const response = await this.fetchImplementation(
+        new Request(request, { signal: controller.signal }),
+      );
+      return await readResponse(response);
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
