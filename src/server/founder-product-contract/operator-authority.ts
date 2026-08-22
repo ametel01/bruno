@@ -9,13 +9,20 @@ export type FounderProductContractTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
 >[0];
 
+export async function lockFounderProductContractLifecycleInTransaction(
+  tx: FounderProductContractTransaction,
+  userId: string,
+): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${userId}`}, 0))`,
+  );
+}
+
 export async function requireActiveFounderOperatorAuthorityInTransaction(
   tx: FounderProductContractTransaction,
   userId: string,
 ): Promise<{ operatorId: string }> {
-  await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${userId}`}, 0))`,
-  );
+  await lockFounderProductContractLifecycleInTransaction(tx, userId);
   const [operator] = await tx
     .select({ id: operators.id })
     .from(operators)

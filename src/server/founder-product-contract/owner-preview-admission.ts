@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lte } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { founderRecoveryArchives, founderReleaseDecisions, users } from "@/src/server/db/schema";
 import { evaluateFounderGoogleCalendarRelease } from "@/src/server/operators/founder-google-reading-release";
@@ -14,6 +14,8 @@ import {
 import { requireFounderOwnerPreviewQualifications } from "./preview-qualification";
 import { createDurableRecoveryArchive } from "./recovery-archive";
 import type { FounderRecoveryArchiveProvider } from "./recovery-archive-provider";
+
+const OWNER_PREVIEW_ARCHIVE_WINDOW_MS = 24 * 60 * 60 * 1_000;
 
 export type FounderOwnerPreviewAdmissionDependencies = {
   applicationRevision?: string;
@@ -76,7 +78,7 @@ export async function admitFounderOperatorToOwnerPreview(
     const authority = await connection.db.transaction((tx) =>
       requireReadyFounderOperatorAuthorityInTransaction(tx, userId),
     );
-    const previewQualifications = requireFounderOwnerPreviewQualifications(
+    requireFounderOwnerPreviewQualifications(
       {
         userId,
         operatorId: authority.operatorId,
@@ -98,6 +100,28 @@ export async function admitFounderOperatorToOwnerPreview(
       if (operatorId !== authority.operatorId || runtimeRevision !== authority.runtimeRevision) {
         throw new Error("Owner Preview authority changed during admission.");
       }
+      const committedAt = clock();
+      const committedOpenAIQualification = evaluateFounderOpenAiRelease(environment, committedAt);
+      if (!committedOpenAIQualification.released) {
+        throw new Error("Owner Preview OpenAI qualification is unavailable.");
+      }
+      const committedCalendarQualification = evaluateFounderGoogleCalendarRelease(
+        environment,
+        committedAt,
+      );
+      if (!committedCalendarQualification.released) {
+        throw new Error("Owner Preview Calendar qualification is unavailable.");
+      }
+      const committedPreviewQualifications = requireFounderOwnerPreviewQualifications(
+        {
+          userId,
+          operatorId,
+          applicationRevision,
+          runtimeRevision,
+          now: committedAt,
+        },
+        environment,
+      );
       const [archive] = await tx
         .select({ id: founderRecoveryArchives.id })
         .from(founderRecoveryArchives)
@@ -105,9 +129,16 @@ export async function admitFounderOperatorToOwnerPreview(
           and(
             eq(founderRecoveryArchives.id, archiveId),
             eq(founderRecoveryArchives.userId, userId),
+            eq(founderRecoveryArchives.operatorId, operatorId),
             eq(founderRecoveryArchives.status, "verified"),
             eq(founderRecoveryArchives.formatVersion, 1),
             eq(founderRecoveryArchives.restorableVerified, true),
+            lte(founderRecoveryArchives.observedAt, committedAt),
+            gt(
+              founderRecoveryArchives.observedAt,
+              new Date(committedAt.valueOf() - OWNER_PREVIEW_ARCHIVE_WINDOW_MS),
+            ),
+            gt(founderRecoveryArchives.expiresAt, committedAt),
           ),
         )
         .limit(1);
@@ -119,22 +150,22 @@ export async function admitFounderOperatorToOwnerPreview(
         runtimeRevision,
         identitySubject,
         qualificationEvidenceDigests: [
-          ...previewQualifications.map((qualification) => qualification.evidenceDigest),
-          openAIQualification.evidence.evidenceDigest,
-          calendarQualification.evidence.evidenceDigest,
+          ...committedPreviewQualifications.map((qualification) => qualification.evidenceDigest),
+          committedOpenAIQualification.evidence.evidenceDigest,
+          committedCalendarQualification.evidence.evidenceDigest,
         ],
-        freshQualificationEvidenceDigests: previewQualifications.map(
+        freshQualificationEvidenceDigests: committedPreviewQualifications.map(
           (qualification) => qualification.evidenceDigest,
         ),
         qualificationObservedAt: new Date(
           Math.min(
-            ...previewQualifications.map((qualification) =>
+            ...committedPreviewQualifications.map((qualification) =>
               new Date(qualification.qualifiedAt).valueOf(),
             ),
           ),
         ),
         recoveryArchiveId: archiveId,
-        now,
+        now: committedAt,
       });
     });
     return { archiveId };

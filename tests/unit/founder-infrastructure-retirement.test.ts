@@ -91,6 +91,21 @@ describe("Founder Infrastructure Retirement deadline", () => {
     releaseArchive?.();
 
     await expect(execution).resolves.toMatchObject({ cleanup: { resourcesAfter: 0 } });
+    await expect(
+      connection.db
+        .select()
+        .from(operatorRuntimes)
+        .where(eq(operatorRuntimes.operatorId, OPERATOR_ID)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        status: "needs_attention",
+        transportState: "failed",
+        safetyState: "unknown",
+        runtimeIdentity: null,
+        readyAt: null,
+        failureCode: "infrastructure_retired",
+      }),
+    ]);
   });
 
   it("retires an exact Droplet even when its Operator runtime is unhealthy", async () => {

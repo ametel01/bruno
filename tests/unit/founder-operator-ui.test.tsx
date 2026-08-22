@@ -219,6 +219,7 @@ describe("Founder Operator preparation shell", () => {
           },
           runtime: { status: "ready", recoveryMessage: null },
         },
+        ownerPreviewAdmitted: true,
       }),
     );
 
@@ -228,6 +229,42 @@ describe("Founder Operator preparation shell", () => {
     expect(html).toContain('id="needs-you"');
     expect(html).not.toContain("Telegram");
     expect(html).not.toContain("WhatsApp");
+  });
+
+  it("keeps a ready runtime outside the Founder workspace until Owner Preview is admitted", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: {
+          ...OPERATOR,
+          preparation: {
+            ...OPERATOR.preparation,
+            status: "ready",
+            timezone: "Asia/Manila",
+            timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+          },
+          runtime: { status: "ready", recoveryMessage: null },
+        },
+        initialOnboarding: {
+          nextStep: "conversation",
+          defaultRoute: "/operator#conversation",
+          activated: true,
+          operation: "calendar_limited",
+          capabilities: { ai: "ready", calendar: "ready", mail: "not_offered", core: "missing" },
+          facts: {
+            timezoneConfirmed: true,
+            runtimeReady: true,
+            processingConsent: true,
+            firstBriefReady: true,
+            primarySuiteIdentity: "google-owner-preview",
+          },
+        } satisfies FounderOnboardingDto,
+        ownerPreviewAdmitted: false,
+      }),
+    );
+
+    expect(html).toContain("Owner Preview is waiting for current protection");
+    expect(html).not.toContain('aria-label="Current Founder workspace"');
+    expect(html).not.toContain("What should we handle today?");
   });
 
   it("keeps OpenAI hidden until current Connected Acceptance releases it", () => {
@@ -242,11 +279,15 @@ describe("Founder Operator preparation shell", () => {
       runtime: { status: "ready", recoveryMessage: null },
     };
     const hidden = renderToStaticMarkup(
-      createElement(FounderOperatorPreparation, { initialOperator: readyOperator }),
+      createElement(FounderOperatorPreparation, {
+        initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
+      }),
     );
     const released = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {
         initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
         openAiReleased: true,
       }),
     );
@@ -289,6 +330,7 @@ describe("Founder Operator preparation shell", () => {
             primarySuiteIdentity: "founder@example.com",
           },
         } satisfies FounderOnboardingDto,
+        ownerPreviewAdmitted: true,
       }),
     );
 
@@ -315,6 +357,7 @@ describe("Founder Operator preparation shell", () => {
           },
           runtime: { status: "ready", recoveryMessage: null },
         },
+        ownerPreviewAdmitted: true,
         calendarReadingReleased: true,
       }),
     );
@@ -338,17 +381,22 @@ describe("Founder Operator preparation shell", () => {
       runtime: { status: "ready", recoveryMessage: null },
     };
     const hidden = renderToStaticMarkup(
-      createElement(FounderOperatorPreparation, { initialOperator: readyOperator }),
+      createElement(FounderOperatorPreparation, {
+        initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
+      }),
     );
     const calendarOnly = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {
         initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
         calendarReadingReleased: true,
       }),
     );
     const mailOnly = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {
         initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
         mailReadingReleased: true,
         mailReleaseControls: {
           qualified: true,
@@ -381,11 +429,15 @@ describe("Founder Operator preparation shell", () => {
       runtime: { status: "ready", recoveryMessage: null },
     };
     const hidden = renderToStaticMarkup(
-      createElement(FounderOperatorPreparation, { initialOperator: readyOperator }),
+      createElement(FounderOperatorPreparation, {
+        initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
+      }),
     );
     const released = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {
         initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
         mailSendingReleased: true,
       }),
     );

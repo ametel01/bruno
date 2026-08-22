@@ -15,6 +15,7 @@ import {
   operatorPrimaryCommunicationsSuites,
   operatorProposedActions,
 } from "@/src/server/db/schema";
+import { requireFounderOwnerPreviewAccessInTransaction } from "@/src/server/founder-product-contract/release-stage-access";
 import {
   assertFounderExternalActionsNotPausedInTransaction,
   type FounderAiWorkTransaction,
@@ -231,6 +232,11 @@ export async function executeFounderApprovedGmailActionForUser(
         .limit(1);
       if (existingStart) return { kind: "in_progress" as const };
       const checkedAt = now();
+      await requireFounderOwnerPreviewAccessInTransaction(tx, {
+        userId,
+        now: checkedAt,
+        applicationRevision: resolveApplicationRevision(dependencies.env),
+      });
       await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id, checkedAt);
       const check = await recheckFounderProposedActionForExecution(
         tx,
@@ -304,11 +310,13 @@ export async function executeFounderApprovedGmailActionForUser(
 
     await assertFounderMailSubmissionStillReady(
       connection,
+      userId,
       operator.id,
       actionId,
       expectedVersion,
       started,
       now,
+      dependencies.env,
     );
 
     let result: Awaited<ReturnType<NonNullable<FounderGoogleMailSendingAdapter["sendMessage"]>>>;
@@ -593,6 +601,7 @@ async function selectReceipt(tx: ExecutionTransaction, proposedActionId: string)
 
 async function assertFounderMailSubmissionStillReady(
   connection: DatabaseConnection,
+  userId: string,
   operatorId: string,
   actionId: string,
   expectedVersion: number,
@@ -602,9 +611,15 @@ async function assertFounderMailSubmissionStillReady(
     sending: typeof operatorMailSendingConnections.$inferSelect;
   },
   now: () => Date,
+  environment: Record<string, string | undefined> | undefined,
 ): Promise<void> {
   await connection.db.transaction(async (tx) => {
     const checkedAt = now();
+    await requireFounderOwnerPreviewAccessInTransaction(tx, {
+      userId,
+      now: checkedAt,
+      applicationRevision: resolveApplicationRevision(environment),
+    });
     const [action] = await tx
       .select()
       .from(operatorProposedActions)
@@ -637,6 +652,14 @@ async function assertFounderMailSubmissionStillReady(
         "The approval changed before submission.",
       );
   });
+}
+
+function resolveApplicationRevision(
+  environment: Record<string, string | undefined> | undefined,
+): string {
+  return (
+    environment?.VERCEL_GIT_COMMIT_SHA?.trim() ?? process.env.VERCEL_GIT_COMMIT_SHA?.trim() ?? ""
+  );
 }
 
 async function finalizeExecution(

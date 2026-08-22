@@ -1,5 +1,7 @@
 import { FounderOperatorPreparation } from "@/app/operator/_components/founder-operator-preparation";
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
+import { resolveAuthMode } from "@/src/auth/server-auth-mode";
+import { getFounderOwnerPreviewAccessForUser } from "@/src/server/founder-product-contract/release-stage-access";
 import { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
 import {
   isFounderGoogleCalendarReleased,
@@ -33,9 +35,12 @@ export default async function FounderOperatorPage() {
   }
 
   const operator = await ensureFounderOperatorForUser(applicationUser.userId);
-  const [onboarding, recoveryArchive] = await Promise.all([
+  const [onboarding, recoveryArchive, ownerPreviewAccess] = await Promise.all([
     getFounderOnboardingForUser(applicationUser.userId),
     getFounderRecoveryArchiveStatusForUser(applicationUser.userId, new Date()),
+    resolveAuthMode(process.env).mode === "clerk"
+      ? getFounderOwnerPreviewAccessForUser(applicationUser.userId, new Date())
+      : Promise.resolve({ admitted: true }),
   ]);
   const calendarReadingReleased = isFounderGoogleCalendarReleased();
   const mailReadingReleased = isFounderGoogleMailReadingReleased();
@@ -48,6 +53,7 @@ export default async function FounderOperatorPage() {
         initialOperator={operator}
         initialOnboarding={onboarding}
         initialRecoveryArchive={recoveryArchive}
+        ownerPreviewAdmitted={ownerPreviewAccess.admitted}
         timezoneOptions={buildFounderTimezoneOptions()}
         openAiReleased={openAiReleased}
         calendarReadingReleased={calendarReadingReleased}

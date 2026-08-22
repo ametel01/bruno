@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildTestGoogleMailSendingAcceptanceRelease } from "@/scripts/founder-google-mail-sending-test-release";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  founderRecoveryArchives,
+  founderReleaseDecisions,
   operatorActionAuthorizations,
   operatorActionExecutionAttempts,
   operatorActionReceipts,
@@ -13,6 +15,7 @@ import {
   operatorPrimaryCommunicationsSuites,
   operatorProposedActions,
   operatorRuntimes,
+  operators,
   users,
 } from "@/src/server/db/schema";
 import {
@@ -68,9 +71,14 @@ describe("Founder approved Gmail execution", () => {
       now: () => NOW,
     });
     await connection.db.update(operatorPreparations).set({ status: "ready", completedAt: NOW });
-    await connection.db
-      .update(operatorRuntimes)
-      .set({ status: "ready", transportState: "connected", safetyState: "verified", readyAt: NOW });
+    await connection.db.update(operatorRuntimes).set({
+      status: "ready",
+      transportState: "connected",
+      safetyState: "verified",
+      configRevision: "runtime-mail-v1",
+      readyAt: NOW,
+    });
+    await seedOwnerPreviewAccess(operator.id);
 
     const calendar = await connection.db
       .insert(operatorCalendarConnections)
@@ -215,6 +223,40 @@ describe("Founder approved Gmail execution", () => {
     );
   });
 
+  it("blocks an external effect after the active Release Stage enters Hold", async () => {
+    const action = await approveAction();
+    const heldAt = new Date(NOW.valueOf() + 1_000);
+    const [operator] = await connection.db
+      .select({ id: operators.id })
+      .from(operators)
+      .where(eq(operators.userId, OWNER_ID));
+    if (!operator) throw new Error("operator setup failed");
+    await connection.db.insert(founderReleaseDecisions).values({
+      userId: OWNER_ID,
+      operatorId: operator.id,
+      stage: "owner_preview",
+      outcome: "hold",
+      applicationRevision: REVISION,
+      runtimeRevision: "runtime-mail-v1",
+      capabilityManifest: ["openai", "calendar_reading"],
+      evidenceDigests: [`sha256:${"7".repeat(64)}`],
+      decidedAt: heldAt,
+      createdAt: heldAt,
+    });
+    let sendCount = 0;
+
+    await expect(
+      execute(action.id, {
+        sendMessage: async () => {
+          sendCount += 1;
+          return { ok: true, providerMessageId: "must-not-send", providerThreadId: null };
+        },
+      }),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+    expect(sendCount).toBe(0);
+    expect(await connection.db.select().from(operatorActionExecutionAttempts)).toHaveLength(0);
+  });
+
   it("uses the controlled send time when Product Entitlement reaches its deadline", async () => {
     const action = await approveAction({ validUntil: "2100-01-01T00:00:00.000Z" });
     await connection.db
@@ -342,6 +384,39 @@ describe("Founder approved Gmail execution", () => {
       keyring: KEYRING,
       env: ENV,
       now: () => NOW,
+    });
+  }
+
+  async function seedOwnerPreviewAccess(operatorId: string): Promise<void> {
+    await connection.db.insert(founderReleaseDecisions).values({
+      userId: OWNER_ID,
+      operatorId,
+      stage: "owner_preview",
+      outcome: "enter",
+      applicationRevision: REVISION,
+      runtimeRevision: "runtime-mail-v1",
+      capabilityManifest: ["openai", "calendar_reading"],
+      evidenceDigests: [`sha256:${"6".repeat(64)}`],
+      decidedAt: NOW,
+      createdAt: NOW,
+    });
+    const archiveId = "00000000-0000-4000-8000-000000003573";
+    await connection.db.insert(founderRecoveryArchives).values({
+      id: archiveId,
+      userId: OWNER_ID,
+      operatorId,
+      status: "verified",
+      formatVersion: 1,
+      storageObjectKey: `founder-recovery/${OWNER_ID}/${archiveId}.age`,
+      recoveryCredentialObjectKey: `founder-recovery/${OWNER_ID}/${archiveId}.key`,
+      ciphertextDigest: `sha256:${"1".repeat(64)}`,
+      recoveryCredentialDigest: `sha256:${"2".repeat(64)}`,
+      stateDigest: `sha256:${"3".repeat(64)}`,
+      restorableVerified: true,
+      restoreVerifiedAt: NOW,
+      observedAt: NOW,
+      expiresAt: new Date(NOW.valueOf() + 30 * 24 * 60 * 60 * 1_000),
+      createdAt: NOW,
     });
   }
 });

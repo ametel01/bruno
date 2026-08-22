@@ -86,7 +86,9 @@ durable state before recording `restorable_verified`. A manifest or ciphertext-o
 satisfy this boundary. In addition to exact-revision identity and OpenAI/Calendar Preview
 Qualification, production preparation records the Owner Preview `enter` Release Decision only after
 this verified-restorable archive exists; unavailable storage returns a fail-closed preparation
-response without admission authority. A later Release Hold can be lifted only by a new `resume`
+response without admission authority. Founder workspace and effect-starting application boundaries
+recheck that the latest Owner Preview decision is an exact-revision `enter` or `resume` and that its
+verified archive remains within the 24-hour currency window. A later Release Hold can be lifted only by a new `resume`
 decision after fresh, independently evidenced OpenAI and Calendar qualifications revalidate the
 same Owner, stage, application, runtime, and capability boundaries after that Hold. Provider
 subscription state applies bounded retirement deadlines and immediately pauses new work for unpaid,
@@ -105,6 +107,10 @@ object identities are persisted before provider upload, so interrupted, partial,
 creations remain eligible for 30-day deletion and a bounded receipt rather than becoming orphaned
 objects. Completed Infrastructure Retirement ends daily replacement creation until later admission
 authority restores the Operator; the final retained archive still reaches the same expiry boundary.
+Retirement also invalidates the destroyed Operator runtime in the same completion transaction, so
+the runtime cannot remain Ready after its Droplet and firewall are absent. Archive restore proof
+includes the complete external-action pause state—boolean, reason, and timestamp—rather than a flag
+that cannot be persisted safely after restoration.
 Delayed or
 reordered commerce events cannot replace newer authority or extend a retirement clock; reactivation
 requires a newly pending Owner-bound Checkout Correlation. DigitalOcean cleanup is derived from

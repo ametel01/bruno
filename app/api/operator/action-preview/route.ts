@@ -1,3 +1,4 @@
+import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
 import {
   dismissFounderMailSendingOfferForUser,
   editFounderActionPreviewForUser,
@@ -25,6 +26,8 @@ export async function GET(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId);
+  if (accessFailure) return accessFailure;
   const preview = await (dependencies.getPreview ?? getFounderActionPreviewForUser)(
     applicationUser.userId,
   );
@@ -40,6 +43,8 @@ export async function POST(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId);
+  if (accessFailure) return accessFailure;
   let payload: unknown;
   try {
     payload = await request.json();

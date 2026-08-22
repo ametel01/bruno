@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   founderInfrastructureRetirements,
   founderRecoveryArchives,
   founderReleaseDecisions,
+  operatorRuntimes,
   operators,
   runnerCredentials,
   runners,
@@ -18,6 +19,7 @@ import { expireFounderRecoveryArchivesForUser } from "./archive-expiry";
 import { founderProductContractDigest } from "./digest";
 import { reconcileFounderCommerceEvent, requireRetirementDue } from "./entitlement";
 import {
+  lockFounderProductContractLifecycleInTransaction,
   requireActiveFounderOperatorAuthorityInTransaction,
   requireReadyFounderOperatorAuthorityInTransaction,
 } from "./operator-authority";
@@ -112,9 +114,7 @@ export async function executeFounderProductContractLifecycleAction(
     }
     if (input.action === "infrastructure_retirement") {
       await connection.db.transaction(async (tx) => {
-        await tx.execute(
-          sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${input.userId}`}, 0))`,
-        );
+        await lockFounderProductContractLifecycleInTransaction(tx, input.userId);
         await reconcileFounderCommerceEvent(tx, input, dependencies);
       });
       return await executeInfrastructureRetirement(input, dependencies, connection);
@@ -480,9 +480,7 @@ async function completeInfrastructureRetirement(
   connection: DatabaseConnection,
 ): Promise<void> {
   await connection.db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${input.userId}`}, 0))`,
-    );
+    await lockFounderProductContractLifecycleInTransaction(tx, input.userId);
     const [receipt] = await tx
       .select({ leaseToken: founderInfrastructureRetirements.leaseToken })
       .from(founderInfrastructureRetirements)
@@ -501,6 +499,23 @@ async function completeInfrastructureRetirement(
         updatedAt: input.now,
       })
       .where(eq(runners.id, work.runnerId));
+    await tx
+      .update(operatorRuntimes)
+      .set({
+        status: "needs_attention",
+        transportState: "failed",
+        safetyState: "unknown",
+        runtimeIdentity: null,
+        operationId: null,
+        readyAt: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        recoveryMessage:
+          "Bruno must verify newly provisioned infrastructure before work can resume.",
+        failureCode: "infrastructure_retired",
+        updatedAt: input.now,
+      })
+      .where(eq(operatorRuntimes.operatorId, work.operatorId));
     await tx
       .update(founderInfrastructureRetirements)
       .set({

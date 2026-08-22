@@ -265,7 +265,13 @@ or partially failed creation remains discoverable for bounded cleanup. A complet
 Retirement stops new daily copies while the final retained archive continues to its 30-day expiry;
 a later `resume` Release Decision can start protection again for a restored Operator. Production
 Operator preparation grants Owner Preview admission only after current OpenAI and Calendar Preview
-Qualification and the initial archive's isolated rebuild check all pass. Every S3-compatible
+Qualification and the initial archive's isolated rebuild check all pass. Founder workspace reads,
+writes, and effect-starting transactions recheck the active exact-revision Owner Preview decision
+and a verified archive observed within the last 24 hours; a Hold, stale archive, or retired runtime
+closes access. Infrastructure Retirement marks the destroyed runtime as needing attention before
+its receipt completes, so only newly provisioned and verified infrastructure can become Ready
+again. The encrypted durable state preserves an external-action pause as the complete boolean,
+reason, and timestamp tuple required to rebuild it safely. Every S3-compatible
 request, including response-body reads, uses a 10-second abort deadline so unavailable storage
 cannot indefinitely hold recovery, expiry, or retirement work.
 

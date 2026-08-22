@@ -1,3 +1,4 @@
+import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
 import {
   getFounderMorningBriefPreferencesForUser,
   updateFounderMorningBriefPreferencesForUser,
@@ -16,6 +17,8 @@ export async function GET(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId);
+  if (accessFailure) return accessFailure;
   const preferences = await getFounderMorningBriefPreferencesForUser(applicationUser.userId);
   return Response.json({ preferences }, { headers: noStoreHeaders() });
 }
@@ -29,6 +32,8 @@ export async function POST(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId);
+  if (accessFailure) return accessFailure;
   let payload: unknown;
   try {
     payload = await request.json();

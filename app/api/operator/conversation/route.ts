@@ -1,3 +1,4 @@
+import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
 import {
   FounderConversationError,
   getFounderConversationForUser,
@@ -26,6 +27,8 @@ export async function GET(
     dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId);
+  if (accessFailure) return accessFailure;
 
   const conversation = await (dependencies.getConversation ?? getFounderConversationForUser)(
     applicationUser.userId,
@@ -42,6 +45,8 @@ export async function POST(
     dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId);
+  if (accessFailure) return accessFailure;
 
   let payload: unknown;
   try {

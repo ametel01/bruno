@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gt, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, lte } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
@@ -17,7 +17,10 @@ import {
 import { expireFounderRecoveryArchivesForUser } from "./archive-expiry";
 import { requireOperationalEntitlement } from "./entitlement";
 import type { FounderProductContractLifecycleAction } from "./lifecycle";
-import { requireReadyFounderOperatorAuthorityInTransaction } from "./operator-authority";
+import {
+  lockFounderProductContractLifecycleInTransaction,
+  requireReadyFounderOperatorAuthorityInTransaction,
+} from "./operator-authority";
 import {
   assertFounderRecoveryArchiveDeletionIdentity,
   type FounderRecoveryArchiveCreationProvider,
@@ -278,9 +281,7 @@ async function cleanupRejectedRecoveryArchivePublication(
     await recordRejectedRecoveryArchivePublicationCleanup(userId, archiveId, clock(), connection);
   } catch {
     await connection.db.transaction(async (tx) => {
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${userId}`}, 0))`,
-      );
+      await lockFounderProductContractLifecycleInTransaction(tx, userId);
       const [reopened] = await tx
         .update(founderRecoveryArchives)
         .set({
@@ -325,9 +326,7 @@ async function recordRejectedRecoveryArchivePublicationCleanup(
   connection: DatabaseConnection,
 ): Promise<void> {
   await connection.db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${userId}`}, 0))`,
-    );
+    await lockFounderProductContractLifecycleInTransaction(tx, userId);
     const [archive] = await tx
       .select({ status: founderRecoveryArchives.status })
       .from(founderRecoveryArchives)
@@ -377,6 +376,7 @@ export async function reconcileFounderRecoveryArchives(input: {
     const decisions = await connection.db
       .select({
         userId: founderReleaseDecisions.userId,
+        stage: founderReleaseDecisions.stage,
         outcome: founderReleaseDecisions.outcome,
         decidedAt: founderReleaseDecisions.decidedAt,
       })
@@ -386,9 +386,10 @@ export async function reconcileFounderRecoveryArchives(input: {
         and(eq(operators.id, founderReleaseDecisions.operatorId), eq(operators.status, "active")),
       )
       .orderBy(desc(founderReleaseDecisions.decidedAt));
-    const latestByUser = new Map<string, (typeof decisions)[number]>();
+    const latestByUserAndStage = new Map<string, (typeof decisions)[number]>();
     for (const decision of decisions) {
-      if (!latestByUser.has(decision.userId)) latestByUser.set(decision.userId, decision);
+      const key = `${decision.userId}:${decision.stage}`;
+      if (!latestByUserAndStage.has(key)) latestByUserAndStage.set(key, decision);
     }
     const retiredOwners = await connection.db
       .select({
@@ -404,10 +405,17 @@ export async function reconcileFounderRecoveryArchives(input: {
         latestRetirementByUser.set(retirement.userId, retirement.retiredAt);
       }
     }
-    const eligibleUsers = [...latestByUser.values()]
+    const latestActiveDecisionByUser = new Map<string, (typeof decisions)[number]>();
+    for (const decision of latestByUserAndStage.values()) {
+      if (decision.outcome !== "enter" && decision.outcome !== "resume") continue;
+      const current = latestActiveDecisionByUser.get(decision.userId);
+      if (!current || current.decidedAt < decision.decidedAt) {
+        latestActiveDecisionByUser.set(decision.userId, decision);
+      }
+    }
+    const eligibleUsers = [...latestActiveDecisionByUser.values()]
       .filter(
         (decision) =>
-          (decision.outcome === "enter" || decision.outcome === "resume") &&
           (latestRetirementByUser.get(decision.userId) ?? new Date(0)) < decision.decidedAt,
       )
       .map((decision) => decision.userId);
@@ -548,6 +556,8 @@ async function loadFounderRecoveryArchiveDurableState(
         createdAt: row.operator.createdAt.toISOString(),
         mailOfferDisposition: row.operator.mailOfferDisposition,
         externalActionPaused: row.operator.externalActionPause,
+        externalActionPauseReason: row.operator.externalActionPauseReason,
+        externalActionPausedAt: row.operator.externalActionPausedAt?.toISOString() ?? null,
       },
       preparation: {
         timezone: row.preparation.timezone,

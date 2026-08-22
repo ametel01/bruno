@@ -8,6 +8,8 @@ export type FounderRecoveryArchiveDurableState = {
     createdAt: string;
     mailOfferDisposition: "enabled" | "dismissed" | null;
     externalActionPaused: boolean;
+    externalActionPauseReason: string | null;
+    externalActionPausedAt: string | null;
   };
   preparation: {
     timezone: string;

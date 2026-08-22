@@ -120,6 +120,44 @@ describe("encrypted Founder Recovery Archive provider", () => {
     ).rejects.toThrow("ciphertext digest");
   });
 
+  it("rejects a paused Operator state that cannot be persisted after restoration", async () => {
+    const provider = new EncryptedFounderRecoveryArchiveProvider({
+      storage: new FakeBackupObjectStorage("founder-recovery-test"),
+      masterKey: MASTER_KEY,
+    });
+
+    await expect(
+      provider.createRecoveryArchive({
+        archiveIntentId: randomUUID(),
+        userId: USER_ID,
+        operatorId: OPERATOR_ID,
+        observedAt: OBSERVED_AT,
+        state: {
+          ...durableState(),
+          operator: { ...durableState().operator, externalActionPaused: true },
+        },
+      }),
+    ).rejects.toThrow("non-allowlisted or credential-bearing state");
+
+    await expect(
+      provider.createRecoveryArchive({
+        archiveIntentId: randomUUID(),
+        userId: USER_ID,
+        operatorId: OPERATOR_ID,
+        observedAt: OBSERVED_AT,
+        state: {
+          ...durableState(),
+          operator: {
+            ...durableState().operator,
+            externalActionPaused: true,
+            externalActionPauseReason: "Founder requested a pause.",
+            externalActionPausedAt: OBSERVED_AT.toISOString(),
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ restorableVerified: true });
+  });
+
   it("deletes and verifies absence of both the archive and its recovery-only credential", async () => {
     const storage = new FakeBackupObjectStorage("founder-recovery-test");
     const provider = new EncryptedFounderRecoveryArchiveProvider({
@@ -177,6 +215,8 @@ function durableState(): FounderRecoveryArchiveDurableState {
       createdAt: "2026-08-18T00:00:00.000Z",
       mailOfferDisposition: null,
       externalActionPaused: false,
+      externalActionPauseReason: null,
+      externalActionPausedAt: null,
     },
     preparation: {
       timezone: "Asia/Manila",

@@ -124,6 +124,7 @@ describe("Founder Operator route", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(body).toEqual({
       operator: OPERATOR,
+      ownerPreviewAdmitted: true,
       recoveryArchive: expect.objectContaining({
         state: "current",
         restoreVerifiedAt: "2026-08-22T00:00:00.000Z",

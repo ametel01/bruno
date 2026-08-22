@@ -1,12 +1,13 @@
 import "server-only";
 
-import { and, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import {
   founderRecoveryArchiveDeletionReceipts,
   founderRecoveryArchives,
 } from "@/src/server/db/schema";
 import { founderProductContractDigest } from "./digest";
+import { lockFounderProductContractLifecycleInTransaction } from "./operator-authority";
 import type { FounderRecoveryArchiveDeletionProvider } from "./recovery-archive-provider";
 
 export async function expireFounderRecoveryArchivesForUser(
@@ -18,9 +19,7 @@ export async function expireFounderRecoveryArchivesForUser(
   let deletedCount = 0;
   while (true) {
     const work = await connection.db.transaction(async (tx) => {
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${userId}`}, 0))`,
-      );
+      await lockFounderProductContractLifecycleInTransaction(tx, userId);
       const [archive] = await tx
         .select({
           id: founderRecoveryArchives.id,
@@ -99,9 +98,7 @@ export async function expireFounderRecoveryArchivesForUser(
         throw new Error("Recovery Archive and credential absence were not both confirmed.");
       }
       await connection.db.transaction(async (tx) => {
-        await tx.execute(
-          sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${userId}`}, 0))`,
-        );
+        await lockFounderProductContractLifecycleInTransaction(tx, userId);
         const [expiredArchive] = await tx
           .update(founderRecoveryArchives)
           .set({

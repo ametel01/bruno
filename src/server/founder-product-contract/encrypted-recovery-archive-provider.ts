@@ -390,11 +390,19 @@ function parseDurableState(value: unknown): FounderRecoveryArchiveDurableState {
   if (
     value.schemaVersion !== 1 ||
     !isRecord(operator) ||
-    !hasExactKeys(operator, ["id", "createdAt", "mailOfferDisposition", "externalActionPaused"]) ||
+    !hasExactKeys(operator, [
+      "id",
+      "createdAt",
+      "mailOfferDisposition",
+      "externalActionPaused",
+      "externalActionPauseReason",
+      "externalActionPausedAt",
+    ]) ||
     !isUuid(operator.id) ||
     !isIsoDate(operator.createdAt) ||
     ![null, "enabled", "dismissed"].includes(operator.mailOfferDisposition as never) ||
     typeof operator.externalActionPaused !== "boolean" ||
+    !isPersistableExternalActionPause(operator) ||
     !isRecord(preparation) ||
     !hasExactKeys(preparation, ["timezone", "timezoneConfirmedAt"]) ||
     typeof preparation.timezone !== "string" ||
@@ -421,6 +429,18 @@ function parseDurableState(value: unknown): FounderRecoveryArchiveDurableState {
     throw new Error("Recovery Archive contains non-allowlisted or credential-bearing state.");
   }
   return value as FounderRecoveryArchiveDurableState;
+}
+
+function isPersistableExternalActionPause(operator: Record<string, unknown>): boolean {
+  if (operator.externalActionPaused === false) {
+    return operator.externalActionPauseReason === null && operator.externalActionPausedAt === null;
+  }
+  return (
+    operator.externalActionPaused === true &&
+    typeof operator.externalActionPauseReason === "string" &&
+    operator.externalActionPauseReason.trim().length > 0 &&
+    isIsoDate(operator.externalActionPausedAt)
+  );
 }
 
 async function requireUpload(

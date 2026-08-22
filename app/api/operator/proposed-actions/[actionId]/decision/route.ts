@@ -1,4 +1,5 @@
 import { readDraft } from "@/app/api/operator/proposed-actions/route";
+import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
 import { FounderExternalActionPauseError } from "@/src/server/operators/founder-ai-work";
 import {
   decideFounderProposedActionForUser,
@@ -26,6 +27,8 @@ export async function POST(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId);
+  if (accessFailure) return accessFailure;
   const { actionId } = await context.params;
   if (!actionId) return validationResponse("Proposed Action ID is required.");
   let payload: unknown;

@@ -1,5 +1,6 @@
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { admitFounderOperatorToOwnerPreview } from "@/src/server/founder-product-contract/owner-preview-admission";
+import { getFounderOwnerPreviewAccessForUser } from "@/src/server/founder-product-contract/release-stage-access";
 import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
 import {
   confirmFounderTimezoneForUser,
@@ -16,6 +17,7 @@ type OperatorRouteDependencies = {
   confirmTimezone?: typeof confirmFounderTimezoneForUser;
   prepareRuntime?: typeof prepareFounderOperatorRuntimeForUser;
   getRecoveryArchiveStatus?: typeof getFounderRecoveryArchiveStatusForUser;
+  getOwnerPreviewAccess?: typeof getFounderOwnerPreviewAccessForUser;
 };
 
 type OperatorRouteContext = {
@@ -43,8 +45,18 @@ export async function GET(
   const recoveryArchive = await (
     dependencies.getRecoveryArchiveStatus ?? getFounderRecoveryArchiveStatusForUser
   )(applicationUser.userId, new Date());
+  const ownerPreviewAccess =
+    resolveAuthMode(process.env).mode === "clerk"
+      ? await (dependencies.getOwnerPreviewAccess ?? getFounderOwnerPreviewAccessForUser)(
+          applicationUser.userId,
+          new Date(),
+        )
+      : { admitted: true };
 
-  return Response.json({ operator, recoveryArchive }, { headers: noStoreHeaders() });
+  return Response.json(
+    { operator, recoveryArchive, ownerPreviewAdmitted: ownerPreviewAccess.admitted },
+    { headers: noStoreHeaders() },
+  );
 }
 
 export async function POST(
@@ -91,7 +103,11 @@ export async function POST(
       }
     }
     return Response.json(
-      { operator: result.operator, runtime: result.runtime },
+      {
+        operator: result.operator,
+        runtime: result.runtime,
+        ownerPreviewAdmitted: result.runtime.status === "ready",
+      },
       { headers: noStoreHeaders() },
     );
   }

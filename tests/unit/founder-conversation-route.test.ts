@@ -5,6 +5,11 @@ const mocks = vi.hoisted(() => ({
   getConversation: vi.fn(),
   sendMessage: vi.fn(),
   resumeWork: vi.fn(),
+  requireWorkspaceAccess: vi.fn(),
+}));
+
+vi.mock("@/app/api/operator/_shared/owner-preview-access", () => ({
+  requireFounderOperatorWorkspaceAccess: mocks.requireWorkspaceAccess,
 }));
 
 vi.mock("@/src/server/users/configured-application-user", () => ({
@@ -47,6 +52,7 @@ describe("Founder Conversation route", () => {
     mocks.getConversation.mockResolvedValue(CONVERSATION);
     mocks.sendMessage.mockResolvedValue(CONVERSATION);
     mocks.resumeWork.mockResolvedValue(CONVERSATION);
+    mocks.requireWorkspaceAccess.mockResolvedValue(null);
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -59,6 +65,21 @@ describe("Founder Conversation route", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ conversation: CONVERSATION });
     expect(mocks.getConversation).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it("denies the workspace when Owner Preview admission is not active", async () => {
+    mocks.requireWorkspaceAccess.mockResolvedValue(
+      Response.json(
+        { error: { code: "owner_preview_access_required" } },
+        { status: 403, headers: { "Cache-Control": "no-store" } },
+      ),
+    );
+    const { GET } = await import("@/app/api/operator/conversation/route");
+    const response = await GET(new Request("http://localhost/api/operator/conversation"));
+
+    expect(response.status).toBe(403);
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.getConversation).not.toHaveBeenCalled();
   });
 
   it("passes the Founder message and idempotency key to the application seam", async () => {

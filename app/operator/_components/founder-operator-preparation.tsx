@@ -24,6 +24,7 @@ export function FounderOperatorPreparation({
   initialOperator,
   initialOnboarding,
   initialRecoveryArchive,
+  ownerPreviewAdmitted = false,
   timezoneOptions = DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
   openAiReleased = false,
   calendarReadingReleased = false,
@@ -34,6 +35,7 @@ export function FounderOperatorPreparation({
   initialOperator: FounderOperatorDto;
   initialOnboarding?: FounderOnboardingDto;
   initialRecoveryArchive?: FounderRecoveryArchiveStatusDto;
+  ownerPreviewAdmitted?: boolean;
   timezoneOptions?: ReadonlyArray<FounderTimezoneOption>;
   openAiReleased?: boolean;
   calendarReadingReleased?: boolean;
@@ -47,6 +49,7 @@ export function FounderOperatorPreparation({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [onboarding, setOnboarding] = useState(initialOnboarding);
+  const [admitted, setAdmitted] = useState(ownerPreviewAdmitted);
   const lastOpenedStep = useRef<string | null>(null);
 
   useEffect(() => {
@@ -115,10 +118,16 @@ export function FounderOperatorPreparation({
     })
       .then(async (response) => {
         if (!response.ok) return null;
-        return (await response.json()) as { operator?: FounderOperatorDto };
+        return (await response.json()) as {
+          operator?: FounderOperatorDto;
+          ownerPreviewAdmitted?: boolean;
+        };
       })
       .then((body) => {
-        if (!cancelled && body?.operator) setOperator(body.operator);
+        if (!cancelled && body?.operator) {
+          setOperator(body.operator);
+          setAdmitted(body.ownerPreviewAdmitted === true);
+        }
       })
       .catch(() => undefined);
 
@@ -133,6 +142,7 @@ export function FounderOperatorPreparation({
   const runtimeReady = runtime?.status === "ready";
   const runtimeNeedsAttention = runtime?.status === "needs_attention";
   const activated = onboarding?.activated === true;
+  const workspaceAvailable = runtimeReady && admitted;
 
   async function confirmTimezone(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -172,10 +182,11 @@ export function FounderOperatorPreparation({
         body: JSON.stringify({ action: "prepare" }),
       });
       const preparationBody = (await preparationResponse.json()) as
-        | { operator: FounderOperatorDto }
+        | { operator: FounderOperatorDto; ownerPreviewAdmitted?: boolean }
         | { error?: { message?: string } };
       if (preparationResponse.ok && "operator" in preparationBody) {
         setOperator(preparationBody.operator);
+        setAdmitted(preparationBody.ownerPreviewAdmitted === true);
       }
     } catch (submissionError) {
       setError(
@@ -250,6 +261,23 @@ export function FounderOperatorPreparation({
         </section>
       ) : null}
 
+      {runtimeReady && !admitted ? (
+        <section className={styles.card} aria-labelledby="owner-preview-access-title">
+          <div className={styles.cardHeading}>
+            <div>
+              <p className={styles.kicker}>Needs you</p>
+              <h3 id="owner-preview-access-title">
+                Owner Preview is waiting for current protection
+              </h3>
+            </div>
+          </div>
+          <p className={styles.hint}>
+            Bruno will open the workspace only after current qualification and a verified Recovery
+            Archive are confirmed together. Try preparation again when protection is available.
+          </p>
+        </section>
+      ) : null}
+
       {!awaitingTimezone && runtimeNeedsAttention ? (
         <section className={styles.card} aria-labelledby="recovery-title">
           <div className={styles.cardHeading}>
@@ -269,7 +297,7 @@ export function FounderOperatorPreparation({
         </section>
       ) : null}
 
-      {activated && runtimeReady ? (
+      {activated && workspaceAvailable ? (
         <section className={styles.workspace} aria-label="Current Founder workspace">
           <div className={styles.workspaceConversation}>
             <FounderConversation showDecisionContext={false} />
@@ -329,31 +357,31 @@ export function FounderOperatorPreparation({
         </form>
       </section>
 
-      {!activated && runtimeReady ? <FounderConversation /> : null}
+      {!activated && workspaceAvailable ? <FounderConversation /> : null}
 
-      {!activated && runtimeReady ? (
+      {!activated && workspaceAvailable ? (
         <FounderActionInbox mailSendingReleased={mailSendingReleased} />
       ) : null}
 
-      {runtimeReady && mailSendingReleased ? <FounderMailSendingConnection /> : null}
+      {workspaceAvailable && mailSendingReleased ? <FounderMailSendingConnection /> : null}
 
-      {runtimeReady && openAiReleased ? <FounderAiConnection /> : null}
+      {workspaceAvailable && openAiReleased ? <FounderAiConnection /> : null}
 
-      {runtimeReady && calendarReadingReleased ? <FounderCalendarConnection /> : null}
+      {workspaceAvailable && calendarReadingReleased ? <FounderCalendarConnection /> : null}
 
-      {runtimeReady && mailReadingReleased && mailReleaseControls ? (
+      {workspaceAvailable && mailReadingReleased && mailReleaseControls ? (
         <FounderMailConnection releaseControls={mailReleaseControls} />
       ) : null}
 
-      {!activated && runtimeReady && onboarding?.operation === "core" ? (
+      {!activated && workspaceAvailable && onboarding?.operation === "core" ? (
         <FounderCoreOperation />
       ) : null}
 
-      {!activated && runtimeReady && onboarding?.operation !== "core" ? (
+      {!activated && workspaceAvailable && onboarding?.operation !== "core" ? (
         <FounderLimitedOperation />
       ) : null}
 
-      {runtimeReady ? <FounderRelationships /> : null}
+      {workspaceAvailable ? <FounderRelationships /> : null}
 
       {initialRecoveryArchive ? (
         <section className={styles.card} aria-labelledby="protected-recovery-title">

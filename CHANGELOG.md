@@ -26,7 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Qualification, independently evidenced for OpenAI and Calendar. Hourly reconciliation refreshes
   eligible archives every 24 hours, expires both archive objects after 30 days with an
   absence-backed Deletion Receipt, bounds S3-compatible operations, and keeps Infrastructure
-  Retirement independent from archive health.
+  Retirement independent from archive health. Founder workspace and effect-starting boundaries now
+  require the active exact-revision Owner Preview decision and current archive, retirement
+  invalidates destroyed runtime readiness, admission rechecks evidence at its final commit, and
+  restore proof preserves the complete external-action pause tuple.
 - A protected production rollout now advances versioned defaults through QStash, an Approved
   Snapshot, release-attested readiness, and the measured runner size while new cold provisioning is
   halted. It exercises dispatch, snapshot, validation, and compatible stock/full runner-size
