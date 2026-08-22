@@ -37,7 +37,7 @@ export const dynamic = "force-dynamic";
 export default async function FounderOperatorPage({
   searchParams = Promise.resolve({}),
 }: {
-  searchParams?: Promise<{ experience?: string | string[] }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 } = {}) {
   const applicationUser = await requireConfiguredApplicationUser();
 
@@ -53,6 +53,7 @@ export default async function FounderOperatorPage({
   }
 
   const operator = await getFounderOperatorForUser(applicationUser.userId);
+  const trustedPreviewInvitationToken = readTrustedPreviewInvitationToken(await searchParams);
   const applicationRevision = readFounderApplicationRevision();
   const authMode = resolveAuthMode(process.env).mode;
   const requestedExperience = (await searchParams).experience;
@@ -104,6 +105,7 @@ export default async function FounderOperatorPage({
         )}
         ownerPreview={projectFounderOwnerPreviewStatus(ownerPreviewAccess)}
         experience={experience}
+        {...(trustedPreviewInvitationToken ? { trustedPreviewInvitationToken } : {})}
         timezoneOptions={buildFounderTimezoneOptions()}
         openAiReleased={openAiReleased}
         calendarReadingReleased={calendarReadingReleased}
@@ -122,4 +124,11 @@ export default async function FounderOperatorPage({
       <FounderExternalBetaManifest status={externalBetaStatus} />
     </FounderOperatorShell>
   );
+}
+
+function readTrustedPreviewInvitationToken(
+  searchParams: Record<string, string | string[] | undefined> | undefined,
+): string | undefined {
+  const value = searchParams?.trusted_preview_invitation;
+  return typeof value === "string" && /^[A-Za-z0-9_-]{43,128}$/.test(value) ? value : undefined;
 }

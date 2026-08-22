@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   admitOwnerPreview: vi.fn(),
+  admitTrustedPreview: vi.fn(),
+  enterTrustedPreviewStage: vi.fn(),
+  issueTrustedPreviewInvitation: vi.fn(),
   confirmTimezone: vi.fn(),
   ensureOperator: vi.fn(),
   getOperator: vi.fn(),
@@ -51,6 +54,12 @@ const OPERATOR = {
 describe("Founder Operator route", () => {
   beforeEach(() => {
     mocks.admitOwnerPreview.mockResolvedValue({ archiveId: "archive-373" });
+    mocks.admitTrustedPreview.mockResolvedValue({ archiveId: "archive-376", cohortSlot: 1 });
+    mocks.enterTrustedPreviewStage.mockResolvedValue({ decisionId: "decision-376" });
+    mocks.issueTrustedPreviewInvitation.mockResolvedValue({
+      invitationToken: "C".repeat(43),
+      cohortSlot: 1,
+    });
     mocks.requireApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
     mocks.ensureOperator.mockRejectedValue(new Error("GET must not create Operator state"));
     mocks.getOperator.mockResolvedValue(OPERATOR);
@@ -120,6 +129,9 @@ describe("Founder Operator route", () => {
 
   afterEach(() => {
     mocks.admitOwnerPreview.mockReset();
+    mocks.admitTrustedPreview.mockReset();
+    mocks.enterTrustedPreviewStage.mockReset();
+    mocks.issueTrustedPreviewInvitation.mockReset();
     mocks.confirmTimezone.mockReset();
     mocks.ensureOperator.mockReset();
     mocks.getOperator.mockReset();
@@ -333,6 +345,113 @@ describe("Founder Operator route", () => {
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "owner_preview_unavailable" },
+    });
+  });
+
+  it("accepts Trusted Preview only through the identity-bound invitation authority", async () => {
+    const { POST } = await import("@/app/api/operator/route");
+    mocks.getOwnerPreviewAccess.mockResolvedValueOnce({
+      admitted: true,
+      availableCapabilities: ["openai", "calendar_reading"],
+      stage: "trusted_preview",
+      cohortSlot: 1,
+    });
+    const response = await POST(
+      new Request("http://localhost/api/operator", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "accept_trusted_preview_invitation",
+          invitationToken: "A".repeat(43),
+        }),
+      }),
+      undefined,
+      {
+        admitTrustedPreview: mocks.admitTrustedPreview,
+        getOwnerPreviewAccess: mocks.getOwnerPreviewAccess,
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.admitTrustedPreview).toHaveBeenCalledWith(USER_ID, "A".repeat(43));
+    await expect(response.json()).resolves.toMatchObject({
+      ownerPreviewAdmitted: true,
+      ownerPreviewWorkAllowed: true,
+      ownerPreview: {
+        stage: "Trusted Preview",
+        evidenceClassification: "Learning Round",
+        founderAcceptanceEligible: false,
+        cohortSlot: 1,
+      },
+    });
+  });
+
+  it("does not let a Clerk session without an invitation create Trusted Preview access", async () => {
+    const { POST } = await import("@/app/api/operator/route");
+    const missing = await POST(
+      new Request("http://localhost/api/operator", {
+        method: "POST",
+        body: JSON.stringify({ action: "accept_trusted_preview_invitation" }),
+      }),
+      undefined,
+      { admitTrustedPreview: mocks.admitTrustedPreview },
+    );
+    expect(missing.status).toBe(400);
+    expect(mocks.admitTrustedPreview).not.toHaveBeenCalled();
+
+    mocks.admitTrustedPreview.mockRejectedValueOnce(new Error("identity mismatch"));
+    const mismatched = await POST(
+      new Request("http://localhost/api/operator", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "accept_trusted_preview_invitation",
+          invitationToken: "B".repeat(43),
+        }),
+      }),
+      undefined,
+      { admitTrustedPreview: mocks.admitTrustedPreview },
+    );
+    expect(mismatched.status).toBe(403);
+    await expect(mismatched.json()).resolves.toMatchObject({
+      error: { code: "trusted_preview_unavailable" },
+    });
+  });
+
+  it("exposes explicit Owner-only cohort decision and invitation operations", async () => {
+    const { POST } = await import("@/app/api/operator/route");
+    const entered = await POST(
+      new Request("http://localhost/api/operator", {
+        method: "POST",
+        body: JSON.stringify({ action: "enter_trusted_preview_stage" }),
+      }),
+      undefined,
+      { enterTrustedPreviewStage: mocks.enterTrustedPreviewStage },
+    );
+    expect(entered.status).toBe(200);
+    expect(mocks.enterTrustedPreviewStage).toHaveBeenCalledWith(USER_ID);
+    await expect(entered.json()).resolves.toEqual({
+      trustedPreview: { state: "entered", decisionId: "decision-376" },
+    });
+
+    const invited = await POST(
+      new Request("http://localhost/api/operator", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "issue_trusted_preview_invitation",
+          invitedClerkSubject: "user_trusted_contact",
+          serviceBusinessEvidenceDigest: `sha256:${"d".repeat(64)}`,
+        }),
+      }),
+      undefined,
+      { issueTrustedPreviewInvitation: mocks.issueTrustedPreviewInvitation },
+    );
+    expect(invited.status).toBe(200);
+    expect(mocks.issueTrustedPreviewInvitation).toHaveBeenCalledWith({
+      cohortOwnerUserId: USER_ID,
+      invitedClerkSubject: "user_trusted_contact",
+      serviceBusinessEvidenceDigest: `sha256:${"d".repeat(64)}`,
+    });
+    await expect(invited.json()).resolves.toEqual({
+      trustedPreviewInvitation: { invitationToken: "C".repeat(43), cohortSlot: 1 },
     });
   });
 });

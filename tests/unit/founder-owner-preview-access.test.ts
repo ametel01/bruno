@@ -52,4 +52,19 @@ describe("Founder Owner Preview route access", () => {
     });
     expect(founderOperatorAccessErrorResponse(new Error("unexpected"))).toBeNull();
   });
+
+  it("names the Trusted Preview invitation boundary without exposing internals", async () => {
+    const response = founderOperatorAccessErrorResponse(
+      new FounderReleaseStageAccessError("trusted_preview"),
+    );
+
+    expect(response?.status).toBe(403);
+    await expect(response?.json()).resolves.toEqual({
+      error: {
+        code: "trusted_preview_access_required",
+        message:
+          "Trusted Preview is unavailable until Clerk identity, invitation admission, exact-revision authority, and current Recovery Archive protection are verified.",
+      },
+    });
+  });
 });

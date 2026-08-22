@@ -903,6 +903,14 @@ export const founderReleaseDecisions = pgTable(
       "founder_release_decisions_owner_preview_qualification_expiry_check",
       sql`${table.stage} <> 'owner_preview' OR ${table.outcome} = 'deny' OR (${table.openAiQualificationExpiresAt} IS NOT NULL AND ${table.calendarQualificationExpiresAt} IS NOT NULL)`,
     ),
+    check(
+      "founder_release_decisions_trusted_preview_manifest_check",
+      sql`${table.stage} <> 'trusted_preview' OR (jsonb_array_length(${table.capabilityManifest}) = 2 AND ${table.capabilityManifest} @> '["openai", "calendar_reading"]'::jsonb)`,
+    ),
+    check(
+      "founder_release_decisions_trusted_preview_qualification_expiry_check",
+      sql`${table.stage} <> 'trusted_preview' OR ${table.outcome} NOT IN ('enter', 'resume') OR (${table.openAiQualificationExpiresAt} IS NOT NULL AND ${table.calendarQualificationExpiresAt} IS NOT NULL)`,
+    ),
     index("founder_release_decisions_user_stage_idx").on(
       table.userId,
       table.stage,
@@ -969,6 +977,57 @@ export const founderPreviewQualifications = pgTable(
       table.runtimeRevision,
       table.capability,
       table.observedAt,
+    ),
+  ],
+);
+
+export const founderTrustedPreviewInvitations = pgTable(
+  "founder_trusted_preview_invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cohortOwnerUserId: uuid("cohort_owner_user_id")
+      .notNull()
+      .references(() => users.id),
+    stageDecisionId: uuid("stage_decision_id")
+      .notNull()
+      .references(() => founderReleaseDecisions.id),
+    cohortSlot: integer("cohort_slot").notNull(),
+    invitationDigest: text("invitation_digest").notNull(),
+    invitedClerkSubjectDigest: text("invited_clerk_subject_digest").notNull(),
+    serviceBusinessEvidenceDigest: text("service_business_evidence_digest").notNull(),
+    status: text("status").notNull().default("invited"),
+    participantUserId: uuid("participant_user_id").references(() => users.id),
+    participantOperatorId: uuid("participant_operator_id").references(() => operators.id),
+    admissionDecisionId: uuid("admission_decision_id").references(() => founderReleaseDecisions.id),
+    invitedAt: timestamp("invited_at", { withTimezone: true }).notNull(),
+    admittedAt: timestamp("admitted_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "founder_trusted_preview_invitations_slot_check",
+      sql`${table.cohortSlot} BETWEEN 1 AND 3`,
+    ),
+    check(
+      "founder_trusted_preview_invitations_digest_check",
+      sql`${table.invitationDigest} ~ '^sha256:[a-f0-9]{64}$' AND ${table.invitedClerkSubjectDigest} ~ '^sha256:[a-f0-9]{64}$' AND ${table.serviceBusinessEvidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_trusted_preview_invitations_state_check",
+      sql`(${table.status} = 'invited' AND ${table.participantUserId} IS NULL AND ${table.participantOperatorId} IS NULL AND ${table.admissionDecisionId} IS NULL AND ${table.admittedAt} IS NULL AND ${table.revokedAt} IS NULL) OR (${table.status} = 'admitted' AND ${table.participantUserId} IS NOT NULL AND ${table.participantOperatorId} IS NOT NULL AND ${table.admissionDecisionId} IS NOT NULL AND ${table.admittedAt} IS NOT NULL AND ${table.revokedAt} IS NULL) OR (${table.status} = 'revoked' AND ${table.participantUserId} IS NULL AND ${table.participantOperatorId} IS NULL AND ${table.admissionDecisionId} IS NULL AND ${table.admittedAt} IS NULL AND ${table.revokedAt} IS NOT NULL)`,
+    ),
+    uniqueIndex("founder_trusted_preview_invitations_slot_idx").on(table.cohortSlot),
+    uniqueIndex("founder_trusted_preview_invitations_digest_idx").on(table.invitationDigest),
+    uniqueIndex("founder_trusted_preview_invitations_clerk_subject_idx").on(
+      table.invitedClerkSubjectDigest,
+    ),
+    uniqueIndex("founder_trusted_preview_invitations_participant_idx").on(table.participantUserId),
+    uniqueIndex("founder_trusted_preview_invitations_operator_idx").on(table.participantOperatorId),
+    index("founder_trusted_preview_invitations_owner_status_idx").on(
+      table.cohortOwnerUserId,
+      table.status,
+      table.cohortSlot,
     ),
   ],
 );

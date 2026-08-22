@@ -38,6 +38,7 @@ export function FounderOperatorPreparation({
   ownerPreviewWorkAllowed = ownerPreviewAdmitted,
   ownerPreview,
   experience = "owner_preview",
+  trustedPreviewInvitationToken,
   timezoneOptions = DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
   openAiReleased = false,
   calendarReadingReleased = false,
@@ -53,6 +54,7 @@ export function FounderOperatorPreparation({
   ownerPreviewWorkAllowed?: boolean;
   ownerPreview?: FounderOwnerPreviewStatus;
   experience?: FounderOperatorExperience;
+  trustedPreviewInvitationToken?: string;
   timezoneOptions?: ReadonlyArray<FounderTimezoneOption>;
   openAiReleased?: boolean;
   calendarReadingReleased?: boolean;
@@ -69,7 +71,12 @@ export function FounderOperatorPreparation({
   const [admitted, setAdmitted] = useState(ownerPreviewAdmitted);
   const [workAllowed, setWorkAllowed] = useState(ownerPreviewWorkAllowed);
   const [previewStatus, setPreviewStatus] = useState<FounderOwnerPreviewStatus>(
-    ownerPreview ?? fallbackOwnerPreviewStatus(ownerPreviewAdmitted, ownerPreviewWorkAllowed),
+    ownerPreview ??
+      fallbackOwnerPreviewStatus(
+        ownerPreviewAdmitted,
+        ownerPreviewWorkAllowed,
+        Boolean(trustedPreviewInvitationToken),
+      ),
   );
   const ownerPreviewExperience = experience === "owner_preview";
   const lastOpenedStep = useRef<string | null>(null);
@@ -308,6 +315,49 @@ export function FounderOperatorPreparation({
     }
   }
 
+  async function acceptTrustedPreviewInvitation() {
+    if (!trustedPreviewInvitationToken) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/operator", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          action: "accept_trusted_preview_invitation",
+          invitationToken: trustedPreviewInvitationToken,
+        }),
+      });
+      const body = (await response.json()) as
+        | {
+            ownerPreviewAdmitted: boolean;
+            ownerPreviewWorkAllowed: boolean;
+            ownerPreview: FounderOwnerPreviewStatus;
+          }
+        | { error?: { message?: string } };
+      if (!response.ok || !("ownerPreview" in body)) {
+        throw new Error(
+          "error" in body
+            ? (body.error?.message ?? "Trusted Preview could not be entered.")
+            : "Trusted Preview could not be entered.",
+        );
+      }
+      setAdmitted(body.ownerPreviewAdmitted);
+      setWorkAllowed(body.ownerPreviewWorkAllowed);
+      setPreviewStatus(body.ownerPreview);
+      window.history.replaceState(null, "", "/operator");
+    } catch (admissionError) {
+      setError(
+        admissionError instanceof Error
+          ? admissionError.message
+          : "Trusted Preview could not be entered.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (!operator) {
     return (
       <div className={styles.content}>
@@ -445,8 +495,9 @@ export function FounderOperatorPreparation({
             Available now: {capabilityList(previewStatus.availableCapabilities)}.
           </p>
           <p className={styles.hint}>
-            Support is {previewStatus.supportBoundary.toLowerCase()}. Seven days of Owner Preview
-            use remains a Learning Round and never promotes Bruno automatically.
+            Support is {previewStatus.supportBoundary.toLowerCase()}. This attended use remains a
+            Learning Round, cannot become Founder Acceptance Evidence, and never promotes Bruno
+            automatically.
           </p>
         </section>
       ) : null}
@@ -460,7 +511,7 @@ export function FounderOperatorPreparation({
               <h3 id="owner-preview-access-title">
                 {admitted
                   ? "Some new work is paused"
-                  : "Owner Preview is waiting for current protection"}
+                  : `${previewStatus.stage} is waiting for current protection`}
               </h3>
             </div>
           </div>
@@ -473,10 +524,18 @@ export function FounderOperatorPreparation({
             <button
               className={styles.button}
               type="button"
-              onClick={() => void enterOwnerPreview()}
+              onClick={() =>
+                void (trustedPreviewInvitationToken
+                  ? acceptTrustedPreviewInvitation()
+                  : enterOwnerPreview())
+              }
               disabled={saving}
             >
-              {saving ? "Checking…" : "Enter Owner Preview"}
+              {saving
+                ? "Checking…"
+                : trustedPreviewInvitationToken
+                  ? "Accept Trusted Preview invitation"
+                  : "Enter Owner Preview"}
             </button>
           ) : null}
         </section>
@@ -774,10 +833,12 @@ function recoveryArchiveBadge(state: FounderRecoveryArchiveStatusDto["state"]): 
 function fallbackOwnerPreviewStatus(
   admitted: boolean,
   workAllowed: boolean,
+  trustedPreviewInvitation = false,
 ): FounderOwnerPreviewStatus {
   return projectFounderOwnerPreviewStatus({
     admitted,
     availableCapabilities: admitted && workAllowed ? ["openai", "calendar_reading"] : [],
+    stage: trustedPreviewInvitation ? "trusted_preview" : "owner_preview",
   });
 }
 
