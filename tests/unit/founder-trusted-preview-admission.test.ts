@@ -18,6 +18,7 @@ import { EncryptedFounderRecoveryArchiveProvider } from "@/src/server/founder-pr
 import { FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY } from "@/src/server/founder-product-contract/owner-preview-release-decision";
 import { createDurableRecoveryArchive } from "@/src/server/founder-product-contract/recovery-archive";
 import { getFounderOwnerPreviewAccessForUser } from "@/src/server/founder-product-contract/release-stage-access";
+import { persistFounderOwnerPreviewHoldInTransaction } from "@/src/server/founder-product-contract/release-stage-hold";
 import {
   admitFounderToTrustedPreview,
   enterFounderTrustedPreviewStage,
@@ -378,6 +379,56 @@ describe("Trusted Preview admission authority", () => {
     });
   });
 
+  it("denies stage entry when Owner Preview becomes held after the precheck", async () => {
+    await connection.db
+      .delete(founderReleaseDecisions)
+      .where(eq(founderReleaseDecisions.stage, "trusted_preview"));
+    await createDurableRecoveryArchive(
+      {
+        action: "release_stage_admission",
+        userId: OWNER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
+      provider,
+      connection,
+      () => START,
+    );
+    const [ownerDecision] = await connection.db
+      .select({ id: founderReleaseDecisions.id, decidedAt: founderReleaseDecisions.decidedAt })
+      .from(founderReleaseDecisions)
+      .where(eq(founderReleaseDecisions.stage, "owner_preview"));
+    if (!ownerDecision) throw new Error("Expected Owner Preview decision.");
+
+    await expect(
+      enterFounderTrustedPreviewStage(OWNER_ID, {
+        applicationRevision: APPLICATION_REVISION,
+        createConnection: () => connection,
+        env: trustedStageEntryEnvironment(ownerDecision.id, ownerDecision.decidedAt),
+        now: () => START,
+        beforeDecisionCommit: async () => {
+          await connection.db.transaction((tx) =>
+            persistFounderOwnerPreviewHoldInTransaction(tx, {
+              userId: OWNER_ID,
+              operatorId: OWNER_OPERATOR_ID,
+              applicationRevision: APPLICATION_REVISION,
+              runtimeRevision: "runtime-owner",
+              affectedCapabilities: ["openai", "calendar_reading"],
+              evidenceDigests: [digest(89)],
+              decidedAt: START,
+            }),
+          );
+        },
+      }),
+    ).rejects.toThrow("Owner Preview must remain qualified");
+    await expect(
+      connection.db
+        .select({ id: founderReleaseDecisions.id })
+        .from(founderReleaseDecisions)
+        .where(eq(founderReleaseDecisions.stage, "trusted_preview")),
+    ).resolves.toEqual([]);
+  });
+
   it("holds the whole cohort, revokes pending admission, and resumes only by fresh decision", async () => {
     const tokens = ["A".repeat(43), "B".repeat(43), "C".repeat(43)] as const;
     for (const [index, participant] of PARTICIPANTS.slice(0, 3).entries()) {
@@ -453,6 +504,39 @@ describe("Trusted Preview admission authority", () => {
       availableCapabilities: ["openai", "calendar_reading"],
       stage: "trusted_preview",
     });
+
+    const replacementToken = "R".repeat(43);
+    await expect(
+      issueFounderTrustedPreviewInvitation(
+        {
+          cohortOwnerUserId: OWNER_ID,
+          invitedClerkSubject: PARTICIPANTS[1].clerk,
+          serviceBusinessEvidenceDigest: digest(31),
+        },
+        {
+          applicationRevision: APPLICATION_REVISION,
+          createConnection: () => connection,
+          createInvitationToken: () => replacementToken,
+          env: ENV,
+          now: () => resumeAt,
+        },
+      ),
+    ).resolves.toEqual({ invitationToken: replacementToken, cohortSlot: 2 });
+    await expect(
+      admitFounderToTrustedPreview(PARTICIPANTS[1].userId, replacementToken, {
+        applicationRevision: APPLICATION_REVISION,
+        createConnection: () => connection,
+        createProvider: () => provider,
+        env: ENV,
+        now: () => resumeAt,
+      }),
+    ).resolves.toMatchObject({ cohortSlot: 2 });
+    const admittedAfterResume = await connection.db
+      .select({ slot: founderTrustedPreviewInvitations.cohortSlot })
+      .from(founderTrustedPreviewInvitations)
+      .where(eq(founderTrustedPreviewInvitations.status, "admitted"))
+      .orderBy(asc(founderTrustedPreviewInvitations.cohortSlot));
+    expect(admittedAfterResume).toEqual([{ slot: 1 }, { slot: 2 }]);
   });
 
   it("retains the cohort lock through authorized participant work", async () => {
@@ -590,6 +674,50 @@ async function insertOwnerPreviewDecision(connection: DatabaseConnection): Promi
     decidedAt,
     createdAt: decidedAt,
   });
+}
+
+function trustedStageEntryEnvironment(ownerDecisionId: string, ownerDecisionAt: Date) {
+  const qualifiedAt = new Date(START.valueOf() - 60 * 60 * 1_000);
+  return {
+    ...ENV,
+    BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
+      START,
+      APPLICATION_REVISION,
+    ),
+    BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
+      "calendar_reading",
+      START,
+      APPLICATION_REVISION,
+    ),
+    BRUNO_TRUSTED_PREVIEW_QUALIFICATIONS: JSON.stringify({
+      schemaVersion: "bruno.trusted-preview-qualifications.v1",
+      qualifications: ["openai", "calendar_reading"].map((capability, index) => ({
+        schemaVersion: "bruno.trusted-preview-qualification.v1",
+        outcome: "passed",
+        audience: "trusted_cohort",
+        cohortOwnerUserId: OWNER_ID,
+        operatorId: OWNER_OPERATOR_ID,
+        stage: "trusted_preview",
+        applicationRevision: APPLICATION_REVISION,
+        runtimeRevision: "runtime-owner",
+        capability,
+        qualifiedAt: qualifiedAt.toISOString(),
+        expiresAt: new Date(qualifiedAt.valueOf() + 7 * 24 * 60 * 60 * 1_000).toISOString(),
+        evidenceDigest: digest(90 + index),
+        gates: {
+          safeAuthorization: true,
+          realUse: true,
+          recovery: true,
+          revocation: true,
+          providerDisclosure: true,
+          cleanup: true,
+        },
+      })),
+    }),
+    BRUNO_OWNER_PREVIEW_PROMOTION_EVIDENCE: JSON.stringify(
+      ownerPromotionEvidence(ownerDecisionId, ownerDecisionAt),
+    ),
+  };
 }
 
 function trustedPromotionEvidence(

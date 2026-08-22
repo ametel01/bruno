@@ -258,7 +258,7 @@ export async function ingestFounderRelationshipEvidenceForUser(
 
 export function founderRelationshipEvidenceRequirement(
   observations: readonly Pick<FounderRelationshipObservation, "sourceKind">[],
-): Exclude<FounderOwnerPreviewAccessRequirement, "workspace"> {
+): Exclude<FounderOwnerPreviewAccessRequirement, "workspace" | "workspace_with_mail"> {
   return observations.some((observation) => observation.sourceKind === "mail")
     ? FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden
     : FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarRelationshipEvidence;

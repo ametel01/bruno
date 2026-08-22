@@ -125,7 +125,9 @@ verified-restorable Recovery Archive. The Founder projection names Trusted Previ
 Calendar reading as its only capabilities, attended onboarding and observation as its support
 boundary, and Learning Round as its immutable evidence classification. A cohort-wide Critical or
 release-blocking finding records a Hold, revokes pending invitations, preserves admitted participant
-state and Safe Work Checkpoints, and requires a fresh exact-revision resume decision. Promotion
+state and Safe Work Checkpoints, and requires a fresh exact-revision resume decision. Revoked
+pending slots can be rebound to that fresh decision without allowing more than three current
+invited-or-admitted contacts. Promotion
 assessment derives its roster under the cohort lock from admitted invitation, exact participant
 decision, Operator, and ready-runtime rows; two distinct admitted contacts must complete activation,
 recurring use, authority, recovery, and privacy journeys under attended observation. It remains ineligible for Founder
@@ -134,7 +136,9 @@ tests are registered in the Founder Product Contract invariant pack.
 
 Core Operation, Gmail reading, Gmail sending, and Anthropic remain unavailable throughout
 Calendar-only Owner Preview and Trusted Preview, including at
-their deep application seams and when retained Mail state exists. Provider subscription state
+their deep application seams and when retained Mail state exists. Trusted Preview hides the mixed
+Calendar-and-Mail Relationship Records UI and denies its API before retained Mail-backed evidence
+can be projected or changed. Provider subscription state
 applies bounded retirement deadlines and immediately
 pauses new work for unpaid, expired, and refunded entitlement. The Proposed Action claim and Gmail
 execution transactions pass
