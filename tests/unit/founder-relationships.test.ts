@@ -275,7 +275,9 @@ describe("Founder Relationship Records", () => {
         sql`select pg_try_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${OWNER_ID}`}, 0)) as acquired`,
       );
       expect(rows[0]?.acquired).toBe(false);
-      if (input.requiredCapabilities.length === 0) throw new FounderReleaseStageAccessError();
+      if (input.requiredCapabilities === "forbidden") {
+        throw new FounderReleaseStageAccessError();
+      }
     });
 
     await expect(
@@ -295,7 +297,7 @@ describe("Founder Relationship Records", () => {
       expect.objectContaining({
         userId: OWNER_ID,
         applicationRevision: "a".repeat(40),
-        requiredCapabilities: [],
+        requiredCapabilities: "forbidden",
       }),
     );
     await expect(connection.db.select().from(operatorRelationshipEvidence)).resolves.toEqual([]);

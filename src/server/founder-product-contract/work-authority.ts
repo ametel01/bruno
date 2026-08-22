@@ -7,7 +7,7 @@ import {
   type FounderProductContractTransaction,
   lockFounderProductContractLifecycleInTransaction,
 } from "./operator-authority";
-import type { FounderOwnerPreviewCapability } from "./preview-qualification";
+import type { FounderOwnerPreviewCapabilityRequirement } from "./preview-qualification";
 import {
   FounderReleaseStageAccessError,
   requireFounderOwnerPreviewAccessForUser,
@@ -26,7 +26,7 @@ export type FounderOwnerPreviewWorkAuthorityDependencies = {
 async function preflightFounderOwnerPreviewWorkAuthority(
   userId: string,
   now: Date,
-  requiredCapabilities: readonly FounderOwnerPreviewCapability[],
+  requiredCapabilities: FounderOwnerPreviewCapabilityRequirement,
   dependencies: FounderOwnerPreviewWorkAuthorityDependencies,
 ): Promise<void> {
   const accessDependencies = {
@@ -61,7 +61,7 @@ export async function withFounderOwnerPreviewWorkAuthority<T>(
   input: {
     userId: string;
     now: () => Date;
-    requiredCapabilities: readonly FounderOwnerPreviewCapability[];
+    requiredCapabilities: FounderOwnerPreviewCapabilityRequirement;
   },
   dependencies: FounderOwnerPreviewWorkAuthorityDependencies,
   work: (tx: FounderProductContractTransaction, now: Date) => Promise<T>,
