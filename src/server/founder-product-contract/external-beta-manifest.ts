@@ -8,6 +8,7 @@ import { founderPreviewQualifications, operatorRuntimes, operators } from "@/src
 import { readFounderApplicationRevision } from "./application-revision";
 import {
   FOUNDER_EXTERNAL_BETA_CAPABILITIES,
+  FOUNDER_EXTERNAL_BETA_QUALIFICATION_MAX_AGE_MS,
   type FounderExternalBetaCapability,
   type FounderExternalBetaQualification,
   founderExternalBetaCapabilityLabel,
@@ -61,7 +62,7 @@ export async function qualifyFounderExternalBetaManifest(
   const ownsConnection = !dependencies.createConnection;
   try {
     await connection.db.transaction((tx) =>
-      persistFounderExternalBetaQualificationsInTransaction(tx, qualifications),
+      persistFounderExternalBetaQualificationsInTransaction(tx, qualifications, input.now),
     );
     return manifestFromQualifications(input, qualifications);
   } finally {
@@ -95,7 +96,7 @@ export async function qualifyFounderExternalBetaManifestForUser(
       environment,
     );
     await connection.db.transaction((tx) =>
-      persistFounderExternalBetaQualificationsInTransaction(tx, qualifications),
+      persistFounderExternalBetaQualificationsInTransaction(tx, qualifications, now),
     );
     return manifestFromQualifications(
       { cohort, applicationRevision, runtimeRevision: candidate.runtimeRevision, now },
@@ -109,6 +110,7 @@ export async function qualifyFounderExternalBetaManifestForUser(
 export async function persistFounderExternalBetaQualificationsInTransaction(
   tx: FounderExternalBetaManifestTransaction,
   qualifications: readonly FounderExternalBetaQualification[],
+  now: Date,
 ): Promise<void> {
   const first = qualifications[0];
   if (
@@ -121,12 +123,14 @@ export async function persistFounderExternalBetaQualificationsInTransaction(
     ) ||
     new Set(qualifications.map((qualification) => qualification.evidenceDigest)).size !==
       qualifications.length ||
+    Number.isNaN(now.valueOf()) ||
     qualifications.some(
       (qualification) =>
         qualification.stage !== "external_beta" ||
         qualification.cohort !== first.cohort ||
         qualification.applicationRevision !== first.applicationRevision ||
-        qualification.runtimeRevision !== first.runtimeRevision,
+        qualification.runtimeRevision !== first.runtimeRevision ||
+        !hasCurrentQualificationWindow(qualification, now),
     )
   ) {
     throw new Error("External Beta qualification manifest is incomplete or inconsistent.");
@@ -185,7 +189,13 @@ export async function getFounderExternalBetaManifest(
     for (const row of rows) {
       if (!isFounderExternalBetaCapability(row.capability) || seen.has(row.capability)) continue;
       seen.add(row.capability);
-      if (row.expiresAt > input.now) current.add(row.capability);
+      if (
+        row.expiresAt > input.now &&
+        row.expiresAt.valueOf() - row.observedAt.valueOf() <=
+          FOUNDER_EXTERNAL_BETA_QUALIFICATION_MAX_AGE_MS
+      ) {
+        current.add(row.capability);
+      }
     }
     const qualifiedCapabilities = FOUNDER_EXTERNAL_BETA_CAPABILITIES.filter((capability) =>
       current.has(capability),
@@ -296,6 +306,27 @@ function manifestFromQualifications(
 
 function isFounderExternalBetaCapability(value: string): value is FounderExternalBetaCapability {
   return FOUNDER_EXTERNAL_BETA_CAPABILITIES.some((capability) => capability === value);
+}
+
+function hasCurrentQualificationWindow(
+  qualification: FounderExternalBetaQualification,
+  now: Date,
+): boolean {
+  const observedAt = readCanonicalDate(qualification.observedAt);
+  const expiresAt = readCanonicalDate(qualification.expiresAt);
+  return Boolean(
+    observedAt &&
+      expiresAt &&
+      observedAt <= now &&
+      expiresAt > now &&
+      observedAt < expiresAt &&
+      expiresAt.valueOf() - observedAt.valueOf() <= FOUNDER_EXTERNAL_BETA_QUALIFICATION_MAX_AGE_MS,
+  );
+}
+
+function readCanonicalDate(value: string): Date | null {
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) || date.toISOString() !== value ? null : date;
 }
 
 async function readReadyCandidate(
