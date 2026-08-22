@@ -248,6 +248,33 @@ export async function getFounderExternalBetaManifestForUser(
   }
 }
 
+export async function getFounderExternalBetaManifestStatusForUser(
+  userId: string,
+  now: Date,
+  dependencies: {
+    applicationRevision?: string;
+    cohort?: string;
+    createConnection?: () => DatabaseConnection;
+    env?: Record<string, string | undefined>;
+  } = {},
+): Promise<FounderExternalBetaManifestStatus> {
+  try {
+    return projectFounderExternalBetaManifestStatus(
+      await getFounderExternalBetaManifestForUser(userId, now, dependencies),
+    );
+  } catch {
+    return unavailableFounderExternalBetaManifestStatus();
+  }
+}
+
+export function unavailableFounderExternalBetaManifestStatus(): FounderExternalBetaManifestStatus {
+  return projectFounderExternalBetaManifestStatus({
+    complete: false,
+    qualifiedCapabilities: [],
+    unavailableCapabilities: FOUNDER_EXTERNAL_BETA_CAPABILITIES,
+  });
+}
+
 export function projectFounderExternalBetaManifestStatus(
   manifest: Pick<
     FounderExternalBetaManifest,

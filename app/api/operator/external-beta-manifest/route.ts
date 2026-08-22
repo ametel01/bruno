@@ -1,6 +1,7 @@
 import {
   getFounderExternalBetaManifestForUser,
   projectFounderExternalBetaManifestStatus,
+  unavailableFounderExternalBetaManifestStatus,
 } from "@/src/server/founder-product-contract/external-beta-manifest";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
@@ -39,11 +40,7 @@ export async function GET(
   } catch {
     return Response.json(
       {
-        externalBeta: projectFounderExternalBetaManifestStatus({
-          complete: false,
-          qualifiedCapabilities: [],
-          unavailableCapabilities: [],
-        }),
+        externalBeta: unavailableFounderExternalBetaManifestStatus(),
       },
       { headers: noStoreHeaders() },
     );
