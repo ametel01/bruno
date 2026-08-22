@@ -222,7 +222,7 @@ describe("Founder Operator route", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({
-      error: { code: "recovery_archive_unavailable" },
+      error: { code: "owner_preview_unavailable" },
     });
   });
 });

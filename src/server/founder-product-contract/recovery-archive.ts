@@ -270,6 +270,7 @@ async function cleanupRejectedRecoveryArchivePublication(
     if (!deleted.archiveAbsent || !deleted.recoveryCredentialsAbsent) {
       throw new Error("Rejected Recovery Archive publication absence was not verified.");
     }
+    await recordRejectedRecoveryArchivePublicationCleanup(userId, archiveId, connection);
   } catch {
     await connection.db.transaction(async (tx) => {
       await tx.execute(
@@ -310,6 +311,48 @@ async function cleanupRejectedRecoveryArchivePublication(
         .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, archiveId));
     });
   }
+}
+
+async function recordRejectedRecoveryArchivePublicationCleanup(
+  userId: string,
+  archiveId: string,
+  connection: DatabaseConnection,
+): Promise<void> {
+  await connection.db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${userId}`}, 0))`,
+    );
+    const [archive] = await tx
+      .select({ status: founderRecoveryArchives.status })
+      .from(founderRecoveryArchives)
+      .where(eq(founderRecoveryArchives.id, archiveId))
+      .limit(1)
+      .for("update");
+    if (archive?.status !== "deleted") return;
+    const [receipt] = await tx
+      .select({ completedAt: founderRecoveryArchiveDeletionReceipts.completedAt })
+      .from(founderRecoveryArchiveDeletionReceipts)
+      .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, archiveId))
+      .limit(1)
+      .for("update");
+    if (!receipt?.completedAt) {
+      throw new Error("Recovery Archive late-cleanup receipt is unavailable.");
+    }
+    const observedAt = new Date(Math.max(Date.now(), receipt.completedAt.valueOf() + 1));
+    const [updated] = await tx
+      .update(founderRecoveryArchiveDeletionReceipts)
+      .set({
+        status: "completed",
+        archiveProviderConfirmed: true,
+        recoveryCredentialsConfirmed: true,
+        attemptedAt: observedAt,
+        completedAt: observedAt,
+        failureCode: null,
+      })
+      .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, archiveId))
+      .returning({ id: founderRecoveryArchiveDeletionReceipts.id });
+    if (!updated) throw new Error("Recovery Archive late cleanup was not recorded.");
+  });
 }
 
 export async function reconcileFounderRecoveryArchives(input: {
@@ -355,7 +398,7 @@ export async function reconcileFounderRecoveryArchives(input: {
     const eligibleUsers = [...latestByUser.values()]
       .filter(
         (decision) =>
-          decision.outcome === "enter" &&
+          (decision.outcome === "enter" || decision.outcome === "resume") &&
           (latestRetirementByUser.get(decision.userId) ?? new Date(0)) < decision.decidedAt,
       )
       .map((decision) => decision.userId);

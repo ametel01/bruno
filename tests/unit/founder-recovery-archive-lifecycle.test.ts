@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
+import { buildTestOpenAiConnectedAcceptanceRelease } from "@/scripts/founder-openai-test-release";
 import { FakeBackupObjectStorage } from "@/src/server/backups/backup-storage";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
@@ -107,10 +109,20 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
   });
 
   it("admits a production Operator only after persisting its initial verified archive", async () => {
+    const applicationRevision = "9".repeat(40);
     const result = await admitFounderOperatorToOwnerPreview(USER_ID, {
-      applicationRevision: "9".repeat(40),
+      applicationRevision,
       createConnection: () => connection,
       createProvider: () => provider,
+      env: {
+        VERCEL_GIT_COMMIT_SHA: applicationRevision,
+        BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
+          START,
+          applicationRevision,
+        ),
+        BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE:
+          buildTestGoogleConnectedAcceptanceRelease("calendar_reading", START, applicationRevision),
+      },
       now: () => START,
     });
 
@@ -129,11 +141,32 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       expect.objectContaining({
         stage: "owner_preview",
         outcome: "enter",
-        applicationRevision: "9".repeat(40),
+        applicationRevision,
         runtimeRevision: "runtime-v1",
-        capabilityManifest: ["recovery_archive_v1"],
+        capabilityManifest: ["openai", "calendar_reading"],
+        evidenceDigests: expect.arrayContaining([expect.stringMatching(/^sha256:[a-f0-9]{64}$/)]),
       }),
     ]);
+  });
+
+  it("does not replace missing Preview Qualification with Recovery Archive proof", async () => {
+    const applicationRevision = "8".repeat(40);
+    await expect(
+      admitFounderOperatorToOwnerPreview(USER_ID, {
+        applicationRevision,
+        createConnection: () => connection,
+        createProvider: () => provider,
+        env: { VERCEL_GIT_COMMIT_SHA: applicationRevision },
+        now: () => START,
+      }),
+    ).rejects.toThrow("Owner Preview OpenAI qualification is unavailable.");
+    await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([]);
+    await expect(
+      connection.db
+        .select()
+        .from(founderReleaseDecisions)
+        .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision)),
+    ).resolves.toEqual([]);
   });
 
   it("creates at most one verified archive per 24-hour window", async () => {
@@ -160,6 +193,50 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     ).resolves.toMatchObject({ eligible: 1, created: 1, failed: 0, deleted: 0 });
 
     expect(await connection.db.select().from(founderRecoveryArchives)).toHaveLength(2);
+  });
+
+  it("resumes daily protection after an explicit Release Hold", async () => {
+    const holdAt = new Date(START.valueOf() + 1_000);
+    await connection.db.insert(founderReleaseDecisions).values({
+      userId: USER_ID,
+      operatorId: OPERATOR_ID,
+      stage: "owner_preview",
+      outcome: "hold",
+      applicationRevision: "7".repeat(40),
+      runtimeRevision: "runtime-v1",
+      capabilityManifest: ["openai", "calendar_reading"],
+      evidenceDigests: [`sha256:${"6".repeat(64)}`],
+      decidedAt: holdAt,
+      createdAt: holdAt,
+    });
+    await expect(
+      reconcileFounderRecoveryArchives({
+        now: new Date(START.valueOf() + 24 * 60 * 60 * 1_000),
+        provider,
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ eligible: 0, created: 0, failed: 0, deleted: 0 });
+
+    const resumeAt = new Date(holdAt.valueOf() + 1_000);
+    await connection.db.insert(founderReleaseDecisions).values({
+      userId: USER_ID,
+      operatorId: OPERATOR_ID,
+      stage: "owner_preview",
+      outcome: "resume",
+      applicationRevision: "5".repeat(40),
+      runtimeRevision: "runtime-v1",
+      capabilityManifest: ["openai", "calendar_reading"],
+      evidenceDigests: [`sha256:${"4".repeat(64)}`],
+      decidedAt: resumeAt,
+      createdAt: resumeAt,
+    });
+    await expect(
+      reconcileFounderRecoveryArchives({
+        now: new Date(START.valueOf() + 24 * 60 * 60 * 1_000 + 1_000),
+        provider,
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ eligible: 1, created: 1, failed: 0, deleted: 0 });
   });
 
   it("reserves one archive intent while its provider upload is still pending", async () => {
@@ -460,12 +537,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     await expect(
       underlyingStorage.exists({ key: pending.recoveryCredentialObjectKey }),
     ).resolves.toEqual({ ok: true, exists: false });
-    await expect(
-      connection.db
-        .select()
-        .from(founderRecoveryArchiveDeletionReceipts)
-        .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, pending.id)),
-    ).resolves.toEqual([expect.objectContaining({ status: "completed" })]);
+    const [lateCleanupReceipt] = await connection.db
+      .select()
+      .from(founderRecoveryArchiveDeletionReceipts)
+      .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, pending.id));
+    expect(lateCleanupReceipt).toMatchObject({ status: "completed" });
+    expect(lateCleanupReceipt?.completedAt?.valueOf()).toBeGreaterThan(expiresAt.valueOf());
   });
 
   it("does not certify stale absence after an in-flight publication becomes verified", async () => {
@@ -626,7 +703,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       userId: USER_ID,
       operatorId: OPERATOR_ID,
       stage: "owner_preview",
-      outcome: "enter",
+      outcome: "resume",
       applicationRevision: "2".repeat(40),
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
@@ -645,7 +722,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
   });
 
   async function seedReadyOwnerPreviewCandidate(): Promise<void> {
-    await connection.db.insert(users).values({ id: USER_ID, createdAt: START, updatedAt: START });
+    await connection.db.insert(users).values({
+      id: USER_ID,
+      clerkUserId: "user_recovery_archive_373",
+      createdAt: START,
+      updatedAt: START,
+    });
     await connection.db.insert(operators).values({
       id: OPERATOR_ID,
       userId: USER_ID,

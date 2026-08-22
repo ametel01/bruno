@@ -21,6 +21,7 @@ import {
   requireActiveFounderOperatorAuthorityInTransaction,
   requireReadyFounderOperatorAuthorityInTransaction,
 } from "./operator-authority";
+import { persistQualifiedFounderOwnerPreviewAdmissionInTransaction } from "./owner-preview-admission";
 import {
   createDurableRecoveryArchive,
   fulfillRecoveryArchiveIntent,
@@ -134,22 +135,21 @@ export async function executeFounderProductContractLifecycleAction(
           });
           if (!identity.subject) throw new Error("Clerk identity authentication was inconclusive.");
           const capabilities = await dependencies.providers.verifyCapabilityProviders();
+          if (!capabilities.openAI || !capabilities.google) {
+            throw new Error("Owner Preview provider qualification was inconclusive.");
+          }
           if (!lifecycleArchiveId) throw new Error("A verified Recovery Archive is required.");
-          await tx.insert(founderReleaseDecisions).values({
+          await persistQualifiedFounderOwnerPreviewAdmissionInTransaction(tx, {
             userId: input.userId,
             operatorId,
-            stage: "owner_preview",
-            outcome: "enter",
             applicationRevision: dependencies.applicationRevision,
             runtimeRevision,
-            capabilityManifest: ["openai", "calendar_reading"],
-            evidenceDigests: [
-              founderProductContractDigest(`clerk:${identity.subject}`),
+            identitySubject: identity.subject,
+            qualificationEvidenceDigests: [
               founderProductContractDigest(JSON.stringify(capabilities)),
-              founderProductContractDigest(`recovery-archive:${lifecycleArchiveId}`),
             ],
-            decidedAt: input.now,
-            createdAt: input.now,
+            recoveryArchiveId: lifecycleArchiveId,
+            now: input.now,
           });
           break;
         }
@@ -199,7 +199,7 @@ async function requireReleaseDecision(
       and(
         eq(founderReleaseDecisions.userId, userId),
         eq(founderReleaseDecisions.stage, "owner_preview"),
-        eq(founderReleaseDecisions.outcome, "enter"),
+        inArray(founderReleaseDecisions.outcome, ["enter", "resume"]),
         eq(founderReleaseDecisions.applicationRevision, applicationRevision),
         eq(founderReleaseDecisions.runtimeRevision, runtimeRevision),
       ),
@@ -250,13 +250,12 @@ async function executeInfrastructureRetirement(
     if (!after.ok || after.value.state !== "absent") {
       throw new Error(after.ok ? "DigitalOcean resource absence was not verified." : after.message);
     }
+    await archiveFulfillment;
     await completeInfrastructureRetirement(input, prepared, connection);
   } catch (error) {
     await retainInfrastructureRetirementFailure(input, prepared, error, connection);
     throw error;
   }
-
-  await archiveFulfillment;
 
   return lifecycleOutcome(input, dependencies.providers, {
     resourcesBefore: prepared.resourcesBefore,

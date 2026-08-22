@@ -258,10 +258,11 @@ archive only when the current verified copy reaches 24 hours, and processes expi
 Release Hold or denied admission. Object identities are persisted before upload, so an interrupted
 or partially failed creation remains discoverable for bounded cleanup. A completed Infrastructure
 Retirement stops new daily copies while the final retained archive continues to its 30-day expiry;
-a later Release Decision can start protection again for a restored Operator. Production Operator
-preparation grants Owner Preview admission only after the initial archive passes the isolated
-rebuild check. Every S3-compatible request, including response-body reads, uses a 10-second abort
-deadline so unavailable storage cannot indefinitely hold recovery, expiry, or retirement work.
+a later `resume` Release Decision can start protection again for a restored Operator. Production
+Operator preparation grants Owner Preview admission only after current OpenAI and Calendar Preview
+Qualification and the initial archive's isolated rebuild check all pass. Every S3-compatible
+request, including response-body reads, uses a 10-second abort deadline so unavailable storage
+cannot indefinitely hold recovery, expiry, or retirement work.
 
 ## Deploy the control plane and runners
 

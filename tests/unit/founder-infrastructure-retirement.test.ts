@@ -79,9 +79,15 @@ describe("Founder Infrastructure Retirement deadline", () => {
     await expect(
       Promise.race([
         dropletDeleted.then(() => "deleted" as const),
-        new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 100)),
+        new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 1_000)),
       ]),
     ).resolves.toBe("deleted");
+    await expect(
+      connection.db
+        .select()
+        .from(founderInfrastructureRetirements)
+        .where(eq(founderInfrastructureRetirements.runnerId, RUNNER_ID)),
+    ).resolves.toEqual([expect.objectContaining({ status: "in_progress" })]);
     releaseArchive?.();
 
     await expect(execution).resolves.toMatchObject({ cleanup: { resourcesAfter: 0 } });

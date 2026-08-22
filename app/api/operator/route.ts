@@ -1,3 +1,4 @@
+import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { admitFounderOperatorToOwnerPreview } from "@/src/server/founder-product-contract/owner-preview-admission";
 import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
 import {
@@ -70,18 +71,19 @@ export async function POST(
     const result = await (dependencies.prepareRuntime ?? prepareFounderOperatorRuntimeForUser)(
       applicationUser.userId,
     );
-    if (result.runtime.status === "ready") {
+    const ownerPreviewAdmission =
+      dependencies.admitOwnerPreview ??
+      (resolveAuthMode(process.env).mode === "clerk" ? admitFounderOperatorToOwnerPreview : null);
+    if (result.runtime.status === "ready" && ownerPreviewAdmission) {
       try {
-        await (dependencies.admitOwnerPreview ?? admitFounderOperatorToOwnerPreview)(
-          applicationUser.userId,
-        );
+        await ownerPreviewAdmission(applicationUser.userId);
       } catch {
         return Response.json(
           {
             error: {
-              code: "recovery_archive_unavailable",
+              code: "owner_preview_unavailable",
               message:
-                "Owner Preview is waiting for verified recovery protection. Try preparation again.",
+                "Owner Preview is waiting for current qualification and verified Recovery Archive protection. Try preparation again.",
             },
           },
           { status: 503, headers: noStoreHeaders() },
