@@ -121,7 +121,12 @@ export async function executeFounderProductContractLifecycleAction(
     }
     const lifecycleArchiveId =
       input.action === "release_stage_admission" || input.action === "recovery_archive_lifecycle"
-        ? await createDurableRecoveryArchive(input, dependencies.providers, connection)
+        ? await createDurableRecoveryArchive(
+            input,
+            dependencies.providers,
+            connection,
+            () => input.now,
+          )
         : null;
     return await connection.db.transaction(async (tx) => {
       const { operatorId, runtimeRevision } =
@@ -139,15 +144,26 @@ export async function executeFounderProductContractLifecycleAction(
             throw new Error("Owner Preview provider qualification was inconclusive.");
           }
           if (!lifecycleArchiveId) throw new Error("A verified Recovery Archive is required.");
+          const qualificationEvidenceDigests = [
+            founderProductContractDigest(
+              JSON.stringify({ capability: "openai", qualifiedAt: input.now.toISOString() }),
+            ),
+            founderProductContractDigest(
+              JSON.stringify({
+                capability: "calendar_reading",
+                qualifiedAt: input.now.toISOString(),
+              }),
+            ),
+          ];
           await persistQualifiedFounderOwnerPreviewAdmissionInTransaction(tx, {
             userId: input.userId,
             operatorId,
             applicationRevision: dependencies.applicationRevision,
             runtimeRevision,
             identitySubject: identity.subject,
-            qualificationEvidenceDigests: [
-              founderProductContractDigest(JSON.stringify(capabilities)),
-            ],
+            qualificationEvidenceDigests,
+            freshQualificationEvidenceDigests: qualificationEvidenceDigests,
+            qualificationObservedAt: input.now,
             recoveryArchiveId: lifecycleArchiveId,
             now: input.now,
           });
@@ -238,6 +254,7 @@ async function executeInfrastructureRetirement(
         prepared.recoveryArchiveId,
         prepared.operatorId,
         false,
+        () => input.now,
       )
     : Promise.resolve();
 

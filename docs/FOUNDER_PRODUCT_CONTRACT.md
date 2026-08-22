@@ -87,8 +87,8 @@ satisfy this boundary. In addition to exact-revision identity and OpenAI/Calenda
 Qualification, production preparation records the Owner Preview `enter` Release Decision only after
 this verified-restorable archive exists; unavailable storage returns a fail-closed preparation
 response without admission authority. A later Release Hold can be lifted only by a new `resume`
-decision after the same Owner-, stage-, application-, runtime-, and capability-scoped qualification
-is revalidated. Provider
+decision after fresh, independently evidenced OpenAI and Calendar qualifications revalidate the
+same Owner, stage, application, runtime, and capability boundaries after that Hold. Provider
 subscription state applies bounded retirement deadlines and immediately pauses new work for unpaid,
 expired, and refunded entitlement. The Proposed Action claim and Gmail execution transactions pass
 their captured operation time into this entitlement guard, so the deadline controls the real effect

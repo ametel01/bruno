@@ -56,6 +56,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       { action: "release_stage_admission", userId: USER_ID, now: START },
       provider,
       connection,
+      () => START,
     );
 
     const [archive] = await connection.db
@@ -103,6 +104,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
           deleteRecoveryArchive: (input) => provider.deleteRecoveryArchive(input),
         },
         connection,
+        () => new Date(START.valueOf() + 60 * 60 * 1_000),
       ),
     ).resolves.toBe(archiveId);
     expect(await connection.db.select().from(founderRecoveryArchives)).toHaveLength(1);
@@ -137,7 +139,10 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         applicationRevision,
         runtimeRevision: "runtime-v1",
         capabilityManifest: ["openai", "calendar_reading"],
-        evidenceDigests: expect.arrayContaining([expect.stringMatching(/^sha256:[a-f0-9]{64}$/)]),
+        evidenceDigests: expect.arrayContaining([
+          `sha256:${"d".repeat(64)}`,
+          `sha256:${"f".repeat(64)}`,
+        ]),
       }),
     ]);
 
@@ -154,12 +159,28 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       decidedAt: holdAt,
       createdAt: holdAt,
     });
+    const resumeAt = new Date(holdAt.valueOf() + 1_000);
+    await expect(
+      admitFounderOperatorToOwnerPreview(USER_ID, {
+        applicationRevision,
+        createConnection: () => connection,
+        createProvider: () => provider,
+        env: environment,
+        now: () => resumeAt,
+      }),
+    ).rejects.toThrow("Release Hold requires fresh Preview Qualification evidence.");
+    const freshEnvironment = ownerPreviewEnvironment(
+      applicationRevision,
+      new Date(holdAt.valueOf() + 500),
+      resumeAt,
+      ["1", "2"],
+    );
     await admitFounderOperatorToOwnerPreview(USER_ID, {
       applicationRevision,
       createConnection: () => connection,
       createProvider: () => provider,
-      env: environment,
-      now: () => new Date(holdAt.valueOf() + 1_000),
+      env: freshEnvironment,
+      now: () => resumeAt,
     });
     const decisions = await connection.db
       .select()
@@ -172,7 +193,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
   it("does not replace missing Preview Qualification with Recovery Archive proof", async () => {
     const applicationRevision = "8".repeat(40);
     const environment = ownerPreviewEnvironment(applicationRevision);
-    delete environment.BRUNO_OWNER_PREVIEW_QUALIFICATION;
+    delete environment.BRUNO_OWNER_PREVIEW_QUALIFICATIONS;
     await expect(
       admitFounderOperatorToOwnerPreview(USER_ID, {
         applicationRevision,
@@ -181,7 +202,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         env: environment,
         now: () => START,
       }),
-    ).rejects.toThrow("Owner Preview Qualification is unavailable.");
+    ).rejects.toThrow("Owner Preview Qualifications are unavailable.");
     await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([]);
     await expect(
       connection.db
@@ -194,9 +215,9 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
   it("rejects Preview Qualification scoped to a different runtime", async () => {
     const applicationRevision = "6".repeat(40);
     const environment = ownerPreviewEnvironment(applicationRevision);
-    const qualification = JSON.parse(environment.BRUNO_OWNER_PREVIEW_QUALIFICATION ?? "null");
-    qualification.runtimeRevision = "different-runtime";
-    environment.BRUNO_OWNER_PREVIEW_QUALIFICATION = JSON.stringify(qualification);
+    const bundle = JSON.parse(environment.BRUNO_OWNER_PREVIEW_QUALIFICATIONS ?? "null");
+    bundle.qualifications[0].runtimeRevision = "different-runtime";
+    environment.BRUNO_OWNER_PREVIEW_QUALIFICATIONS = JSON.stringify(bundle);
 
     await expect(
       admitFounderOperatorToOwnerPreview(USER_ID, {
@@ -206,7 +227,28 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         env: environment,
         now: () => START,
       }),
-    ).rejects.toThrow("Owner Preview Qualification does not match this Owner and candidate.");
+    ).rejects.toThrow(
+      "Owner Preview openai qualification does not match this Owner and candidate.",
+    );
+    await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([]);
+  });
+
+  it("requires independent evidence for each Preview capability", async () => {
+    const applicationRevision = "5".repeat(40);
+    const environment = ownerPreviewEnvironment(applicationRevision);
+    const bundle = JSON.parse(environment.BRUNO_OWNER_PREVIEW_QUALIFICATIONS ?? "null");
+    bundle.qualifications[1].evidenceDigest = bundle.qualifications[0].evidenceDigest;
+    environment.BRUNO_OWNER_PREVIEW_QUALIFICATIONS = JSON.stringify(bundle);
+
+    await expect(
+      admitFounderOperatorToOwnerPreview(USER_ID, {
+        applicationRevision,
+        createConnection: () => connection,
+        createProvider: () => provider,
+        env: environment,
+        now: () => START,
+      }),
+    ).rejects.toThrow("Owner Preview capabilities require independent qualification evidence.");
     await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([]);
   });
 
@@ -215,6 +257,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       { action: "release_stage_admission", userId: USER_ID, now: START },
       provider,
       connection,
+      () => START,
     );
 
     await expect(
@@ -311,12 +354,14 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       { action: "release_stage_admission", userId: USER_ID, now: START },
       blockingProvider,
       connection,
+      () => START,
     );
     await firstUploadStarted;
     const second = createDurableRecoveryArchive(
       { action: "release_stage_admission", userId: USER_ID, now: START },
       blockingProvider,
       connection,
+      () => START,
     );
 
     await expect(second).rejects.toThrow("Recovery Archive creation is already in progress.");
@@ -348,6 +393,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         deleteRecoveryArchive: (input) => provider.deleteRecoveryArchive(input),
       },
       connection,
+      () => START,
     );
     await dailyUploadStarted;
 
@@ -415,6 +461,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
           deleteRecoveryArchive: (input) => provider.deleteRecoveryArchive(input),
         },
         connection,
+        () => START,
       ),
     ).rejects.toThrow("object storage unavailable");
 
@@ -480,6 +527,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       { action: "release_stage_admission", userId: USER_ID, now: START },
       provider,
       connection,
+      () => START,
     );
     const expiresAt = new Date(START.valueOf() + 30 * 24 * 60 * 60 * 1_000);
 
@@ -553,10 +601,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       storage: blockingStorage,
       masterKey: new Uint8Array(32).fill(91),
     });
+    let cleanupObservedAt = START;
     const creation = createDurableRecoveryArchive(
       { action: "release_stage_admission", userId: USER_ID, now: START },
       lateProvider,
       connection,
+      () => cleanupObservedAt,
     );
     await uploadStarted;
     const [pending] = await connection.db.select().from(founderRecoveryArchives);
@@ -568,6 +618,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     await expect(
       expireFounderRecoveryArchivesForUser(USER_ID, expiresAt, lateProvider, connection),
     ).resolves.toBe(1);
+    cleanupObservedAt = new Date(expiresAt.valueOf() + 6 * 60 * 60 * 1_000);
     releaseUpload?.();
     await expect(creation).rejects.toThrow("Recovery Archive intent is no longer pending.");
 
@@ -583,7 +634,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       .from(founderRecoveryArchiveDeletionReceipts)
       .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, pending.id));
     expect(lateCleanupReceipt).toMatchObject({ status: "completed" });
-    expect(lateCleanupReceipt?.completedAt).toEqual(new Date(expiresAt.valueOf() + 1));
+    expect(lateCleanupReceipt?.completedAt).toEqual(cleanupObservedAt);
   });
 
   it("does not certify stale absence after an in-flight publication becomes verified", async () => {
@@ -653,6 +704,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       { action: "release_stage_admission", userId: USER_ID, now: START },
       provider,
       connection,
+      () => START,
     );
     await connection.db.insert(founderReleaseDecisions).values({
       userId: USER_ID,
@@ -688,6 +740,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       { action: "release_stage_admission", userId: USER_ID, now: START },
       provider,
       connection,
+      () => START,
     );
     const runnerId = randomUUID();
     await connection.db.insert(runners).values({
@@ -817,39 +870,45 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   function ownerPreviewEnvironment(
     applicationRevision: string,
+    qualifiedAt = new Date(START.valueOf() - 60 * 60 * 1_000),
+    observedAt = START,
+    evidenceCharacters: readonly [string, string] = ["d", "f"],
   ): Record<string, string | undefined> {
     return {
       VERCEL_GIT_COMMIT_SHA: applicationRevision,
       BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
-        START,
+        observedAt,
         applicationRevision,
       ),
       BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
         "calendar_reading",
-        START,
+        observedAt,
         applicationRevision,
       ),
-      BRUNO_OWNER_PREVIEW_QUALIFICATION: JSON.stringify({
-        schemaVersion: "bruno.owner-preview-qualification.v1",
-        outcome: "passed",
-        audience: "owner",
-        ownerUserId: USER_ID,
-        operatorId: OPERATOR_ID,
-        stage: "owner_preview",
-        applicationRevision,
-        runtimeRevision: "runtime-v1",
-        capabilityManifest: ["openai", "calendar_reading"],
-        qualifiedAt: new Date(START.valueOf() - 60 * 60 * 1_000).toISOString(),
-        expiresAt: new Date(START.valueOf() + 7 * 24 * 60 * 60 * 1_000).toISOString(),
-        evidenceDigest: `sha256:${"d".repeat(64)}`,
-        gates: {
-          safeAuthorization: true,
-          realUse: true,
-          recovery: true,
-          revocation: true,
-          providerDisclosure: true,
-          cleanup: true,
-        },
+      BRUNO_OWNER_PREVIEW_QUALIFICATIONS: JSON.stringify({
+        schemaVersion: "bruno.owner-preview-qualifications.v1",
+        qualifications: ["openai", "calendar_reading"].map((capability, index) => ({
+          schemaVersion: "bruno.preview-qualification.v1",
+          outcome: "passed",
+          audience: "owner",
+          ownerUserId: USER_ID,
+          operatorId: OPERATOR_ID,
+          stage: "owner_preview",
+          applicationRevision,
+          runtimeRevision: "runtime-v1",
+          capability,
+          qualifiedAt: qualifiedAt.toISOString(),
+          expiresAt: new Date(qualifiedAt.valueOf() + 7 * 24 * 60 * 60 * 1_000).toISOString(),
+          evidenceDigest: `sha256:${evidenceCharacters[index]?.repeat(64)}`,
+          gates: {
+            safeAuthorization: true,
+            realUse: true,
+            recovery: true,
+            revocation: true,
+            providerDisclosure: true,
+            cleanup: true,
+          },
+        })),
       }),
     };
   }

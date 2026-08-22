@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { founderRecoveryArchives, founderReleaseDecisions, users } from "@/src/server/db/schema";
 import { evaluateFounderGoogleCalendarRelease } from "@/src/server/operators/founder-google-reading-release";
@@ -11,7 +11,7 @@ import {
   type FounderProductContractTransaction,
   requireReadyFounderOperatorAuthorityInTransaction,
 } from "./operator-authority";
-import { requireFounderOwnerPreviewQualification } from "./preview-qualification";
+import { requireFounderOwnerPreviewQualifications } from "./preview-qualification";
 import { createDurableRecoveryArchive } from "./recovery-archive";
 import type { FounderRecoveryArchiveProvider } from "./recovery-archive-provider";
 
@@ -30,6 +30,8 @@ type QualifiedOwnerPreviewAdmissionInput = {
   runtimeRevision: string;
   identitySubject: string;
   qualificationEvidenceDigests: readonly `sha256:${string}`[];
+  freshQualificationEvidenceDigests: readonly `sha256:${string}`[];
+  qualificationObservedAt: Date;
   recoveryArchiveId: string;
   now: Date;
 };
@@ -38,7 +40,8 @@ export async function admitFounderOperatorToOwnerPreview(
   userId: string,
   dependencies: FounderOwnerPreviewAdmissionDependencies = {},
 ): Promise<{ archiveId: string }> {
-  const now = dependencies.now?.() ?? new Date();
+  const clock = dependencies.now ?? (() => new Date());
+  const now = clock();
   const environment = dependencies.env ?? process.env;
   const applicationRevision =
     dependencies.applicationRevision ?? environment.VERCEL_GIT_COMMIT_SHA?.trim() ?? "";
@@ -73,7 +76,7 @@ export async function admitFounderOperatorToOwnerPreview(
     const authority = await connection.db.transaction((tx) =>
       requireReadyFounderOperatorAuthorityInTransaction(tx, userId),
     );
-    const previewQualification = requireFounderOwnerPreviewQualification(
+    const previewQualifications = requireFounderOwnerPreviewQualifications(
       {
         userId,
         operatorId: authority.operatorId,
@@ -87,6 +90,7 @@ export async function admitFounderOperatorToOwnerPreview(
       { action: "release_stage_admission", userId, now },
       provider,
       connection,
+      clock,
     );
     await connection.db.transaction(async (tx) => {
       const { operatorId, runtimeRevision } =
@@ -115,10 +119,20 @@ export async function admitFounderOperatorToOwnerPreview(
         runtimeRevision,
         identitySubject,
         qualificationEvidenceDigests: [
-          previewQualification.evidenceDigest,
+          ...previewQualifications.map((qualification) => qualification.evidenceDigest),
           openAIQualification.evidence.evidenceDigest,
           calendarQualification.evidence.evidenceDigest,
         ],
+        freshQualificationEvidenceDigests: previewQualifications.map(
+          (qualification) => qualification.evidenceDigest,
+        ),
+        qualificationObservedAt: new Date(
+          Math.min(
+            ...previewQualifications.map((qualification) =>
+              new Date(qualification.qualifiedAt).valueOf(),
+            ),
+          ),
+        ),
         recoveryArchiveId: archiveId,
         now,
       });
@@ -148,6 +162,7 @@ export async function persistQualifiedFounderOwnerPreviewAdmissionInTransaction(
   const [latestDecision] = await tx
     .select({
       outcome: founderReleaseDecisions.outcome,
+      decidedAt: founderReleaseDecisions.decidedAt,
       applicationRevision: founderReleaseDecisions.applicationRevision,
       runtimeRevision: founderReleaseDecisions.runtimeRevision,
       capabilityManifest: founderReleaseDecisions.capabilityManifest,
@@ -174,6 +189,32 @@ export async function persistQualifiedFounderOwnerPreviewAdmissionInTransaction(
     ) &&
     evidenceDigests.every((digest) => latestDecision.evidenceDigests.includes(digest));
   if (alreadyQualified) return;
+  if (latestDecision?.outcome === "hold") {
+    const [priorActiveDecision] = await tx
+      .select({ evidenceDigests: founderReleaseDecisions.evidenceDigests })
+      .from(founderReleaseDecisions)
+      .where(
+        and(
+          eq(founderReleaseDecisions.userId, input.userId),
+          eq(founderReleaseDecisions.operatorId, input.operatorId),
+          eq(founderReleaseDecisions.stage, "owner_preview"),
+          inArray(founderReleaseDecisions.outcome, ["enter", "resume"]),
+        ),
+      )
+      .orderBy(desc(founderReleaseDecisions.decidedAt))
+      .limit(1)
+      .for("update");
+    if (
+      input.qualificationObservedAt <= latestDecision.decidedAt ||
+      input.freshQualificationEvidenceDigests.length === 0 ||
+      !priorActiveDecision ||
+      input.freshQualificationEvidenceDigests.some((digest) =>
+        priorActiveDecision.evidenceDigests.includes(digest),
+      )
+    ) {
+      throw new Error("Release Hold requires fresh Preview Qualification evidence.");
+    }
+  }
   await tx.insert(founderReleaseDecisions).values({
     userId: input.userId,
     operatorId: input.operatorId,

@@ -56,6 +56,7 @@ export async function createDurableRecoveryArchive(
   input: ArchiveLifecycleInput,
   providers: FounderRecoveryArchiveProvider,
   connection: DatabaseConnection,
+  clock: () => Date,
 ): Promise<string> {
   const intent = await connection.db.transaction(async (tx) => {
     const { operatorId } = await requireReadyFounderOperatorAuthorityInTransaction(
@@ -103,6 +104,7 @@ export async function createDurableRecoveryArchive(
     intent.archiveId,
     intent.operatorId,
     true,
+    clock,
   );
   return intent.archiveId;
 }
@@ -188,6 +190,7 @@ export async function fulfillRecoveryArchiveIntent(
   archiveId: string,
   operatorId: string,
   failClosed: boolean,
+  clock: () => Date,
 ): Promise<void> {
   try {
     const state = await loadFounderRecoveryArchiveDurableState(connection, operatorId);
@@ -227,7 +230,7 @@ export async function fulfillRecoveryArchiveIntent(
         archive,
         providers,
         connection,
-        input.now,
+        clock,
       );
       throw new Error("Recovery Archive intent is no longer pending.");
     }
@@ -260,7 +263,7 @@ async function cleanupRejectedRecoveryArchivePublication(
   archive: Awaited<ReturnType<FounderRecoveryArchiveProvider["createRecoveryArchive"]>>,
   providers: FounderRecoveryArchiveProvider,
   connection: DatabaseConnection,
-  publicationObservedAt: Date,
+  clock: () => Date,
 ): Promise<void> {
   try {
     const deleted = await providers.deleteRecoveryArchive({
@@ -272,12 +275,7 @@ async function cleanupRejectedRecoveryArchivePublication(
     if (!deleted.archiveAbsent || !deleted.recoveryCredentialsAbsent) {
       throw new Error("Rejected Recovery Archive publication absence was not verified.");
     }
-    await recordRejectedRecoveryArchivePublicationCleanup(
-      userId,
-      archiveId,
-      publicationObservedAt,
-      connection,
-    );
+    await recordRejectedRecoveryArchivePublicationCleanup(userId, archiveId, clock(), connection);
   } catch {
     await connection.db.transaction(async (tx) => {
       await tx.execute(
@@ -323,7 +321,7 @@ async function cleanupRejectedRecoveryArchivePublication(
 async function recordRejectedRecoveryArchivePublicationCleanup(
   userId: string,
   archiveId: string,
-  publicationObservedAt: Date,
+  cleanupObservedAt: Date,
   connection: DatabaseConnection,
 ): Promise<void> {
   await connection.db.transaction(async (tx) => {
@@ -346,17 +344,17 @@ async function recordRejectedRecoveryArchivePublicationCleanup(
     if (!receipt?.completedAt) {
       throw new Error("Recovery Archive late-cleanup receipt is unavailable.");
     }
-    const observedAt = new Date(
-      Math.max(publicationObservedAt.valueOf(), receipt.completedAt.valueOf() + 1),
-    );
+    if (cleanupObservedAt <= receipt.completedAt) {
+      throw new Error("Recovery Archive late-cleanup observation time is stale.");
+    }
     const [updated] = await tx
       .update(founderRecoveryArchiveDeletionReceipts)
       .set({
         status: "completed",
         archiveProviderConfirmed: true,
         recoveryCredentialsConfirmed: true,
-        attemptedAt: observedAt,
-        completedAt: observedAt,
+        attemptedAt: cleanupObservedAt,
+        completedAt: cleanupObservedAt,
         failureCode: null,
       })
       .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, archiveId))
@@ -369,6 +367,7 @@ export async function reconcileFounderRecoveryArchives(input: {
   now: Date;
   provider: FounderRecoveryArchiveProvider;
   createConnection?: () => DatabaseConnection;
+  clock?: () => Date;
 }): Promise<{ eligible: number; created: number; failed: number; deleted: number }> {
   const connection =
     input.createConnection?.() ??
@@ -445,6 +444,7 @@ export async function reconcileFounderRecoveryArchives(input: {
             { action: "scheduled_archive", userId, now: input.now },
             input.provider,
             connection,
+            input.clock ?? (() => new Date()),
           );
           created += 1;
         }
