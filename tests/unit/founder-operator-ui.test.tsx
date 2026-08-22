@@ -362,6 +362,67 @@ describe("Founder Operator preparation shell", () => {
     expect(html).toContain("What should we handle today?");
   });
 
+  it("shows the attended Trusted Preview Learning Round without hidden capabilities", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: {
+          ...OPERATOR,
+          preparation: {
+            ...OPERATOR.preparation,
+            status: "ready",
+            timezone: "Asia/Manila",
+            timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+          },
+          runtime: { status: "ready", recoveryMessage: null },
+        },
+        ownerPreviewAdmitted: true,
+        ownerPreviewWorkAllowed: true,
+        ownerPreview: {
+          stage: "Trusted Preview",
+          state: "active",
+          availableCapabilities: ["OpenAI", "Calendar reading"],
+          supportBoundary: "Attended onboarding and observation",
+          evidenceClassification: "Learning Round",
+          automaticPromotion: false,
+          founderAcceptanceEligible: false,
+          cohortSlot: 2,
+        },
+        openAiReleased: true,
+        calendarReadingReleased: true,
+        mailReadingReleased: true,
+        mailSendingReleased: true,
+      }),
+    );
+
+    expect(html).toContain("Trusted Preview");
+    expect(html).toContain("Available now: OpenAI and Calendar reading.");
+    expect(html).toContain("attended onboarding and observation");
+    expect(html).toContain("cannot become Founder Acceptance Evidence");
+    expect(html).not.toMatch(/Gmail|Anthropic|Core Operation/);
+  });
+
+  it("presents an identity-bound Trusted Preview invitation instead of open admission", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: {
+          ...OPERATOR,
+          preparation: {
+            ...OPERATOR.preparation,
+            status: "ready",
+            timezone: "Asia/Manila",
+            timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+          },
+          runtime: { status: "ready", recoveryMessage: null },
+        },
+        trustedPreviewInvitationToken: "A".repeat(43),
+      }),
+    );
+
+    expect(html).toContain("Trusted Preview is waiting for current protection");
+    expect(html).toContain("Accept Trusted Preview invitation");
+    expect(html).not.toContain("Enter Owner Preview");
+  });
+
   it("preserves safe workspace checkpoints when the admitted runtime needs attention", () => {
     const html = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {

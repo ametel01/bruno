@@ -7,6 +7,7 @@ import {
   appMetadata,
   founderRecoveryArchives,
   founderReleaseDecisions,
+  founderTrustedPreviewInvitations,
   operatorRuntimes,
   operators,
 } from "@/src/server/db/schema";
@@ -19,12 +20,19 @@ import {
   type FounderOwnerPreviewCapabilityRequirement,
 } from "./preview-qualification";
 import { reconcileFounderOwnerPreviewQualificationExpiryInTransaction } from "./release-stage-hold";
+import {
+  getFounderTrustedPreviewCohortOwnerIdInTransaction,
+  getLatestFounderTrustedPreviewStageDecisionInTransaction,
+  reconcileFounderTrustedPreviewQualificationExpiryInTransaction,
+} from "./trusted-preview-release-decision";
 
 const OWNER_PREVIEW_ARCHIVE_WINDOW_MS = 24 * 60 * 60 * 1_000;
 
 export type FounderOwnerPreviewAccess = {
   admitted: boolean;
   availableCapabilities: readonly FounderOwnerPreviewCapability[];
+  stage?: "owner_preview" | "trusted_preview" | null;
+  cohortSlot?: 1 | 2 | 3;
 };
 
 export type FounderOwnerPreviewAccessRequirement =
@@ -36,13 +44,19 @@ export function requiresFounderReleaseStageAuthority(mode: AuthModeDecision["mod
 }
 
 export class FounderReleaseStageAccessError extends Error {
-  readonly code = "owner_preview_access_required" as const;
+  readonly code: "owner_preview_access_required" | "trusted_preview_access_required";
   readonly status = 403 as const;
 
-  constructor() {
+  constructor(stage: "owner_preview" | "trusted_preview" = "owner_preview") {
     super(
-      "An active exact-revision Owner Preview admission and current Recovery Archive are required.",
+      stage === "trusted_preview"
+        ? "Trusted Preview is unavailable until Clerk identity, invitation admission, exact-revision authority, and current Recovery Archive protection are verified."
+        : "Owner Preview is unavailable until exact-revision admission and current Recovery Archive protection are verified.",
     );
+    this.code =
+      stage === "trusted_preview"
+        ? "trusted_preview_access_required"
+        : "owner_preview_access_required";
     this.name = "FounderReleaseStageAccessError";
   }
 }
@@ -81,7 +95,7 @@ export async function requireFounderOwnerPreviewAccessForUser(
 ): Promise<void> {
   if (requirement === "workspace") {
     const access = await getFounderOwnerPreviewAccessForUser(userId, now, dependencies);
-    if (!access.admitted) throw new FounderReleaseStageAccessError();
+    if (!access.admitted) throw new FounderReleaseStageAccessError(access.stage ?? "owner_preview");
     return;
   }
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
@@ -89,7 +103,7 @@ export async function requireFounderOwnerPreviewAccessForUser(
   try {
     const applicationRevision = readFounderApplicationRevision(dependencies) ?? "";
     const access = await connection.db.transaction(async (tx) => {
-      await reconcileFounderOwnerPreviewQualificationExpiryInTransaction(tx, {
+      await reconcileFounderPreviewQualificationExpiryInTransaction(tx, {
         userId,
         now,
         applicationRevision,
@@ -97,10 +111,26 @@ export async function requireFounderOwnerPreviewAccessForUser(
       return getFounderOwnerPreviewAccessInTransaction(tx, { userId, now, applicationRevision });
     });
     if (!requirementsAvailable(access.availableCapabilities, requirement)) {
-      throw new FounderReleaseStageAccessError();
+      throw new FounderReleaseStageAccessError(access.stage ?? "owner_preview");
     }
   } finally {
     if (ownsConnection) await connection.close();
+  }
+}
+
+export async function reconcileFounderPreviewQualificationExpiryInTransaction(
+  tx: FounderProductContractTransaction,
+  input: { userId: string; now: Date; applicationRevision: string },
+): Promise<void> {
+  const cohortOwnerUserId = await getFounderTrustedPreviewCohortOwnerIdInTransaction(tx);
+  if (cohortOwnerUserId === input.userId) {
+    await reconcileFounderOwnerPreviewQualificationExpiryInTransaction(tx, input);
+  } else if (cohortOwnerUserId) {
+    await reconcileFounderTrustedPreviewQualificationExpiryInTransaction(tx, {
+      cohortOwnerUserId,
+      now: input.now,
+      applicationRevision: input.applicationRevision,
+    });
   }
 }
 
@@ -115,7 +145,7 @@ export async function requireFounderOwnerPreviewAccessInTransaction(
 ): Promise<void> {
   const access = await getFounderOwnerPreviewAccessInTransaction(tx, input);
   if (!requirementsAvailable(access.availableCapabilities, input.requiredCapabilities)) {
-    throw new FounderReleaseStageAccessError();
+    throw new FounderReleaseStageAccessError(access.stage ?? "owner_preview");
   }
 }
 
@@ -130,7 +160,13 @@ export async function getFounderOwnerPreviewAccessInTransaction(
     .from(appMetadata)
     .where(eq(appMetadata.key, FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY))
     .limit(1);
-  if (ownerMapping?.userId !== input.userId) return unavailable;
+  if (ownerMapping?.userId !== input.userId) {
+    if (!ownerMapping) return unavailable;
+    return getFounderTrustedPreviewAccessInTransaction(tx, {
+      ...input,
+      cohortOwnerUserId: ownerMapping.userId,
+    });
+  }
   const [authority] = await tx
     .select({
       operatorId: operators.id,
@@ -254,6 +290,158 @@ export async function getFounderOwnerPreviewAccessInTransaction(
   return { admitted: true, availableCapabilities: [] };
 }
 
+async function getFounderTrustedPreviewAccessInTransaction(
+  tx: Pick<FounderProductContractTransaction, "select">,
+  input: {
+    userId: string;
+    cohortOwnerUserId: string;
+    now: Date;
+    applicationRevision: string;
+  },
+): Promise<FounderOwnerPreviewAccess> {
+  const unavailable = {
+    admitted: false,
+    availableCapabilities: [],
+    stage: "trusted_preview",
+  } as const;
+  const [membership] = await tx
+    .select({
+      operatorId: founderTrustedPreviewInvitations.participantOperatorId,
+      admissionDecisionId: founderTrustedPreviewInvitations.admissionDecisionId,
+      cohortSlot: founderTrustedPreviewInvitations.cohortSlot,
+    })
+    .from(founderTrustedPreviewInvitations)
+    .where(
+      and(
+        eq(founderTrustedPreviewInvitations.cohortOwnerUserId, input.cohortOwnerUserId),
+        eq(founderTrustedPreviewInvitations.participantUserId, input.userId),
+        eq(founderTrustedPreviewInvitations.status, "admitted"),
+      ),
+    )
+    .limit(1);
+  if (
+    !membership?.operatorId ||
+    !membership.admissionDecisionId ||
+    !isCohortSlot(membership.cohortSlot)
+  ) {
+    return unavailable;
+  }
+  const [participantAuthority] = await tx
+    .select({
+      operatorId: operators.id,
+      runtimeStatus: operatorRuntimes.status,
+      runtimeRevision: operatorRuntimes.configRevision,
+    })
+    .from(operators)
+    .innerJoin(operatorRuntimes, eq(operatorRuntimes.operatorId, operators.id))
+    .where(
+      and(
+        eq(operators.userId, input.userId),
+        eq(operators.id, membership.operatorId),
+        eq(operators.status, "active"),
+      ),
+    )
+    .limit(1);
+  if (!participantAuthority?.runtimeRevision) return unavailable;
+  const [participantDecision] = await tx
+    .select({
+      id: founderReleaseDecisions.id,
+      outcome: founderReleaseDecisions.outcome,
+      applicationRevision: founderReleaseDecisions.applicationRevision,
+      runtimeRevision: founderReleaseDecisions.runtimeRevision,
+      capabilityManifest: founderReleaseDecisions.capabilityManifest,
+    })
+    .from(founderReleaseDecisions)
+    .where(
+      and(
+        eq(founderReleaseDecisions.id, membership.admissionDecisionId),
+        eq(founderReleaseDecisions.userId, input.userId),
+        eq(founderReleaseDecisions.operatorId, membership.operatorId),
+        eq(founderReleaseDecisions.stage, "trusted_preview"),
+      ),
+    )
+    .limit(1);
+  if (
+    !participantDecision ||
+    (participantDecision.outcome !== "enter" && participantDecision.outcome !== "resume") ||
+    participantDecision.applicationRevision !== input.applicationRevision ||
+    participantDecision.runtimeRevision !== participantAuthority.runtimeRevision ||
+    participantDecision.capabilityManifest.length !== FOUNDER_OWNER_PREVIEW_CAPABILITIES.length ||
+    !FOUNDER_OWNER_PREVIEW_CAPABILITIES.every((capability) =>
+      participantDecision.capabilityManifest.includes(capability),
+    )
+  ) {
+    return unavailable;
+  }
+  const [cohortOwnerAuthority] = await tx
+    .select({ operatorId: operators.id, runtimeRevision: operatorRuntimes.configRevision })
+    .from(operators)
+    .innerJoin(operatorRuntimes, eq(operatorRuntimes.operatorId, operators.id))
+    .where(and(eq(operators.userId, input.cohortOwnerUserId), eq(operators.status, "active")))
+    .limit(1);
+  const stageDecision = await getLatestFounderTrustedPreviewStageDecisionInTransaction(
+    tx,
+    input.cohortOwnerUserId,
+  );
+  const [archive] = await tx
+    .select({ id: founderRecoveryArchives.id })
+    .from(founderRecoveryArchives)
+    .where(
+      and(
+        eq(founderRecoveryArchives.userId, input.userId),
+        eq(founderRecoveryArchives.operatorId, membership.operatorId),
+        eq(founderRecoveryArchives.applicationRevision, input.applicationRevision),
+        eq(founderRecoveryArchives.runtimeRevision, participantAuthority.runtimeRevision),
+        eq(founderRecoveryArchives.status, "verified"),
+        eq(founderRecoveryArchives.formatVersion, 1),
+        eq(founderRecoveryArchives.restorableVerified, true),
+        lte(founderRecoveryArchives.observedAt, input.now),
+        gt(
+          founderRecoveryArchives.observedAt,
+          new Date(input.now.valueOf() - OWNER_PREVIEW_ARCHIVE_WINDOW_MS),
+        ),
+        gt(founderRecoveryArchives.expiresAt, input.now),
+      ),
+    )
+    .orderBy(desc(founderRecoveryArchives.observedAt))
+    .limit(1);
+  if (
+    participantAuthority.runtimeStatus !== "ready" ||
+    !archive ||
+    !cohortOwnerAuthority?.runtimeRevision ||
+    !stageDecision ||
+    stageDecision.operatorId !== cohortOwnerAuthority.operatorId ||
+    stageDecision.runtimeRevision !== cohortOwnerAuthority.runtimeRevision ||
+    stageDecision.applicationRevision !== input.applicationRevision ||
+    stageDecision.capabilityManifest.length !== FOUNDER_OWNER_PREVIEW_CAPABILITIES.length ||
+    !FOUNDER_OWNER_PREVIEW_CAPABILITIES.every((capability) =>
+      stageDecision.capabilityManifest.includes(capability),
+    )
+  ) {
+    return {
+      admitted: true,
+      availableCapabilities: [],
+      stage: "trusted_preview",
+      cohortSlot: membership.cohortSlot,
+    };
+  }
+  const availableCapabilities = FOUNDER_OWNER_PREVIEW_CAPABILITIES.filter(
+    (capability) =>
+      participantDecision.capabilityManifest.includes(capability) &&
+      qualificationIsCurrent(stageDecision, capability, input.now) &&
+      (stageDecision.outcome === "enter" ||
+        stageDecision.outcome === "resume" ||
+        (stageDecision.outcome === "hold" &&
+          !stageDecision.affectedCapabilities.includes(capability))),
+  );
+  return {
+    admitted: true,
+    availableCapabilities,
+    stage: "trusted_preview",
+    cohortSlot: membership.cohortSlot,
+  };
+}
+
 function qualificationIsCurrent(
   decision: {
     openAiQualificationExpiresAt: Date | null;
@@ -291,4 +479,8 @@ function isFounderOwnerPreviewCapability(
   capability: string,
 ): capability is FounderOwnerPreviewCapability {
   return FOUNDER_OWNER_PREVIEW_CAPABILITIES.some((candidate) => candidate === capability);
+}
+
+function isCohortSlot(value: number): value is 1 | 2 | 3 {
+  return value === 1 || value === 2 || value === 3;
 }

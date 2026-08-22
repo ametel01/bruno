@@ -38,8 +38,7 @@ export function founderOperatorAccessErrorResponse(error: unknown): Response | n
     {
       error: {
         code: error.code,
-        message:
-          "Owner Preview is unavailable until exact-revision admission and current Recovery Archive protection are verified.",
+        message: error.message,
       },
     },
     { status: error.status, headers: { "Cache-Control": "no-store" } },

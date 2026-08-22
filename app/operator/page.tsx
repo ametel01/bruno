@@ -31,7 +31,11 @@ import { buildFounderTimezoneOptions } from "@/src/shared/founder-timezones";
 
 export const dynamic = "force-dynamic";
 
-export default async function FounderOperatorPage() {
+export default async function FounderOperatorPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+} = {}) {
   const applicationUser = await requireConfiguredApplicationUser();
 
   if (!applicationUser.ok) {
@@ -46,6 +50,7 @@ export default async function FounderOperatorPage() {
   }
 
   const operator = await getFounderOperatorForUser(applicationUser.userId);
+  const trustedPreviewInvitationToken = readTrustedPreviewInvitationToken(await searchParams);
   const applicationRevision = readFounderApplicationRevision();
   const [onboarding, recoveryArchive, infrastructureRetirement, ownerPreviewAccess] =
     await Promise.all([
@@ -81,6 +86,7 @@ export default async function FounderOperatorPage() {
           FOUNDER_OWNER_PREVIEW_CAPABILITIES,
         )}
         ownerPreview={projectFounderOwnerPreviewStatus(ownerPreviewAccess)}
+        {...(trustedPreviewInvitationToken ? { trustedPreviewInvitationToken } : {})}
         timezoneOptions={buildFounderTimezoneOptions()}
         openAiReleased={openAiReleased}
         calendarReadingReleased={calendarReadingReleased}
@@ -98,4 +104,11 @@ export default async function FounderOperatorPage() {
       />
     </FounderOperatorShell>
   );
+}
+
+function readTrustedPreviewInvitationToken(
+  searchParams: Record<string, string | string[] | undefined> | undefined,
+): string | undefined {
+  const value = searchParams?.trusted_preview_invitation;
+  return typeof value === "string" && /^[A-Za-z0-9_-]{43,128}$/.test(value) ? value : undefined;
 }

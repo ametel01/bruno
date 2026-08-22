@@ -10,10 +10,10 @@ import {
 import type { FounderOwnerPreviewCapabilityRequirement } from "./preview-qualification";
 import {
   FounderReleaseStageAccessError,
+  reconcileFounderPreviewQualificationExpiryInTransaction,
   requireFounderOwnerPreviewAccessForUser,
   requireFounderOwnerPreviewAccessInTransaction,
 } from "./release-stage-access";
-import { reconcileFounderOwnerPreviewQualificationExpiryInTransaction } from "./release-stage-hold";
 
 export type FounderOwnerPreviewWorkAuthorityDependencies = {
   applicationRevision?: string;
@@ -83,14 +83,14 @@ export async function withFounderOwnerPreviewWorkAuthority<T>(
 
     const outcome = await connection.db.transaction(async (tx) => {
       const now = input.now();
-      await lockFounderProductContractLifecycleInTransaction(tx, input.userId);
       if (!dependencies.requireReleaseStageAccess) {
-        await reconcileFounderOwnerPreviewQualificationExpiryInTransaction(tx, {
+        await reconcileFounderPreviewQualificationExpiryInTransaction(tx, {
           userId: input.userId,
           now,
           applicationRevision,
         });
       }
+      await lockFounderProductContractLifecycleInTransaction(tx, input.userId);
       try {
         await (
           dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction
