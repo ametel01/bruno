@@ -303,6 +303,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
+    expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
   ]);
 });
 
