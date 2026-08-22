@@ -26,11 +26,16 @@ import { getFounderOnboardingForUser } from "@/src/server/operators/founder-onbo
 import { isFounderOpenAiReleased } from "@/src/server/operators/founder-openai-release";
 import { getFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
+import { resolveFounderOperatorExperience } from "@/src/shared/founder-operator-experience";
 import { buildFounderTimezoneOptions } from "@/src/shared/founder-timezones";
 
 export const dynamic = "force-dynamic";
 
-export default async function FounderOperatorPage() {
+export default async function FounderOperatorPage({
+  searchParams = Promise.resolve({}),
+}: {
+  searchParams?: Promise<{ experience?: string | string[] }>;
+} = {}) {
   const applicationUser = await requireConfiguredApplicationUser();
 
   if (!applicationUser.ok) {
@@ -46,6 +51,15 @@ export default async function FounderOperatorPage() {
 
   const operator = await getFounderOperatorForUser(applicationUser.userId);
   const applicationRevision = readFounderApplicationRevision();
+  const authMode = resolveAuthMode(process.env).mode;
+  const requestedExperience = (await searchParams).experience;
+  const experience = resolveFounderOperatorExperience({
+    authMode,
+    nodeEnvironment: process.env.NODE_ENV,
+    requestedExperience: Array.isArray(requestedExperience)
+      ? requestedExperience[0]
+      : requestedExperience,
+  });
   const [onboarding, recoveryArchive, ownerPreviewAccess] = await Promise.all([
     operator ? getFounderOnboardingForUser(applicationUser.userId) : Promise.resolve(undefined),
     applicationRevision
@@ -53,7 +67,7 @@ export default async function FounderOperatorPage() {
           applicationRevision,
         })
       : Promise.resolve(unavailableFounderRecoveryArchiveStatus()),
-    requiresFounderReleaseStageAuthority(resolveAuthMode(process.env).mode)
+    requiresFounderReleaseStageAuthority(authMode)
       ? getFounderOwnerPreviewAccessForUser(applicationUser.userId, new Date())
       : Promise.resolve({
           admitted: true,
@@ -77,6 +91,7 @@ export default async function FounderOperatorPage() {
           FOUNDER_OWNER_PREVIEW_CAPABILITIES,
         )}
         ownerPreview={projectFounderOwnerPreviewStatus(ownerPreviewAccess)}
+        experience={experience}
         timezoneOptions={buildFounderTimezoneOptions()}
         openAiReleased={openAiReleased}
         calendarReadingReleased={calendarReadingReleased}

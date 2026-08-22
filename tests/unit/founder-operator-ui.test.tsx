@@ -6,6 +6,7 @@ import { FounderOperatorPreparation } from "@/app/operator/_components/founder-o
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
 import type { FounderOnboardingDto } from "@/src/server/operators/founder-onboarding";
 import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
+import { resolveFounderOperatorExperience } from "@/src/shared/founder-operator-experience";
 
 const OPERATOR: FounderOperatorDto = {
   id: "00000000-0000-4000-8000-000000003391",
@@ -27,6 +28,32 @@ const OPERATOR: FounderOperatorDto = {
 };
 
 describe("Founder Operator preparation shell", () => {
+  it("allows the legacy compatibility projection only in development mode", () => {
+    expect(
+      resolveFounderOperatorExperience({
+        authMode: "development",
+        nodeEnvironment: "development",
+        requestedExperience: "legacy_compatibility",
+      }),
+    ).toBe("legacy_compatibility");
+    for (const authMode of ["clerk", "operator", "invalid"] as const) {
+      expect(
+        resolveFounderOperatorExperience({
+          authMode,
+          nodeEnvironment: "development",
+          requestedExperience: "legacy_compatibility",
+        }),
+      ).toBe("owner_preview");
+    }
+    expect(
+      resolveFounderOperatorExperience({
+        authMode: "development",
+        nodeEnvironment: "production",
+        requestedExperience: "legacy_compatibility",
+      }),
+    ).toBe("owner_preview");
+  });
+
   it("asks the Founder to begin preparation without creating state on page load", () => {
     const html = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, { initialOperator: null }),
@@ -511,6 +538,55 @@ describe("Founder Operator preparation shell", () => {
     expect(mailOnly).not.toContain("Your Mail Connection");
     expect(mailOnly).not.toMatch(/Gmail|Anthropic|Core Operation/);
     expect(mailOnly).toContain("Support is fully attended");
+  });
+
+  it("keeps legacy Mail and Core UI available only through the explicit compatibility projection", () => {
+    const readyOperator: FounderOperatorDto = {
+      ...OPERATOR,
+      preparation: {
+        ...OPERATOR.preparation,
+        status: "ready",
+        timezone: "Asia/Manila",
+        timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+      },
+      runtime: { status: "ready", recoveryMessage: null },
+    };
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: readyOperator,
+        initialOnboarding: {
+          nextStep: "mail",
+          defaultRoute: "/operator#onboarding-mail",
+          activated: false,
+          operation: "core",
+          capabilities: { ai: "ready", calendar: "ready", mail: "stale", core: "missing" },
+          facts: {
+            timezoneConfirmed: true,
+            runtimeReady: true,
+            processingConsent: false,
+            firstBriefReady: false,
+            primarySuiteIdentity: "founder@example.com",
+          },
+        } satisfies FounderOnboardingDto,
+        ownerPreviewAdmitted: true,
+        experience: "legacy_compatibility",
+        mailReadingReleased: true,
+        mailReleaseControls: {
+          qualified: true,
+          requiredScope: "https://www.googleapis.com/auth/gmail.readonly",
+          disclosure: "bounded",
+          retentionDays: 90,
+          deletion: "staged",
+          aiLimitedUse: "bounded",
+        },
+      }),
+    );
+
+    expect(html).toContain("Next step: Review Mail evidence access");
+    expect(html).toContain("Mail: Needs a fresh check");
+    expect(html).toContain("Your Mail Connection");
+    expect(html).toContain("Core Operation");
+    expect(html).not.toContain("Owner Preview capabilities");
   });
 
   it("keeps Gmail sending hidden even when its separate release evidence passes", () => {
