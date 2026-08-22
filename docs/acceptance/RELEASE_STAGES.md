@@ -79,6 +79,13 @@ history, cancellation, and eligible resumption. Initial General Release does not
 switching or customer-initiated subscription pausing until their Product Entitlement consequences
 are separately released.
 
+The application requests a fresh signed portal URL only after authenticating the internal Owner and
+checking a current `verified`, in-window `past_due`, or paid-through `cancelled` Product Entitlement.
+It rechecks that authority before redirecting and records only an immutable digest plus portal expiry,
+never the signed URL. The Lemon Squeezy Customer Portal configuration for Initial General Release
+must expose payment methods, billing history, cancellation, and eligible resumption while leaving
+plan switching and customer-initiated pausing disabled.
+
 Losing or deleting a Clerk identity does not cancel commerce or delete Bruno.Ai data. It creates an
 identity-recovery problem. Only recently reauthenticated Account Closure coordinates external-action
 pause, Lemon Squeezy cancellation, connection revocation, Bruno Data Deletion, and receipts; refunds
@@ -105,6 +112,18 @@ Bruno.Ai's infrastructure cost. Product Entitlement transitions therefore use ex
 - a full refund ends Product Entitlement, stops new work immediately, and requires Infrastructure
   Retirement within 24 hours; and
 - duplicate, delayed, or reordered commerce events never restart or extend a retirement clock.
+
+Founder surfaces project these states separately: payment recovery with its exact deadline,
+cancelled-through with the paid `ends_at`, stopped new work with retirement due or in progress, and
+completed Infrastructure Retirement after provider absence is verified. Cancellation and full
+refund create immutable Commerce Lifecycle Receipts; Infrastructure Retirement and Account Closure
+continue to use their own decisions and receipts.
+
+The deterministic Founder Product Contract includes a required `subscription_lifecycle` scenario.
+It exercises the signed hosted portal boundary and its exact allowed/forbidden actions, all recovery
+and terminal deadlines, cancellation through paid `ends_at`, and the rule that reordered active
+events cannot restart terminal clocks. Deterministic evidence does not prove live Lemon Squeezy
+configuration; attended test- and live-mode provider qualification remains required before release.
 
 Before retirement, Bruno.Ai creates and verifies an encrypted off-Droplet Recovery Archive containing
 the minimum durable Operator state needed to rebuild. It excludes raw provider credentials, expires

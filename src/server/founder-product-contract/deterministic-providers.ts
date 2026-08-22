@@ -114,6 +114,23 @@ export function deterministicFounderLifecycleProviders(input: {
       if (!subscriptionId) throw new Error("Subscription identity is required.");
       return { status: input.subscriptionStatus };
     },
+    async createCustomerPortal({ subscriptionId, now }) {
+      calls.push("lemonSqueezy.create_customer_portal");
+      if (!subscriptionId) throw new Error("Subscription identity is required.");
+      const expiresAt = new Date(now.valueOf() + 24 * 60 * 60 * 1_000);
+      return {
+        url: `https://app.lemonsqueezy.com/billing?expires=${Math.floor(expiresAt.valueOf() / 1_000)}&user=founder-contract&signature=${"a".repeat(64)}`,
+        expiresAt,
+        actions: {
+          paymentMethods: true,
+          billingHistory: true,
+          cancellation: true,
+          eligibleResumption: true,
+          planSwitching: false,
+          customerPause: false,
+        },
+      };
+    },
     async createRecoveryArchive(archiveInput) {
       calls.push("archive.create");
       failIfConfigured(failures, "archive.create");

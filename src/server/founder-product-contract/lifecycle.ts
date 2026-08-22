@@ -4,8 +4,10 @@ import { founderReleaseDecisions } from "@/src/server/db/schema";
 import type { DigitalOceanOwnedSetProvider } from "@/src/server/runners/digitalocean-provider";
 import { expireFounderRecoveryArchivesForUser } from "./archive-expiry";
 import { founderProductContractDigest } from "./digest";
-import { reconcileFounderCommerceEvent } from "./entitlement";
-import { executeFounderInfrastructureRetirement } from "./infrastructure-retirement";
+import {
+  assertFounderSubscriptionLifecycleContract,
+  reconcileFounderCommerceEvent,
+} from "./entitlement";
 import { persistFounderExternalBetaQualificationsInTransaction } from "./external-beta-manifest";
 import {
   FOUNDER_EXTERNAL_BETA_CAPABILITIES,
@@ -13,6 +15,7 @@ import {
   FOUNDER_EXTERNAL_BETA_QUALIFICATION_SCHEMA,
   type FounderExternalBetaQualification,
 } from "./external-beta-qualification";
+import { executeFounderInfrastructureRetirement } from "./infrastructure-retirement";
 import {
   lockFounderProductContractLifecycleInTransaction,
   requireReadyFounderOperatorAuthorityInTransaction,
@@ -20,13 +23,14 @@ import {
 import { persistQualifiedFounderOwnerPreviewAdmissionInTransaction } from "./owner-preview-admission";
 import { persistFounderOwnerPreviewDenialInTransaction } from "./owner-preview-release-decision";
 import { FOUNDER_PREVIEW_QUALIFICATION_MAX_AGE_MS } from "./preview-qualification";
-import { persistFounderOwnerPreviewHoldInTransaction } from "./release-stage-hold";
 import { createDurableRecoveryArchive } from "./recovery-archive";
 import type { FounderRecoveryArchiveProvider } from "./recovery-archive-provider";
+import { persistFounderOwnerPreviewHoldInTransaction } from "./release-stage-hold";
 
 export type FounderProductContractLifecycleAction =
   | "release_stage_admission"
   | "product_entitlement_lifecycle"
+  | "subscription_lifecycle"
   | "recovery_archive_lifecycle"
   | "infrastructure_retirement";
 
@@ -58,6 +62,18 @@ export type FounderLifecycleProviderBoundary = FounderRecoveryArchiveProvider & 
     gmailSending: true;
   }>;
   readSubscription(input: { subscriptionId: string }): Promise<{ status: FounderCommerceStatus }>;
+  createCustomerPortal(input: { subscriptionId: string; now: Date }): Promise<{
+    url: string;
+    expiresAt: Date;
+    actions: {
+      paymentMethods: true;
+      billingHistory: true;
+      cancellation: true;
+      eligibleResumption: true;
+      planSwitching: false;
+      customerPause: false;
+    };
+  }>;
   digitalOcean: DigitalOceanOwnedSetProvider;
   calls(): readonly string[];
 };
@@ -81,6 +97,14 @@ export type FounderLifecycleOutcome = {
     providerChoice: "Connect OpenAI, Anthropic, or both";
     capacityBoundary: "Uses only your connected provider accounts";
     safeWorkCheckpointsPreserved: true;
+  };
+  commerceLifecycle?: {
+    portal: "signed_hosted";
+    paymentRecoveryHours: 168;
+    unpaidRetirementHours: 24;
+    expiredRetirementHours: 1;
+    refundRetirementHours: 24;
+    reorderedActiveCanRestartTerminalClock: false;
   };
 };
 
@@ -265,6 +289,21 @@ export async function executeFounderProductContractLifecycleAction(
           await reconcileFounderCommerceEvent(tx, input, dependencies);
           break;
         }
+        case "subscription_lifecycle": {
+          await requireReleaseDecision(
+            tx,
+            input.userId,
+            dependencies.applicationRevision,
+            runtimeRevision,
+          );
+          const portal = await dependencies.providers.createCustomerPortal({
+            subscriptionId: `${input.runId}:subscription`,
+            now: input.now,
+          });
+          assertFounderCustomerPortalContract(portal, input.now);
+          assertFounderSubscriptionLifecycleContract(input.now);
+          break;
+        }
         case "recovery_archive_lifecycle": {
           if (!lifecycleArchiveId) throw new Error("A verified Recovery Archive is required.");
           break;
@@ -290,6 +329,18 @@ export async function executeFounderProductContractLifecycleAction(
               },
             }
           : {}),
+        ...(input.action === "subscription_lifecycle"
+          ? {
+              commerceLifecycle: {
+                portal: "signed_hosted" as const,
+                paymentRecoveryHours: 168 as const,
+                unpaidRetirementHours: 24 as const,
+                expiredRetirementHours: 1 as const,
+                refundRetirementHours: 24 as const,
+                reorderedActiveCanRestartTerminalClock: false as const,
+              },
+            }
+          : {}),
       };
     });
   } catch (error) {
@@ -310,6 +361,30 @@ export async function executeFounderProductContractLifecycleAction(
     throw error;
   } finally {
     if (ownsConnection) await connection.close();
+  }
+}
+
+function assertFounderCustomerPortalContract(
+  portal: Awaited<ReturnType<FounderLifecycleProviderBoundary["createCustomerPortal"]>>,
+  now: Date,
+): void {
+  const url = new URL(portal.url);
+  if (
+    url.protocol !== "https:" ||
+    url.pathname !== "/billing" ||
+    !url.searchParams.get("user") ||
+    !url.searchParams.get("expires") ||
+    !/^[a-f0-9]{64}$/.test(url.searchParams.get("signature") ?? "") ||
+    portal.expiresAt <= now ||
+    portal.expiresAt.valueOf() - now.valueOf() > 25 * 60 * 60 * 1_000 ||
+    portal.actions.paymentMethods !== true ||
+    portal.actions.billingHistory !== true ||
+    portal.actions.cancellation !== true ||
+    portal.actions.eligibleResumption !== true ||
+    portal.actions.planSwitching !== false ||
+    portal.actions.customerPause !== false
+  ) {
+    throw new Error("The signed hosted Customer Portal contract is incomplete.");
   }
 }
 

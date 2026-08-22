@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { POST as startCheckout } from "@/app/api/operator/commerce/checkout/route";
+import { POST as openCustomerPortal } from "@/app/api/operator/commerce/portal/route";
 import { GET as readStatus } from "@/app/api/operator/commerce/status/route";
 import { POST as receiveWebhook } from "@/app/api/webhooks/lemon-squeezy/route";
 import type { LemonSqueezyCommerceProvider } from "@/src/server/commerce/lemon-squeezy-provider";
@@ -42,7 +43,7 @@ describe("Founder commerce routes", () => {
     const getStatus = vi.fn(async () => ({
       state: "entitled" as const,
       status: "verified" as const,
-      retirementDueAt: null,
+      customerPortalAvailable: true as const,
     }));
     const response = await readStatus(
       new Request("https://bruno.example/api/operator/commerce/status"),
@@ -59,6 +60,55 @@ describe("Founder commerce routes", () => {
       { requireUser: async () => ({ ok: true, userId: USER_ID }), getStatus },
     );
     expect(queryAttempt.status).toBe(400);
+  });
+
+  it("redirects only an authenticated eligible Founder to a newly issued signed portal", async () => {
+    const provider = {} as LemonSqueezyCommerceProvider;
+    const issuePortal = vi.fn(async () => ({
+      portalUrl: "https://bruno.lemonsqueezy.com/billing?signed=true",
+    }));
+    const response = await openCustomerPortal(
+      new Request("https://bruno.example/api/operator/commerce/portal", { method: "POST" }),
+      undefined,
+      {
+        requireUser: async () => ({ ok: true, userId: USER_ID }),
+        createProvider: () => provider,
+        issuePortal,
+        now: () => new Date("2026-08-23T00:00:00.000Z"),
+      },
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://bruno.lemonsqueezy.com/billing?signed=true",
+    );
+    expect(issuePortal).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID, provider }),
+    );
+
+    issuePortal.mockClear();
+    const queryAttempt = await openCustomerPortal(
+      new Request("https://bruno.example/api/operator/commerce/portal?success=true", {
+        method: "POST",
+      }),
+      undefined,
+      {
+        requireUser: async () => ({ ok: true, userId: USER_ID }),
+        createProvider: () => provider,
+        issuePortal,
+      },
+    );
+    expect(queryAttempt.status).toBe(400);
+    await expect(queryAttempt.json()).resolves.toMatchObject({
+      error: { code: "customer_portal_request_invalid" },
+    });
+    expect(issuePortal).not.toHaveBeenCalled();
+
+    const unauthorized = await openCustomerPortal(
+      new Request("https://bruno.example/api/operator/commerce/portal", { method: "POST" }),
+      undefined,
+      { requireUser: async () => ({ ok: false, status: 401, code: "unauthenticated" }) },
+    );
+    expect(unauthorized.status).toBe(401);
   });
 
   it("rejects an invalid signature before recording and accepts a verified delivery", async () => {

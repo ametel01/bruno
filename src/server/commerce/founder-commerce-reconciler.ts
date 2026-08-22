@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, isNull, lte, notExists, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, notExists, or } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   founderCheckoutCorrelations,
@@ -16,8 +16,11 @@ import {
   type FounderInfrastructureRetirementProvider,
 } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import { lockFounderProductContractLifecycleInTransaction } from "@/src/server/founder-product-contract/operator-authority";
+import {
+  reconcileFounderCommerceReceipt,
+  recordFounderCommerceLifecycleDecisionReceiptInTransaction,
+} from "./founder-commerce";
 import type { LemonSqueezyCommerceProvider } from "./lemon-squeezy-provider";
-import { reconcileFounderCommerceReceipt } from "./founder-commerce";
 
 const REFUND_LEASE_MILLISECONDS = 5 * 60 * 1_000;
 const ENTITLEMENT_PAUSE_REASON = "Product Entitlement does not authorize new work.";
@@ -141,6 +144,54 @@ export async function reconcileNextFounderCommerce(input: {
         return { processed: 1, outcome: "retirement_retrying" };
       }
     }
+    const [dueEntitlement] = await connection.db
+      .select({
+        userId: founderProductEntitlements.userId,
+        sourceEventId: founderProductEntitlements.sourceEventId,
+      })
+      .from(founderProductEntitlements)
+      .where(
+        and(
+          inArray(founderProductEntitlements.status, [
+            "past_due",
+            "unpaid",
+            "cancelled",
+            "expired",
+            "refunded",
+          ]),
+          lte(founderProductEntitlements.retirementDueAt, input.now),
+          notExists(
+            connection.db
+              .select({ id: founderInfrastructureRetirements.id })
+              .from(founderInfrastructureRetirements)
+              .where(
+                and(
+                  eq(founderInfrastructureRetirements.userId, founderProductEntitlements.userId),
+                  eq(founderInfrastructureRetirements.status, "completed"),
+                ),
+              ),
+          ),
+        ),
+      )
+      .orderBy(asc(founderProductEntitlements.retirementDueAt))
+      .limit(1);
+    if (dueEntitlement) {
+      try {
+        await executeFounderInfrastructureRetirement(
+          {
+            action: "infrastructure_retirement",
+            runId: `commerce-entitlement:${dueEntitlement.sourceEventId}`,
+            userId: dueEntitlement.userId,
+            now: input.now,
+          },
+          { providers: input.retirementProvider, applicationRevision: input.applicationRevision },
+          connection,
+        );
+        return { processed: 1, outcome: "retirement_completed" };
+      } catch {
+        return { processed: 1, outcome: "retirement_retrying" };
+      }
+    }
     return {
       processed: pendingReceipt ? 1 : 0,
       outcome: pendingReceipt ? "receipt_pending" : "idle",
@@ -176,7 +227,7 @@ async function claimRefund(connection: DatabaseConnection, now: Date): Promise<R
     if (!candidate?.providerSubscriptionId || !candidate.providerOrderId) return null;
     await lockFounderProductContractLifecycleInTransaction(tx, candidate.userId);
     const authority = await readCurrentEntitlementAuthority(tx, candidate.userId);
-    if (authority?.checkoutCorrelationId === candidate.id && authority.status === "verified") {
+    if (authority?.checkoutCorrelationId === candidate.id) {
       return null;
     }
     const superseded = authority !== null && authority.generation > candidate.generation;
@@ -296,6 +347,16 @@ async function executeRefundClaim(
               updatedAt: input.now,
             },
           });
+        await recordFounderCommerceLifecycleDecisionReceiptInTransaction(tx, {
+          userId: claim.userId,
+          sourceEventId: source.id,
+          providerSubscriptionId: claim.subscriptionId,
+          providerStatus: "refunded",
+          orderId: claim.orderId,
+          effectiveAt: input.now,
+          occurredAt: input.now,
+          createdAt: input.now,
+        });
       }
       return { closed: true, retireInfrastructure: !superseded };
     });

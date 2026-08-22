@@ -21,6 +21,7 @@ export const dynamic = "force-dynamic";
 const ACTIONS = new Set<FounderProductContractLifecycleAction>([
   "release_stage_admission",
   "product_entitlement_lifecycle",
+  "subscription_lifecycle",
   "recovery_archive_lifecycle",
   "infrastructure_retirement",
 ]);

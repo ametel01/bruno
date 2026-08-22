@@ -41,6 +41,10 @@ export type LemonSqueezyCommerceProvider = {
     redirectUrl: string;
     expiresAt: string;
   }): Promise<{ checkoutId: string; checkoutUrl: string }>;
+  createCustomerPortal(input: {
+    subscriptionId: string;
+    now: Date;
+  }): Promise<{ portalUrl: string; expiresAt: string }>;
   readSubscription(input: { subscriptionId: string }): Promise<ReconciledLemonSqueezySubscription>;
   readOrder(input: { orderId: string }): Promise<ReconciledLemonSqueezyOrder>;
   cancelSubscription(input: { subscriptionId: string }): Promise<void>;
@@ -134,6 +138,31 @@ export class LemonSqueezyApiProvider implements LemonSqueezyCommerceProvider {
   async readSubscription(input: {
     subscriptionId: string;
   }): Promise<ReconciledLemonSqueezySubscription> {
+    const { subscriptionId, attributes } = await this.#readSubscriptionResource(input);
+    return {
+      subscriptionId,
+      orderId: String(readPositiveInteger(attributes, "order_id")),
+      status: parseCommerceStatus(readString(attributes, "status")),
+      updatedAt: readExactInstant(attributes, "updated_at"),
+      endsAt: readNullableExactInstant(attributes, "ends_at"),
+    };
+  }
+
+  async createCustomerPortal(input: {
+    subscriptionId: string;
+    now: Date;
+  }): Promise<{ portalUrl: string; expiresAt: string }> {
+    const { attributes } = await this.#readSubscriptionResource(input);
+    const urls = readRecord(attributes.urls);
+    const portalUrl = readString(urls, "customer_portal");
+    const expiresAt = requireSignedCustomerPortalUrl(portalUrl, input.now);
+    return { portalUrl, expiresAt };
+  }
+
+  async #readSubscriptionResource(input: { subscriptionId: string }): Promise<{
+    subscriptionId: string;
+    attributes: Record<string, unknown>;
+  }> {
     const subscriptionId = requireProviderId(input.subscriptionId, "subscription ID");
     const body = await this.#request(`/subscriptions/${subscriptionId}`, { method: "GET" });
     const data = readResource(body, "subscriptions");
@@ -144,13 +173,7 @@ export class LemonSqueezyApiProvider implements LemonSqueezyCommerceProvider {
     requireExpectedTestMode(attributes, this.#config.mode);
     requireConfiguredResource(attributes, "store_id", this.#config.storeId);
     requireConfiguredResource(attributes, "variant_id", this.#config.variantId);
-    return {
-      subscriptionId,
-      orderId: String(readPositiveInteger(attributes, "order_id")),
-      status: parseCommerceStatus(readString(attributes, "status")),
-      updatedAt: readExactInstant(attributes, "updated_at"),
-      endsAt: readNullableExactInstant(attributes, "ends_at"),
-    };
+    return { subscriptionId, attributes };
   }
 
   async refundOrder(input: { orderId: string }): Promise<ReconciledLemonSqueezyOrder> {
@@ -276,6 +299,42 @@ function requireExactFutureInstant(value: string): string {
 function isLemonSqueezyCheckoutHost(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
   return normalized === "lemonsqueezy.com" || normalized.endsWith(".lemonsqueezy.com");
+}
+
+function requireSignedCustomerPortalUrl(value: string, now: Date): string {
+  const url = new URL(value);
+  if (
+    url.protocol !== "https:" ||
+    !isLemonSqueezyCheckoutHost(url.hostname) ||
+    url.username ||
+    url.password ||
+    url.hash ||
+    !/^\/billing\/?$/.test(url.pathname)
+  ) {
+    throw new Error("Lemon Squeezy returned an invalid Customer Portal URL.");
+  }
+  const expires = url.searchParams.get("expires");
+  const signature = url.searchParams.get("signature");
+  const user = url.searchParams.get("user");
+  if (
+    !expires ||
+    !/^[1-9][0-9]{0,12}$/.test(expires) ||
+    !signature ||
+    !/^[a-f0-9]{64}$/.test(signature) ||
+    !user ||
+    !/^[1-9][0-9]{0,19}$/.test(user)
+  ) {
+    throw new Error("Lemon Squeezy Customer Portal signature is invalid.");
+  }
+  const expiresAt = new Date(Number(expires) * 1_000);
+  if (
+    Number.isNaN(expiresAt.valueOf()) ||
+    expiresAt <= now ||
+    expiresAt.valueOf() > now.valueOf() + 25 * 60 * 60 * 1_000
+  ) {
+    throw new Error("Lemon Squeezy Customer Portal expiry is invalid.");
+  }
+  return expiresAt.toISOString();
 }
 
 function readResource(

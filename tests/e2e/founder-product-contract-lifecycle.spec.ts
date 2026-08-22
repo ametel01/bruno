@@ -53,6 +53,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
         for (const id of [
           "release_stage_admission",
           "product_entitlement_lifecycle",
+          "subscription_lifecycle",
           "recovery_archive_lifecycle",
           "infrastructure_retirement",
         ] as const) {
@@ -107,6 +108,14 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                   resourcesAfter: number;
                   verified: boolean;
                   observedAt: string;
+                };
+                commerceLifecycle?: {
+                  portal: string;
+                  paymentRecoveryHours: number;
+                  unpaidRetirementHours: number;
+                  expiredRetirementHours: number;
+                  refundRetirementHours: number;
+                  reorderedActiveCanRestartTerminalClock: boolean;
                 };
               };
             };
@@ -188,6 +197,17 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                 },
               });
             }
+            if (id === "subscription_lifecycle") {
+              expect(body.outcome.providerCalls).toContain("lemonSqueezy.create_customer_portal");
+              expect(body.outcome.commerceLifecycle).toEqual({
+                portal: "signed_hosted",
+                paymentRecoveryHours: 168,
+                unpaidRetirementHours: 24,
+                expiredRetirementHours: 1,
+                refundRetirementHours: 24,
+                reorderedActiveCanRestartTerminalClock: false,
+              });
+            }
             clock.advance(id === "release_stage_admission" ? 3 : 1);
             return { status: "passed", ...body.outcome.cleanup };
           });
@@ -209,6 +229,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
   }
 
   expect(await readFounderScenarioExecutions(runId, fixture.userId)).toEqual([
+    expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),

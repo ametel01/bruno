@@ -142,7 +142,7 @@ export async function assertPersistedFounderLifecycleAuthority(
     expect(authority).toMatchObject({
       release_decisions: 3,
       release_decision_outcomes: ["enter", "hold", "resume"],
-      scenario_executions: 4,
+      scenario_executions: 5,
       commerce_events: 2,
       terminal_entitlements: 1,
       consumed_correlations: 1,

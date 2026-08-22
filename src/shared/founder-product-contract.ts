@@ -44,6 +44,16 @@ export const FOUNDER_PRODUCT_CONTRACT_INVARIANTS = [
     ],
   },
   {
+    id: "subscription_lifecycle",
+    kind: "automated",
+    evidence: [
+      "tests/e2e/founder-product-contract-lifecycle.spec.ts",
+      "tests/unit/founder-commerce-db.test.ts",
+      "tests/unit/founder-product-entitlement-policy.test.ts",
+      "tests/unit/founder-payment-status.test.tsx",
+    ],
+  },
+  {
     id: "privacy_lifecycle",
     kind: "automated",
     evidence: [
@@ -133,6 +143,7 @@ export const FOUNDER_PRODUCT_CONTRACT_UNIT_FILES = [
 export const FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS = [
   "release_stage_admission",
   "product_entitlement_lifecycle",
+  "subscription_lifecycle",
   "recovery_archive_lifecycle",
   "infrastructure_retirement",
 ] as const;

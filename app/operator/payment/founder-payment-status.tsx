@@ -69,9 +69,43 @@ export function FounderPaymentStatus({
         <p className={styles.eyebrow}>Paid access confirmed</p>
         <h2 id="payment-title">Your Bruno.Ai access is ready</h2>
         <p>Your Product Entitlement is saved to your Founder workspace and works across devices.</p>
+        <p>
+          Use Lemon Squeezy for payment methods, billing history, cancellation, or an eligible
+          resumption. Plan switching and subscription pausing are not available.
+        </p>
+        <PortalButton />
         <a className={styles.primary} href="/operator">
           Return to Bruno
         </a>
+      </section>
+    );
+  }
+
+  if (status.state === "payment_recovery") {
+    return (
+      <section className={styles.card} aria-labelledby="payment-title" aria-live="polite">
+        <p className={styles.eyebrow}>Payment recovery</p>
+        <h2 id="payment-title">Your Operator is still working</h2>
+        <p>
+          Update your payment method by {formatFounderDate(status.recoveryEndsAt)}. New work stops
+          when this disclosed recovery window ends if payment has not recovered.
+        </p>
+        <PortalButton />
+      </section>
+    );
+  }
+
+  if (status.state === "cancelled_through") {
+    return (
+      <section className={styles.card} aria-labelledby="payment-title" aria-live="polite">
+        <p className={styles.eyebrow}>Subscription cancelled</p>
+        <h2 id="payment-title">Your paid access continues for now</h2>
+        <p>
+          Your Operator can keep working through {formatFounderDate(status.endsAt)}. Infrastructure
+          Retirement begins at that paid boundary unless you are eligible and choose to resume in
+          Lemon Squeezy.
+        </p>
+        <PortalButton />
       </section>
     );
   }
@@ -89,11 +123,69 @@ export function FounderPaymentStatus({
     );
   }
 
+  if (status.state === "retirement_completed") {
+    return (
+      <section className={styles.card} aria-labelledby="payment-title" aria-live="polite">
+        <p className={styles.eyebrow}>Infrastructure Retirement complete</p>
+        <h2 id="payment-title">Your retired infrastructure is no longer billable</h2>
+        <p>
+          New work is stopped and provider absence was verified on{" "}
+          {formatFounderDate(status.completedAt)}. Subscription cancellation, refunds,
+          Infrastructure Retirement, and Account Closure remain separate actions. Your retained
+          Bruno.Ai data was not deleted.
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section className={styles.card} aria-labelledby="payment-title" aria-live="polite">
-      <p className={styles.eyebrow}>Paid access unavailable</p>
-      <h2 id="payment-title">Your Operator has stopped new work</h2>
-      <p>Payment state no longer authorizes paid operation. Your retained data is not deleted.</p>
+      <p className={styles.eyebrow}>New work stopped</p>
+      <h2 id="payment-title">
+        Infrastructure Retirement{" "}
+        {status.retirement === "in_progress" ? "is in progress" : "is required"}
+      </h2>
+      <p>
+        {workStoppedReason(status.reason)} Retirement is due by{" "}
+        {formatFounderDate(status.retirementDueAt)}. Your retained Bruno.Ai data is not deleted, and
+        this is not Account Closure.
+      </p>
     </section>
   );
+}
+
+function PortalButton() {
+  return (
+    <form action="/api/operator/commerce/portal" method="post">
+      <button className={styles.secondary} type="submit">
+        Open secure billing portal
+      </button>
+    </form>
+  );
+}
+
+function formatFounderDate(value: string): string {
+  return new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(value));
+}
+
+function workStoppedReason(reason: "unpaid" | "expired" | "refunded" | "cancelled" | "past_due") {
+  switch (reason) {
+    case "unpaid":
+      return "Payment recovery ended without payment, so Product Entitlement no longer authorizes new work.";
+    case "expired":
+      return "Verified subscription expiry ended Product Entitlement.";
+    case "refunded":
+      return "A full refund ended Product Entitlement immediately.";
+    case "cancelled":
+      return "The paid cancellation boundary has passed.";
+    case "past_due":
+      return "The disclosed payment-recovery window has ended.";
+  }
 }

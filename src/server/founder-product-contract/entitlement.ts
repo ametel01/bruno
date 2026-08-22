@@ -4,17 +4,18 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { and, eq, gt, inArray, lte } from "drizzle-orm";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import {
-  founderCommerceEvents,
   founderCheckoutCorrelations,
+  founderCommerceEvents,
+  founderInfrastructureRetirements,
   founderProductEntitlements,
   operators,
 } from "@/src/server/db/schema";
+import { founderProductContractDigest } from "./digest";
 import type {
   FounderCommerceEvent,
   FounderCommerceStatus,
   FounderLifecycleProviderBoundary,
 } from "./lifecycle";
-import { founderProductContractDigest } from "./digest";
 
 type Transaction = Parameters<Parameters<DatabaseConnection["db"]["transaction"]>[0]>[0];
 
@@ -44,6 +45,7 @@ export async function reconcileFounderCommerceEvent(
     .select({
       sourceEventId: founderProductEntitlements.sourceEventId,
       providerSubscriptionId: founderProductEntitlements.providerSubscriptionId,
+      reconciledProviderStatus: founderProductEntitlements.reconciledProviderStatus,
       retirementDueAt: founderProductEntitlements.retirementDueAt,
     })
     .from(founderProductEntitlements)
@@ -109,6 +111,27 @@ export async function reconcileFounderCommerceEvent(
     throw new Error("The current Lemon Squeezy subscription state does not match the event.");
   }
   const status = subscription.status === "active" ? "verified" : subscription.status;
+  if (
+    event.status === "active" &&
+    currentEntitlement &&
+    !founderCommerceTransitionAllows({
+      incomingStatus: event.status,
+      currentStatus: currentEntitlement.reconciledProviderStatus as FounderCommerceStatus,
+      currentRetirementDueAt: currentEntitlement.retirementDueAt,
+      now: input.now,
+      retirementStarted: false,
+    })
+  ) {
+    throw new Error("A commerce event cannot restart an expired retirement clock.");
+  }
+  if (event.status === "active") {
+    const [retirement] = await tx
+      .select({ id: founderInfrastructureRetirements.id })
+      .from(founderInfrastructureRetirements)
+      .where(eq(founderInfrastructureRetirements.userId, input.userId))
+      .limit(1);
+    if (retirement) throw new Error("Product Entitlement cannot restart after retirement begins.");
+  }
   const policy = founderEntitlementPolicy({
     status: event.status,
     occurredAt: event.occurredAt,
@@ -169,6 +192,10 @@ export async function reconcileFounderCommerceEvent(
   }
 }
 
+function isIrreversibleCommerceStatus(status: FounderCommerceStatus): boolean {
+  return status === "unpaid" || status === "expired" || status === "refunded";
+}
+
 export function founderEntitlementPolicy(input: {
   status: FounderCommerceStatus;
   occurredAt: string;
@@ -205,6 +232,80 @@ export function founderEntitlementPolicy(input: {
     );
   }
   return { retirementDueAt: proposedDueAt, stopNewWork };
+}
+
+export function founderCommerceTransitionAllows(input: {
+  incomingStatus: FounderCommerceStatus;
+  currentStatus: FounderCommerceStatus;
+  currentRetirementDueAt: Date | null;
+  now: Date;
+  retirementStarted: boolean;
+}): boolean {
+  if (input.incomingStatus !== "active") return true;
+  if (input.retirementStarted) return false;
+  if (isIrreversibleCommerceStatus(input.currentStatus)) return false;
+  return input.currentRetirementDueAt === null || input.currentRetirementDueAt > input.now;
+}
+
+export function assertFounderSubscriptionLifecycleContract(now: Date): void {
+  const occurredAt = now.toISOString();
+  const expected = [
+    ["past_due", 7 * 24 * 60 * 60 * 1_000, false],
+    ["unpaid", 24 * 60 * 60 * 1_000, true],
+    ["expired", 60 * 60 * 1_000, true],
+    ["refunded", 24 * 60 * 60 * 1_000, true],
+  ] as const;
+  for (const [status, duration, stopNewWork] of expected) {
+    const policy = founderEntitlementPolicy({
+      status,
+      occurredAt,
+      endsAt: null,
+      currentRetirementDueAt: null,
+    });
+    if (
+      policy.retirementDueAt?.valueOf() !== now.valueOf() + duration ||
+      policy.stopNewWork !== stopNewWork
+    ) {
+      throw new Error(`The ${status} Product Entitlement deadline is not exact.`);
+    }
+  }
+  const paidEndsAt = new Date(now.valueOf() + 3 * 24 * 60 * 60 * 1_000);
+  const cancellation = founderEntitlementPolicy({
+    status: "cancelled",
+    occurredAt,
+    endsAt: paidEndsAt.toISOString(),
+    currentRetirementDueAt: null,
+  });
+  if (
+    cancellation.retirementDueAt?.valueOf() !== paidEndsAt.valueOf() ||
+    cancellation.stopNewWork
+  ) {
+    throw new Error("Cancellation does not preserve operation through paid ends_at.");
+  }
+  const existingDueAt = new Date(now.valueOf() + 60 * 60 * 1_000);
+  if (
+    founderEntitlementPolicy({
+      status: "past_due",
+      occurredAt: new Date(now.valueOf() + 1).toISOString(),
+      endsAt: null,
+      currentRetirementDueAt: existingDueAt,
+    }).retirementDueAt?.valueOf() !== existingDueAt.valueOf()
+  ) {
+    throw new Error("A reordered commerce event extended a retirement clock.");
+  }
+  for (const currentStatus of ["unpaid", "expired", "refunded"] as const) {
+    if (
+      founderCommerceTransitionAllows({
+        incomingStatus: "active",
+        currentStatus,
+        currentRetirementDueAt: new Date(now.valueOf() + 60 * 60 * 1_000),
+        now,
+        retirementStarted: false,
+      })
+    ) {
+      throw new Error(`A reordered active event restarted the ${currentStatus} retirement clock.`);
+    }
+  }
 }
 
 export type FounderProductEntitlementAuthority = {

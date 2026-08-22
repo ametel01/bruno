@@ -55,6 +55,10 @@ export const founderProductEntitlementStatusEnum = pgEnum("founder_product_entit
   "expired",
   "refunded",
 ]);
+export const founderCommerceLifecycleReceiptKindEnum = pgEnum(
+  "founder_commerce_lifecycle_receipt_kind",
+  ["portal_issued", "cancellation", "refund"],
+);
 export const founderRecoveryArchiveStatusEnum = pgEnum("founder_recovery_archive_status", [
   "pending",
   "verified",
@@ -64,6 +68,7 @@ export const founderRecoveryArchiveStatusEnum = pgEnum("founder_recovery_archive
 export const founderProductContractScenarioEnum = pgEnum("founder_product_contract_scenario", [
   "release_stage_admission",
   "product_entitlement_lifecycle",
+  "subscription_lifecycle",
   "recovery_archive_lifecycle",
   "infrastructure_retirement",
 ]);
@@ -1152,6 +1157,43 @@ export const founderCommerceEvents = pgTable(
       sql`(${table.applicationStatus} = 'pending' AND ${table.appliedAt} IS NULL) OR (${table.applicationStatus} IN ('applied', 'ignored') AND ${table.appliedAt} IS NOT NULL AND ${table.lastErrorCode} IS NULL)`,
     ),
     index("founder_commerce_events_user_occurred_idx").on(table.userId, table.occurredAt),
+  ],
+);
+
+export const founderCommerceLifecycleReceipts = pgTable(
+  "founder_commerce_lifecycle_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    sourceEventId: uuid("source_event_id").references(() => founderCommerceEvents.id),
+    providerSubscriptionId: text("provider_subscription_id").notNull(),
+    kind: founderCommerceLifecycleReceiptKindEnum("kind").notNull(),
+    effectiveAt: timestamp("effective_at", { withTimezone: true }),
+    portalExpiresAt: timestamp("portal_expires_at", { withTimezone: true }),
+    evidenceDigest: text("evidence_digest").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("founder_commerce_lifecycle_receipts_event_kind_idx").on(
+      table.sourceEventId,
+      table.kind,
+    ),
+    check(
+      "founder_commerce_lifecycle_receipts_shape_check",
+      sql`(${table.kind} = 'portal_issued' AND ${table.sourceEventId} IS NULL AND ${table.effectiveAt} IS NULL AND ${table.portalExpiresAt} IS NOT NULL) OR (${table.kind} = 'cancellation' AND ${table.sourceEventId} IS NOT NULL AND ${table.effectiveAt} IS NOT NULL AND ${table.portalExpiresAt} IS NULL) OR (${table.kind} = 'refund' AND ${table.sourceEventId} IS NOT NULL AND ${table.effectiveAt} IS NOT NULL AND ${table.portalExpiresAt} IS NULL)`,
+    ),
+    check(
+      "founder_commerce_lifecycle_receipts_digest_check",
+      sql`${table.evidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_commerce_lifecycle_receipts_portal_expiry_check",
+      sql`${table.portalExpiresAt} IS NULL OR ${table.portalExpiresAt} > ${table.occurredAt}`,
+    ),
+    index("founder_commerce_lifecycle_receipts_user_created_idx").on(table.userId, table.createdAt),
   ],
 );
 

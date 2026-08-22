@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { founderEntitlementPolicy } from "@/src/server/founder-product-contract/entitlement";
+import {
+  assertFounderSubscriptionLifecycleContract,
+  founderCommerceTransitionAllows,
+  founderEntitlementPolicy,
+} from "@/src/server/founder-product-contract/entitlement";
 
 const OCCURRED_AT = "2026-08-21T08:00:00.000Z";
 
@@ -45,5 +49,25 @@ describe("Founder Product Entitlement policy", () => {
         currentRetirementDueAt: existing,
       }).retirementDueAt,
     ).toEqual(existing);
+  });
+
+  it.each([
+    "unpaid",
+    "expired",
+    "refunded",
+  ] as const)("does not let a reordered active event restart a %s clock", (currentStatus) => {
+    expect(
+      founderCommerceTransitionAllows({
+        incomingStatus: "active",
+        currentStatus,
+        currentRetirementDueAt: new Date("2026-08-22T08:00:00.000Z"),
+        now: new Date(OCCURRED_AT),
+        retirementStarted: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("proves the deterministic subscription lifecycle matrix", () => {
+    expect(() => assertFounderSubscriptionLifecycleContract(new Date(OCCURRED_AT))).not.toThrow();
   });
 });
