@@ -86,9 +86,11 @@ durable state before recording `restorable_verified`. A manifest or ciphertext-o
 satisfy this boundary. In addition to exact-revision identity and OpenAI/Calendar Preview
 Qualification, production preparation records the Owner Preview `enter` Release Decision only after
 this verified-restorable archive exists; unavailable storage returns a fail-closed preparation
-response without admission authority. Founder workspace and effect-starting application boundaries
-recheck that the latest Owner Preview decision is an exact-revision `enter` or `resume` and that its
-verified archive remains within the 24-hour currency window. A later Release Hold can be lifted only by a new `resume`
+response without admission authority. Founder workspace reads require a prior exact-revision Owner
+Preview admission. New work and effect-starting application boundaries additionally recheck that
+the latest decision is an `enter` or `resume` and that its verified archive remains within the
+24-hour currency window. A Hold or stale archive preserves safe reads and checkpoints while pausing
+new work. A later Release Hold can be lifted only by a new `resume`
 decision after fresh, independently evidenced OpenAI and Calendar qualifications revalidate the
 same Owner, stage, application, runtime, and capability boundaries after that Hold. Provider
 subscription state applies bounded retirement deadlines and immediately pauses new work for unpaid,
@@ -98,7 +100,7 @@ path rather than only a policy helper. Verified archives that reach their 30-day
 durable, idempotent deletion boundary that requires separate absence proof for the encrypted object
 and its recovery-only credential. The production adapter uses the configured S3-compatible object
 store under the reserved `founder-recovery/` namespace, while the hourly protected reconciler
-maintains at most one current verified archive per 24-hour window and processes expiry for retained
+refreshes one schedule interval before the 24-hour access boundary and processes expiry for retained
 archives even when the Owner is no longer eligible for new archives. Neither the manual backup
 manifest nor a DigitalOcean snapshot can enter the v1 archive state. Archive and recovery-credential
 deletion requires a live proof that bucket versioning is disabled, so a delete marker that leaves

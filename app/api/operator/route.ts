@@ -51,10 +51,15 @@ export async function GET(
           applicationUser.userId,
           new Date(),
         )
-      : { admitted: true };
+      : { admitted: true, workAllowed: true };
 
   return Response.json(
-    { operator, recoveryArchive, ownerPreviewAdmitted: ownerPreviewAccess.admitted },
+    {
+      operator,
+      recoveryArchive,
+      ownerPreviewAdmitted: ownerPreviewAccess.admitted,
+      ownerPreviewWorkAllowed: ownerPreviewAccess.workAllowed,
+    },
     { headers: noStoreHeaders() },
   );
 }
@@ -107,6 +112,7 @@ export async function POST(
         operator: result.operator,
         runtime: result.runtime,
         ownerPreviewAdmitted: result.runtime.status === "ready",
+        ownerPreviewWorkAllowed: result.runtime.status === "ready",
       },
       { headers: noStoreHeaders() },
     );

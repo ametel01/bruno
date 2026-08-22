@@ -11,7 +11,10 @@ import {
   type FounderProductContractTransaction,
   requireReadyFounderOperatorAuthorityInTransaction,
 } from "./operator-authority";
-import { requireFounderOwnerPreviewQualifications } from "./preview-qualification";
+import {
+  FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+  requireFounderOwnerPreviewQualifications,
+} from "./preview-qualification";
 import { createDurableRecoveryArchive } from "./recovery-archive";
 import type { FounderRecoveryArchiveProvider } from "./recovery-archive-provider";
 
@@ -181,7 +184,7 @@ export async function persistQualifiedFounderOwnerPreviewAdmissionInTransaction(
   if (!input.identitySubject.trim() || input.qualificationEvidenceDigests.length === 0) {
     throw new Error("Owner Preview qualification evidence is incomplete.");
   }
-  const capabilityManifest = ["openai", "calendar_reading"] as const;
+  const capabilityManifest = FOUNDER_OWNER_PREVIEW_CAPABILITIES;
   const archiveEvidenceDigest = founderProductContractDigest(
     `recovery-archive:${input.recoveryArchiveId}`,
   );

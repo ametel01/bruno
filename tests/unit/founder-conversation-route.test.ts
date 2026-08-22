@@ -67,7 +67,7 @@ describe("Founder Conversation route", () => {
     expect(mocks.getConversation).toHaveBeenCalledWith(USER_ID);
   });
 
-  it("denies the workspace when Owner Preview admission is not active", async () => {
+  it("denies the workspace when Owner Preview was never admitted", async () => {
     mocks.requireWorkspaceAccess.mockResolvedValue(
       Response.json(
         { error: { code: "owner_preview_access_required" } },
@@ -78,8 +78,34 @@ describe("Founder Conversation route", () => {
     const response = await GET(new Request("http://localhost/api/operator/conversation"));
 
     expect(response.status).toBe(403);
-    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, "workspace");
     expect(mocks.getConversation).not.toHaveBeenCalled();
+  });
+
+  it("preserves safe reads while current protection blocks new work", async () => {
+    const blocked = Response.json(
+      { error: { code: "owner_preview_access_required" } },
+      { status: 403 },
+    );
+    mocks.requireWorkspaceAccess.mockImplementation(
+      async (_userId: string, requirement?: "workspace" | "work") =>
+        requirement === "workspace" ? null : blocked,
+    );
+    const { GET, POST } = await import("@/app/api/operator/conversation/route");
+
+    await expect(
+      GET(new Request("http://localhost/api/operator/conversation")),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      POST(
+        new Request("http://localhost/api/operator/conversation", {
+          method: "POST",
+          body: JSON.stringify({ message: "Start new work" }),
+        }),
+      ),
+    ).resolves.toMatchObject({ status: 403 });
+    expect(mocks.getConversation).toHaveBeenCalledOnce();
+    expect(mocks.sendMessage).not.toHaveBeenCalled();
   });
 
   it("passes the Founder message and idempotency key to the application seam", async () => {

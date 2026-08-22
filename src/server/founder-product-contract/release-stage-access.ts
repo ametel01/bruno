@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, gt, lte } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lte } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   founderRecoveryArchives,
@@ -9,9 +9,16 @@ import {
   operators,
 } from "@/src/server/db/schema";
 import type { FounderProductContractTransaction } from "./operator-authority";
+import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "./preview-qualification";
 
 const OWNER_PREVIEW_ARCHIVE_WINDOW_MS = 24 * 60 * 60 * 1_000;
-const OWNER_PREVIEW_CAPABILITIES = ["openai", "calendar_reading"] as const;
+
+export type FounderOwnerPreviewAccess = {
+  admitted: boolean;
+  workAllowed: boolean;
+};
+
+export type FounderOwnerPreviewAccessRequirement = "workspace" | "work";
 
 export class FounderReleaseStageAccessError extends Error {
   readonly code = "owner_preview_access_required" as const;
@@ -33,21 +40,19 @@ export async function getFounderOwnerPreviewAccessForUser(
     createConnection?: () => DatabaseConnection;
     env?: Record<string, string | undefined>;
   } = {},
-): Promise<{ admitted: boolean }> {
+): Promise<FounderOwnerPreviewAccess> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
-    return {
-      admitted: await hasFounderOwnerPreviewAccessInTransaction(connection.db, {
-        userId,
-        now,
-        applicationRevision:
-          dependencies.applicationRevision ??
-          dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
-          process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
-          "",
-      }),
-    };
+    return await getFounderOwnerPreviewAccessInTransaction(connection.db, {
+      userId,
+      now,
+      applicationRevision:
+        dependencies.applicationRevision ??
+        dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
+        process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
+        "",
+    });
   } finally {
     if (ownsConnection) await connection.close();
   }
@@ -61,25 +66,29 @@ export async function requireFounderOwnerPreviewAccessForUser(
     createConnection?: () => DatabaseConnection;
     env?: Record<string, string | undefined>;
   } = {},
+  requirement: FounderOwnerPreviewAccessRequirement = "work",
 ): Promise<void> {
   const access = await getFounderOwnerPreviewAccessForUser(userId, now, dependencies);
-  if (!access.admitted) throw new FounderReleaseStageAccessError();
+  if (requirement === "workspace" ? !access.admitted : !access.workAllowed) {
+    throw new FounderReleaseStageAccessError();
+  }
 }
 
 export async function requireFounderOwnerPreviewAccessInTransaction(
   tx: FounderProductContractTransaction,
   input: { userId: string; now: Date; applicationRevision: string },
 ): Promise<void> {
-  if (!(await hasFounderOwnerPreviewAccessInTransaction(tx, input))) {
+  if (!(await getFounderOwnerPreviewAccessInTransaction(tx, input)).workAllowed) {
     throw new FounderReleaseStageAccessError();
   }
 }
 
-export async function hasFounderOwnerPreviewAccessInTransaction(
+export async function getFounderOwnerPreviewAccessInTransaction(
   tx: Pick<FounderProductContractTransaction, "select">,
   input: { userId: string; now: Date; applicationRevision: string },
-): Promise<boolean> {
-  if (!/^[a-f0-9]{40}$/.test(input.applicationRevision)) return false;
+): Promise<FounderOwnerPreviewAccess> {
+  const unavailable = { admitted: false, workAllowed: false } as const;
+  if (!/^[a-f0-9]{40}$/.test(input.applicationRevision)) return unavailable;
   const [authority] = await tx
     .select({
       operatorId: operators.id,
@@ -92,7 +101,7 @@ export async function hasFounderOwnerPreviewAccessInTransaction(
     )
     .where(and(eq(operators.userId, input.userId), eq(operators.status, "active")))
     .limit(1);
-  if (!authority?.runtimeRevision) return false;
+  if (!authority?.runtimeRevision) return unavailable;
 
   const [latestDecision] = await tx
     .select({
@@ -111,19 +120,45 @@ export async function hasFounderOwnerPreviewAccessInTransaction(
     )
     .orderBy(desc(founderReleaseDecisions.decidedAt))
     .limit(1);
+  const [priorAdmission] = await tx
+    .select({ capabilityManifest: founderReleaseDecisions.capabilityManifest })
+    .from(founderReleaseDecisions)
+    .where(
+      and(
+        eq(founderReleaseDecisions.userId, input.userId),
+        eq(founderReleaseDecisions.operatorId, authority.operatorId),
+        eq(founderReleaseDecisions.stage, "owner_preview"),
+        inArray(founderReleaseDecisions.outcome, ["enter", "resume"]),
+        eq(founderReleaseDecisions.applicationRevision, input.applicationRevision),
+        eq(founderReleaseDecisions.runtimeRevision, authority.runtimeRevision),
+      ),
+    )
+    .orderBy(desc(founderReleaseDecisions.decidedAt))
+    .limit(1);
+  const exactDecision = (decision: typeof latestDecision) => {
+    if (!decision) return false;
+    return (
+      decision.operatorId === authority.operatorId &&
+      decision.applicationRevision === input.applicationRevision &&
+      decision.runtimeRevision === authority.runtimeRevision &&
+      decision.capabilityManifest.length === FOUNDER_OWNER_PREVIEW_CAPABILITIES.length &&
+      FOUNDER_OWNER_PREVIEW_CAPABILITIES.every((capability) =>
+        decision.capabilityManifest.includes(capability),
+      )
+    );
+  };
   if (
-    !latestDecision ||
-    (latestDecision.outcome !== "enter" && latestDecision.outcome !== "resume") ||
-    latestDecision.operatorId !== authority.operatorId ||
-    latestDecision.applicationRevision !== input.applicationRevision ||
-    latestDecision.runtimeRevision !== authority.runtimeRevision ||
-    latestDecision.capabilityManifest.length !== OWNER_PREVIEW_CAPABILITIES.length ||
-    !OWNER_PREVIEW_CAPABILITIES.every((capability) =>
-      latestDecision.capabilityManifest.includes(capability),
+    !priorAdmission ||
+    priorAdmission.capabilityManifest.length !== FOUNDER_OWNER_PREVIEW_CAPABILITIES.length ||
+    !FOUNDER_OWNER_PREVIEW_CAPABILITIES.every((capability) =>
+      priorAdmission.capabilityManifest.includes(capability),
     )
   ) {
-    return false;
+    return unavailable;
   }
+  const stageActive =
+    (latestDecision?.outcome === "enter" || latestDecision?.outcome === "resume") &&
+    exactDecision(latestDecision);
 
   const [archive] = await tx
     .select({ id: founderRecoveryArchives.id })
@@ -145,5 +180,5 @@ export async function hasFounderOwnerPreviewAccessInTransaction(
     )
     .orderBy(desc(founderRecoveryArchives.observedAt))
     .limit(1);
-  return Boolean(archive);
+  return { admitted: true, workAllowed: stageActive && Boolean(archive) };
 }

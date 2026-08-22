@@ -8,6 +8,8 @@ import {
   founderCommerceEvents,
   founderInfrastructureRetirements,
   founderProductEntitlements,
+  founderRecoveryArchiveDeletionReceipts,
+  founderRecoveryArchives,
   operatorPreparations,
   operatorRuntimes,
   operators,
@@ -298,8 +300,27 @@ describe("Founder Infrastructure Retirement deadline", () => {
   }
 
   async function reset(): Promise<void> {
-    await connection.client.unsafe(
-      "delete from founder_recovery_archive_deletion_receipts; delete from founder_infrastructure_retirements; delete from founder_recovery_archives; delete from founder_product_entitlements; delete from founder_commerce_events; delete from founder_checkout_correlations; delete from runner_credentials; delete from runners; delete from operator_runtimes; delete from operator_preparations; delete from operators; delete from users",
-    );
+    await connection.db.transaction(async (tx) => {
+      await tx
+        .delete(founderRecoveryArchiveDeletionReceipts)
+        .where(eq(founderRecoveryArchiveDeletionReceipts.userId, USER_ID));
+      await tx
+        .delete(founderInfrastructureRetirements)
+        .where(eq(founderInfrastructureRetirements.userId, USER_ID));
+      await tx.delete(founderRecoveryArchives).where(eq(founderRecoveryArchives.userId, USER_ID));
+      await tx
+        .delete(founderProductEntitlements)
+        .where(eq(founderProductEntitlements.userId, USER_ID));
+      await tx.delete(founderCommerceEvents).where(eq(founderCommerceEvents.userId, USER_ID));
+      await tx
+        .delete(founderCheckoutCorrelations)
+        .where(eq(founderCheckoutCorrelations.userId, USER_ID));
+      await tx.delete(runnerCredentials).where(eq(runnerCredentials.runnerId, RUNNER_ID));
+      await tx.delete(runners).where(eq(runners.id, RUNNER_ID));
+      await tx.delete(operatorRuntimes).where(eq(operatorRuntimes.operatorId, OPERATOR_ID));
+      await tx.delete(operatorPreparations).where(eq(operatorPreparations.operatorId, OPERATOR_ID));
+      await tx.delete(operators).where(eq(operators.id, OPERATOR_ID));
+      await tx.delete(users).where(eq(users.id, USER_ID));
+    });
   }
 });

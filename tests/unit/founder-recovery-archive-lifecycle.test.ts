@@ -111,7 +111,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     expect(await connection.db.select().from(founderRecoveryArchives)).toHaveLength(1);
   });
 
-  it("opens Owner Preview only while the latest exact-revision decision and archive are current", async () => {
+  it("separates persisted Owner Preview access from current work protection", async () => {
     await createDurableRecoveryArchive(
       { action: "release_stage_admission", userId: USER_ID, now: START },
       provider,
@@ -124,7 +124,14 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         applicationRevision: "a".repeat(40),
         createConnection: () => connection,
       }),
-    ).resolves.toEqual({ admitted: true });
+    ).resolves.toEqual({ admitted: true, workAllowed: true });
+
+    await expect(
+      getFounderOwnerPreviewAccessForUser(USER_ID, START, {
+        applicationRevision: "b".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ admitted: false, workAllowed: false });
 
     const heldAt = new Date(START.valueOf() + 60_000);
     await connection.db.insert(founderReleaseDecisions).values({
@@ -145,7 +152,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         applicationRevision: "a".repeat(40),
         createConnection: () => connection,
       }),
-    ).resolves.toEqual({ admitted: false });
+    ).resolves.toEqual({ admitted: true, workAllowed: false });
   });
 
   it("admits a production Operator only after persisting its initial verified archive", async () => {
@@ -352,7 +359,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([]);
   });
 
-  it("creates at most one verified archive per 24-hour window", async () => {
+  it("refreshes before the daily boundary without duplicating the scheduled cohort", async () => {
     await createDurableRecoveryArchive(
       { action: "release_stage_admission", userId: USER_ID, now: START },
       provider,
@@ -366,7 +373,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         provider,
         createConnection: () => connection,
       }),
-    ).resolves.toMatchObject({ eligible: 1, created: 0, failed: 0, deleted: 0 });
+    ).resolves.toMatchObject({ eligible: 1, created: 1, failed: 0, deleted: 0 });
 
     await expect(
       reconcileFounderRecoveryArchives({
@@ -374,7 +381,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         provider,
         createConnection: () => connection,
       }),
-    ).resolves.toMatchObject({ eligible: 1, created: 1, failed: 0, deleted: 0 });
+    ).resolves.toMatchObject({ eligible: 1, created: 0, failed: 0, deleted: 0 });
 
     expect(await connection.db.select().from(founderRecoveryArchives)).toHaveLength(2);
   });

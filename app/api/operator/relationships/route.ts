@@ -15,7 +15,10 @@ export const dynamic = "force-dynamic";
 export async function GET(): Promise<Response> {
   const applicationUser = await requireConfiguredApplicationUser();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
-  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    "workspace",
+  );
   if (accessFailure) return accessFailure;
   try {
     const relationships = await getFounderRelationshipsForUser(applicationUser.userId);
@@ -28,7 +31,10 @@ export async function GET(): Promise<Response> {
 export async function POST(request: Request): Promise<Response> {
   const applicationUser = await requireConfiguredApplicationUser();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
-  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    "workspace",
+  );
   if (accessFailure) return accessFailure;
   let payload: unknown;
   try {

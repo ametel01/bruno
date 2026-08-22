@@ -25,7 +25,10 @@ export async function POST(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
-  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    "workspace",
+  );
   if (accessFailure) return accessFailure;
   let payload: unknown;
   try {

@@ -267,6 +267,43 @@ describe("Founder Operator preparation shell", () => {
     expect(html).not.toContain("What should we handle today?");
   });
 
+  it("preserves the safe Founder workspace while new work is held", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: {
+          ...OPERATOR,
+          preparation: {
+            ...OPERATOR.preparation,
+            status: "ready",
+            timezone: "Asia/Manila",
+            timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+          },
+          runtime: { status: "ready", recoveryMessage: null },
+        },
+        initialOnboarding: {
+          nextStep: "conversation",
+          defaultRoute: "/operator#conversation",
+          activated: true,
+          operation: "calendar_limited",
+          capabilities: { ai: "ready", calendar: "ready", mail: "not_offered", core: "missing" },
+          facts: {
+            timezoneConfirmed: true,
+            runtimeReady: true,
+            processingConsent: true,
+            firstBriefReady: true,
+            primarySuiteIdentity: "google-owner-preview",
+          },
+        } satisfies FounderOnboardingDto,
+        ownerPreviewAdmitted: true,
+        ownerPreviewWorkAllowed: false,
+      }),
+    );
+
+    expect(html).toContain("New work is paused until protection is current");
+    expect(html).toContain('aria-label="Current Founder workspace"');
+    expect(html).toContain("What should we handle today?");
+  });
+
   it("keeps OpenAI hidden until current Connected Acceptance releases it", () => {
     const readyOperator: FounderOperatorDto = {
       ...OPERATOR,

@@ -26,7 +26,10 @@ export async function GET(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
-  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    "workspace",
+  );
   if (accessFailure) return accessFailure;
   const preview = await (dependencies.getPreview ?? getFounderActionPreviewForUser)(
     applicationUser.userId,

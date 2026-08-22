@@ -125,6 +125,7 @@ describe("Founder Operator route", () => {
     expect(body).toEqual({
       operator: OPERATOR,
       ownerPreviewAdmitted: true,
+      ownerPreviewWorkAllowed: true,
       recoveryArchive: expect.objectContaining({
         state: "current",
         restoreVerifiedAt: "2026-08-22T00:00:00.000Z",

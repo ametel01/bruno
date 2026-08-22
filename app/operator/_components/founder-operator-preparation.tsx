@@ -25,6 +25,7 @@ export function FounderOperatorPreparation({
   initialOnboarding,
   initialRecoveryArchive,
   ownerPreviewAdmitted = false,
+  ownerPreviewWorkAllowed = ownerPreviewAdmitted,
   timezoneOptions = DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
   openAiReleased = false,
   calendarReadingReleased = false,
@@ -36,6 +37,7 @@ export function FounderOperatorPreparation({
   initialOnboarding?: FounderOnboardingDto;
   initialRecoveryArchive?: FounderRecoveryArchiveStatusDto;
   ownerPreviewAdmitted?: boolean;
+  ownerPreviewWorkAllowed?: boolean;
   timezoneOptions?: ReadonlyArray<FounderTimezoneOption>;
   openAiReleased?: boolean;
   calendarReadingReleased?: boolean;
@@ -50,6 +52,7 @@ export function FounderOperatorPreparation({
   const [saving, setSaving] = useState(false);
   const [onboarding, setOnboarding] = useState(initialOnboarding);
   const [admitted, setAdmitted] = useState(ownerPreviewAdmitted);
+  const [workAllowed, setWorkAllowed] = useState(ownerPreviewWorkAllowed);
   const lastOpenedStep = useRef<string | null>(null);
 
   useEffect(() => {
@@ -121,12 +124,14 @@ export function FounderOperatorPreparation({
         return (await response.json()) as {
           operator?: FounderOperatorDto;
           ownerPreviewAdmitted?: boolean;
+          ownerPreviewWorkAllowed?: boolean;
         };
       })
       .then((body) => {
         if (!cancelled && body?.operator) {
           setOperator(body.operator);
           setAdmitted(body.ownerPreviewAdmitted === true);
+          setWorkAllowed(body.ownerPreviewWorkAllowed === true);
         }
       })
       .catch(() => undefined);
@@ -182,11 +187,16 @@ export function FounderOperatorPreparation({
         body: JSON.stringify({ action: "prepare" }),
       });
       const preparationBody = (await preparationResponse.json()) as
-        | { operator: FounderOperatorDto; ownerPreviewAdmitted?: boolean }
+        | {
+            operator: FounderOperatorDto;
+            ownerPreviewAdmitted?: boolean;
+            ownerPreviewWorkAllowed?: boolean;
+          }
         | { error?: { message?: string } };
       if (preparationResponse.ok && "operator" in preparationBody) {
         setOperator(preparationBody.operator);
         setAdmitted(preparationBody.ownerPreviewAdmitted === true);
+        setWorkAllowed(preparationBody.ownerPreviewWorkAllowed === true);
       }
     } catch (submissionError) {
       setError(
@@ -261,19 +271,22 @@ export function FounderOperatorPreparation({
         </section>
       ) : null}
 
-      {runtimeReady && !admitted ? (
+      {runtimeReady && (!admitted || !workAllowed) ? (
         <section className={styles.card} aria-labelledby="owner-preview-access-title">
           <div className={styles.cardHeading}>
             <div>
               <p className={styles.kicker}>Needs you</p>
               <h3 id="owner-preview-access-title">
-                Owner Preview is waiting for current protection
+                {admitted
+                  ? "New work is paused until protection is current"
+                  : "Owner Preview is waiting for current protection"}
               </h3>
             </div>
           </div>
           <p className={styles.hint}>
-            Bruno will open the workspace only after current qualification and a verified Recovery
-            Archive are confirmed together. Try preparation again when protection is available.
+            {admitted
+              ? "Your saved workspace remains available. Bruno will not begin new work or provider effects until the exact Release Decision and Recovery Archive protection are current again."
+              : "Bruno will open the workspace only after current qualification and a verified Recovery Archive are confirmed together. Try preparation again when protection is available."}
           </p>
         </section>
       ) : null}

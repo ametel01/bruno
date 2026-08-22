@@ -24,7 +24,10 @@ export async function POST(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
-  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    "workspace",
+  );
   if (accessFailure) return accessFailure;
   const { actionId } = await context.params;
   if (!actionId) return validationResponse("Proposed Action ID is required.");

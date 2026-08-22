@@ -259,16 +259,18 @@ Recovery Archives use the object store only as an off-Droplet transport. Their e
 separate wrapped recovery credential, authenticated restore check, 24-hour refresh boundary, and
 30-day deletion receipt are distinct from the manual backup manifest and from DigitalOcean
 snapshots. The protected `/api/internal/operator/recovery-archives` cron runs hourly, creates a new
-archive only when the current verified copy reaches 24 hours, and processes expiry even after a
+archive one hourly schedule interval before the current verified copy reaches 24 hours, and
+processes expiry even after a
 Release Hold or denied admission. Object identities are persisted before upload, so an interrupted
 or partially failed creation remains discoverable for bounded cleanup. A completed Infrastructure
 Retirement stops new daily copies while the final retained archive continues to its 30-day expiry;
 a later `resume` Release Decision can start protection again for a restored Operator. Production
 Operator preparation grants Owner Preview admission only after current OpenAI and Calendar Preview
-Qualification and the initial archive's isolated rebuild check all pass. Founder workspace reads,
-writes, and effect-starting transactions recheck the active exact-revision Owner Preview decision
-and a verified archive observed within the last 24 hours; a Hold, stale archive, or retired runtime
-closes access. Infrastructure Retirement marks the destroyed runtime as needing attention before
+Qualification and the initial archive's isolated rebuild check all pass. Founder workspace reads
+require a prior exact-revision Owner Preview admission. New work and effect-starting transactions
+additionally require the latest decision to remain active and a verified archive observed within the
+last 24 hours; a Hold or stale archive preserves safe reads and checkpoints while pausing work.
+Infrastructure Retirement marks the destroyed runtime as needing attention before
 its receipt completes, so only newly provisioned and verified infrastructure can become Ready
 again. The encrypted durable state preserves an external-action pause as the complete boolean,
 reason, and timestamp tuple required to rebuild it safely. Every S3-compatible

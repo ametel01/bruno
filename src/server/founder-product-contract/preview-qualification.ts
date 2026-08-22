@@ -3,9 +3,9 @@ import "server-only";
 const OWNER_PREVIEW_QUALIFICATIONS_SCHEMA = "bruno.owner-preview-qualifications.v1";
 const PREVIEW_QUALIFICATION_SCHEMA = "bruno.preview-qualification.v1";
 const PREVIEW_QUALIFICATION_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1_000;
-const OWNER_PREVIEW_CAPABILITIES = ["openai", "calendar_reading"] as const;
+export const FOUNDER_OWNER_PREVIEW_CAPABILITIES = ["openai", "calendar_reading"] as const;
 
-type OwnerPreviewCapability = (typeof OWNER_PREVIEW_CAPABILITIES)[number];
+type OwnerPreviewCapability = (typeof FOUNDER_OWNER_PREVIEW_CAPABILITIES)[number];
 type PreviewQualificationEnvironment = Record<string, string | undefined>;
 
 export type FounderPreviewQualification = {
@@ -54,11 +54,11 @@ export function requireFounderOwnerPreviewQualifications(
     !isRecord(value) ||
     value.schemaVersion !== OWNER_PREVIEW_QUALIFICATIONS_SCHEMA ||
     !Array.isArray(qualifications) ||
-    qualifications.length !== OWNER_PREVIEW_CAPABILITIES.length
+    qualifications.length !== FOUNDER_OWNER_PREVIEW_CAPABILITIES.length
   ) {
     throw new Error("Owner Preview Qualifications are invalid.");
   }
-  const validated = OWNER_PREVIEW_CAPABILITIES.map((capability) => {
+  const validated = FOUNDER_OWNER_PREVIEW_CAPABILITIES.map((capability) => {
     const matching = qualifications.filter(
       (qualification) => isRecord(qualification) && qualification.capability === capability,
     );

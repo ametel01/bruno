@@ -1,15 +1,17 @@
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import {
   FounderReleaseStageAccessError,
+  type FounderOwnerPreviewAccessRequirement,
   requireFounderOwnerPreviewAccessForUser,
 } from "@/src/server/founder-product-contract/release-stage-access";
 
 export async function requireFounderOperatorWorkspaceAccess(
   userId: string,
+  requirement: FounderOwnerPreviewAccessRequirement = "work",
 ): Promise<Response | null> {
   if (resolveAuthMode(process.env).mode !== "clerk") return null;
   try {
-    await requireFounderOwnerPreviewAccessForUser(userId, new Date());
+    await requireFounderOwnerPreviewAccessForUser(userId, new Date(), {}, requirement);
     return null;
   } catch (error) {
     if (!(error instanceof FounderReleaseStageAccessError)) throw error;

@@ -40,7 +40,7 @@ export default async function FounderOperatorPage() {
     getFounderRecoveryArchiveStatusForUser(applicationUser.userId, new Date()),
     resolveAuthMode(process.env).mode === "clerk"
       ? getFounderOwnerPreviewAccessForUser(applicationUser.userId, new Date())
-      : Promise.resolve({ admitted: true }),
+      : Promise.resolve({ admitted: true, workAllowed: true }),
   ]);
   const calendarReadingReleased = isFounderGoogleCalendarReleased();
   const mailReadingReleased = isFounderGoogleMailReadingReleased();
@@ -54,6 +54,7 @@ export default async function FounderOperatorPage() {
         initialOnboarding={onboarding}
         initialRecoveryArchive={recoveryArchive}
         ownerPreviewAdmitted={ownerPreviewAccess.admitted}
+        ownerPreviewWorkAllowed={ownerPreviewAccess.workAllowed}
         timezoneOptions={buildFounderTimezoneOptions()}
         openAiReleased={openAiReleased}
         calendarReadingReleased={calendarReadingReleased}

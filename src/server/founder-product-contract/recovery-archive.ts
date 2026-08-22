@@ -30,6 +30,7 @@ import {
 } from "./recovery-archive-provider";
 
 const DAILY_ARCHIVE_WINDOW_MS = 24 * 60 * 60 * 1_000;
+const SCHEDULED_ARCHIVE_REFRESH_MS = DAILY_ARCHIVE_WINDOW_MS - 60 * 60 * 1_000;
 const ARCHIVE_RETENTION_MS = 30 * DAILY_ARCHIVE_WINDOW_MS;
 
 type RecoveryArchiveTransaction = Parameters<
@@ -70,6 +71,10 @@ export async function createDurableRecoveryArchive(
       await requireOperationalEntitlement(tx, input.userId, input.now);
     }
     if (input.action === "scheduled_archive" || input.action === "release_stage_admission") {
+      const reuseWindowMs =
+        input.action === "scheduled_archive"
+          ? SCHEDULED_ARCHIVE_REFRESH_MS
+          : DAILY_ARCHIVE_WINDOW_MS;
       const [current] = await tx
         .select({ id: founderRecoveryArchives.id })
         .from(founderRecoveryArchives)
@@ -80,10 +85,7 @@ export async function createDurableRecoveryArchive(
             eq(founderRecoveryArchives.formatVersion, 1),
             eq(founderRecoveryArchives.restorableVerified, true),
             lte(founderRecoveryArchives.observedAt, input.now),
-            gt(
-              founderRecoveryArchives.observedAt,
-              new Date(input.now.valueOf() - DAILY_ARCHIVE_WINDOW_MS),
-            ),
+            gt(founderRecoveryArchives.observedAt, new Date(input.now.valueOf() - reuseWindowMs)),
           ),
         )
         .orderBy(desc(founderRecoveryArchives.observedAt))
@@ -447,7 +449,16 @@ export async function reconcileFounderRecoveryArchives(input: {
               createConnection: () => connection,
             },
           );
-          if (statusBeforeCreation.state === "current") continue;
+          const lastVerifiedAt = statusBeforeCreation.lastVerifiedAt
+            ? new Date(statusBeforeCreation.lastVerifiedAt)
+            : null;
+          if (
+            statusBeforeCreation.state === "current" &&
+            lastVerifiedAt &&
+            lastVerifiedAt > new Date(input.now.valueOf() - SCHEDULED_ARCHIVE_REFRESH_MS)
+          ) {
+            continue;
+          }
           await createDurableRecoveryArchive(
             { action: "scheduled_archive", userId, now: input.now },
             input.provider,
