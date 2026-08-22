@@ -36,7 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   evidence. Legacy qualification expiry migrates fail-closed, and scheduled protection can archive
   the last admitted checkpoint while runtime recovery needs attention. Retirement invalidates
   destroyed runtime readiness, admission rechecks evidence at its final commit, and restore proof
-  preserves the complete external-action pause tuple.
+  preserves the complete external-action pause tuple with a closed non-secret recovery reason,
+  excludes raw Founder-controlled pause text, and binds archive reuse and authorization to the
+  persisted runtime revision.
 - A protected production rollout now advances versioned defaults through QStash, an Approved
   Snapshot, release-attested readiness, and the measured runner size while new cold provisioning is
   halted. It exercises dispatch, snapshot, validation, and compatible stock/full runner-size

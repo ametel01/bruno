@@ -161,6 +161,7 @@ export async function executeFounderProductContractLifecycleAction(
             operatorId,
             applicationRevision: dependencies.applicationRevision,
             runtimeRevision,
+            identityKind: "clerk",
             identitySubject: identity.subject,
             qualificationEvidenceDigests,
             freshQualificationEvidenceDigests: qualificationEvidenceDigests,
@@ -237,6 +238,7 @@ type RetirementWork = {
   leaseToken: string;
   runnerId: string;
   operatorId: string;
+  runtimeRevision: string;
   recoveryArchiveId: string;
   archiveNeedsExecution: boolean;
   expectation: DigitalOceanOwnedSetExpectation;
@@ -262,6 +264,7 @@ async function executeInfrastructureRetirement(
         prepared.operatorId,
         false,
         () => input.now,
+        prepared.runtimeRevision,
       )
     : Promise.resolve();
 
@@ -299,6 +302,15 @@ async function prepareInfrastructureRetirement(
       tx,
       input.userId,
     );
+    const [runtime] = await tx
+      .select({ configRevision: operatorRuntimes.configRevision })
+      .from(operatorRuntimes)
+      .where(eq(operatorRuntimes.operatorId, operatorId))
+      .orderBy(desc(operatorRuntimes.updatedAt))
+      .limit(1);
+    if (!runtime?.configRevision) {
+      throw new Error("Infrastructure Retirement requires a persisted runtime revision.");
+    }
     await requireRetirementDue(tx, input.userId, input.now);
 
     const runnerCandidates = await tx
@@ -421,6 +433,7 @@ async function prepareInfrastructureRetirement(
       recoveryArchiveId = await persistFounderRecoveryArchiveIntentInTransaction(tx, {
         userId: input.userId,
         operatorId,
+        runtimeRevision: runtime.configRevision,
         now: input.now,
         pendingIntentPolicy: "supersede_for_retirement",
       });
@@ -473,6 +486,7 @@ async function prepareInfrastructureRetirement(
       leaseToken,
       runnerId: runner.id,
       operatorId,
+      runtimeRevision: runtime.configRevision,
       recoveryArchiveId,
       archiveNeedsExecution,
       expectation,

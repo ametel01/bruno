@@ -1,6 +1,10 @@
 import "server-only";
 
 import { founderProductContractDigest } from "./digest";
+
+export const FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON =
+  "recovery_archive_external_actions_paused" as const;
+
 export type FounderRecoveryArchiveDurableState = {
   schemaVersion: 1;
   operator: {
@@ -8,7 +12,7 @@ export type FounderRecoveryArchiveDurableState = {
     createdAt: string;
     mailOfferDisposition: "enabled" | "dismissed" | null;
     externalActionPaused: boolean;
-    externalActionPauseReason: string | null;
+    externalActionPauseReason: typeof FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON | null;
     externalActionPausedAt: string | null;
   };
   preparation: {

@@ -70,7 +70,9 @@ BRUNO_OPERATOR_PASSWORD=replace-with-strong-operator-password
 Operator mode is explicit and fails closed when the password is absent or blank. It does not enable
 Clerk pages, sessions, or automatic legacy-user claiming. The production cutover replaces this mode
 with `clerk`; the operator password and Basic-auth code are removed only after hosted Clerk and
-ownership acceptance passes.
+ownership acceptance passes. Both `operator` and `clerk` production modes enforce the same persisted
+Owner Preview Release Decision and Recovery Archive access boundary; only explicit development mode
+uses the local bypass.
 
 ## Clerk mode
 

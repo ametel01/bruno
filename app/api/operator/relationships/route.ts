@@ -2,6 +2,7 @@ import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_share
 import {
   confirmFounderRelationshipCandidateForUser,
   FounderRelationshipsError,
+  founderRelationshipEvidenceRequirement,
   getFounderRelationshipsForUser,
   ingestFounderRelationshipEvidenceForUser,
   rejectFounderRelationshipCandidateForUser,
@@ -49,6 +50,11 @@ export async function POST(request: Request): Promise<Response> {
     if (payload.action === "ingest_evidence") {
       const observations = readObservations(payload.observations);
       if (!observations.ok) return validationResponse(observations.message);
+      const evidenceAccessFailure = await requireFounderOperatorWorkspaceAccess(
+        applicationUser.userId,
+        founderRelationshipEvidenceRequirement(observations.value),
+      );
+      if (evidenceAccessFailure) return evidenceAccessFailure;
       const relationships = await ingestFounderRelationshipEvidenceForUser(
         applicationUser.userId,
         observations.value,

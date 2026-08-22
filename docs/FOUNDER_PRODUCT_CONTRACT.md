@@ -120,12 +120,15 @@ deletion requires a live proof that bucket versioning is disabled, so a delete m
 recoverable object versions cannot produce a completed receipt. Archive and recovery-credential
 object identities are persisted before provider upload, so interrupted, partial, and failed
 creations remain eligible for 30-day deletion and a bounded receipt rather than becoming orphaned
-objects. Completed Infrastructure Retirement ends daily replacement creation until later admission
+objects. Each archive intent persists its trusted runtime revision before upload; reuse, admission,
+and work authorization require that revision to match, while migrated archives without provable
+revision identity fail closed. Completed Infrastructure Retirement ends daily replacement creation until later admission
 authority restores the Operator; the final retained archive still reaches the same expiry boundary.
 Retirement also invalidates the destroyed Operator runtime in the same completion transaction, so
 the runtime cannot remain Ready after its Droplet and firewall are absent. Archive restore proof
-includes the complete external-action pause state—boolean, reason, and timestamp—rather than a flag
-that cannot be persisted safely after restoration.
+includes the complete external-action pause state—boolean, a closed non-secret recovery reason, and
+timestamp—rather than a flag that cannot be persisted safely after restoration. Raw
+Founder-controlled pause text is excluded from the archive allowlist.
 Delayed or
 reordered commerce events cannot replace newer authority or extend a retirement clock; reactivation
 requires a newly pending Owner-bound Checkout Correlation. DigitalOcean cleanup is derived from

@@ -4,6 +4,7 @@ import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import {
   getFounderOwnerPreviewAccessForUser,
   hasFounderOwnerPreviewCapabilities,
+  requiresFounderReleaseStageAuthority,
 } from "@/src/server/founder-product-contract/release-stage-access";
 import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
 import { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
@@ -42,7 +43,7 @@ export default async function FounderOperatorPage() {
   const [onboarding, recoveryArchive, ownerPreviewAccess] = await Promise.all([
     getFounderOnboardingForUser(applicationUser.userId),
     getFounderRecoveryArchiveStatusForUser(applicationUser.userId, new Date()),
-    resolveAuthMode(process.env).mode === "clerk"
+    requiresFounderReleaseStageAuthority(resolveAuthMode(process.env).mode)
       ? getFounderOwnerPreviewAccessForUser(applicationUser.userId, new Date())
       : Promise.resolve({
           admitted: true,

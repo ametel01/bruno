@@ -7,6 +7,7 @@ import {
   type FounderRecoveryArchiveDurableState,
   readFounderRecoveryArchiveMasterKey,
 } from "@/src/server/founder-product-contract/encrypted-recovery-archive-provider";
+import { FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON } from "@/src/server/founder-product-contract/recovery-archive-provider";
 
 const USER_ID = "00000000-0000-4000-8000-000000003730";
 const OPERATOR_ID = "00000000-0000-4000-8000-000000003731";
@@ -139,6 +140,25 @@ describe("encrypted Founder Recovery Archive provider", () => {
       }),
     ).rejects.toThrow("non-allowlisted or credential-bearing state");
 
+    const unsafeState = {
+      ...durableState(),
+      operator: {
+        ...durableState().operator,
+        externalActionPaused: true,
+        externalActionPauseReason: "Bearer embedded-secret-must-not-be-archived",
+        externalActionPausedAt: OBSERVED_AT.toISOString(),
+      },
+    } as unknown as FounderRecoveryArchiveDurableState;
+    await expect(
+      provider.createRecoveryArchive({
+        archiveIntentId: randomUUID(),
+        userId: USER_ID,
+        operatorId: OPERATOR_ID,
+        observedAt: OBSERVED_AT,
+        state: unsafeState,
+      }),
+    ).rejects.toThrow("non-allowlisted or credential-bearing state");
+
     await expect(
       provider.createRecoveryArchive({
         archiveIntentId: randomUUID(),
@@ -150,7 +170,7 @@ describe("encrypted Founder Recovery Archive provider", () => {
           operator: {
             ...durableState().operator,
             externalActionPaused: true,
-            externalActionPauseReason: "Founder requested a pause.",
+            externalActionPauseReason: FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON,
             externalActionPausedAt: OBSERVED_AT.toISOString(),
           },
         },

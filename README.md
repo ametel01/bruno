@@ -285,7 +285,10 @@ mutation seams recheck this boundary; read endpoints only project existing opera
 Infrastructure Retirement marks the destroyed runtime as needing attention before
 its receipt completes, so only newly provisioned and verified infrastructure can become Ready
 again. The encrypted durable state preserves an external-action pause as the complete boolean,
-reason, and timestamp tuple required to rebuild it safely. Every S3-compatible
+closed non-secret recovery reason, and timestamp tuple required to rebuild it safely; raw
+Founder-controlled pause text is never archived. Each verified archive is bound to the trusted
+runtime revision persisted before upload, and legacy rows without provable revision identity cannot
+be reused for admission or authorize work. Every S3-compatible
 request, including response-body reads, uses a 10-second abort deadline so unavailable storage
 cannot indefinitely hold recovery, expiry, or retirement work.
 

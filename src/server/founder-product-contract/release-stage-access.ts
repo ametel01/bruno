@@ -1,6 +1,7 @@
 import "server-only";
 
 import { and, desc, eq, gt, inArray, lte } from "drizzle-orm";
+import type { AuthModeDecision } from "@/src/auth/auth-mode";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   founderRecoveryArchives,
@@ -26,6 +27,10 @@ export type FounderOwnerPreviewAccessRequirement =
   | "workspace"
   | readonly FounderOwnerPreviewCapability[];
 
+export function requiresFounderReleaseStageAuthority(mode: AuthModeDecision["mode"]): boolean {
+  return mode !== "development";
+}
+
 export class FounderReleaseStageAccessError extends Error {
   readonly code = "owner_preview_access_required" as const;
   readonly status = 403 as const;
@@ -50,22 +55,10 @@ export async function getFounderOwnerPreviewAccessForUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
-    const applicationRevision =
-      dependencies.applicationRevision ??
-      dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
-      process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
-      "";
-    return await connection.db.transaction(async (tx) => {
-      await reconcileFounderOwnerPreviewQualificationExpiryInTransaction(tx, {
-        userId,
-        now,
-        applicationRevision,
-      });
-      return getFounderOwnerPreviewAccessInTransaction(tx, {
-        userId,
-        now,
-        applicationRevision,
-      });
+    return await getFounderOwnerPreviewAccessInTransaction(connection.db, {
+      userId,
+      now,
+      applicationRevision: resolveApplicationRevision(dependencies),
     });
   } finally {
     if (ownsConnection) await connection.close();
@@ -82,13 +75,28 @@ export async function requireFounderOwnerPreviewAccessForUser(
   } = {},
   requirement: FounderOwnerPreviewAccessRequirement,
 ): Promise<void> {
-  const access = await getFounderOwnerPreviewAccessForUser(userId, now, dependencies);
-  if (
-    requirement === "workspace"
-      ? !access.admitted
-      : !requirementsAvailable(access.availableCapabilities, requirement)
-  ) {
-    throw new FounderReleaseStageAccessError();
+  if (requirement === "workspace") {
+    const access = await getFounderOwnerPreviewAccessForUser(userId, now, dependencies);
+    if (!access.admitted) throw new FounderReleaseStageAccessError();
+    return;
+  }
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  try {
+    const applicationRevision = resolveApplicationRevision(dependencies);
+    const access = await connection.db.transaction(async (tx) => {
+      await reconcileFounderOwnerPreviewQualificationExpiryInTransaction(tx, {
+        userId,
+        now,
+        applicationRevision,
+      });
+      return getFounderOwnerPreviewAccessInTransaction(tx, { userId, now, applicationRevision });
+    });
+    if (!requirementsAvailable(access.availableCapabilities, requirement)) {
+      throw new FounderReleaseStageAccessError();
+    }
+  } finally {
+    if (ownsConnection) await connection.close();
   }
 }
 
@@ -138,6 +146,8 @@ export async function getFounderOwnerPreviewAccessInTransaction(
       runtimeRevision: founderReleaseDecisions.runtimeRevision,
       capabilityManifest: founderReleaseDecisions.capabilityManifest,
       affectedCapabilities: founderReleaseDecisions.affectedCapabilities,
+      openAiQualificationExpiresAt: founderReleaseDecisions.openAiQualificationExpiresAt,
+      calendarQualificationExpiresAt: founderReleaseDecisions.calendarQualificationExpiresAt,
     })
     .from(founderReleaseDecisions)
     .where(
@@ -191,6 +201,7 @@ export async function getFounderOwnerPreviewAccessInTransaction(
       and(
         eq(founderRecoveryArchives.userId, input.userId),
         eq(founderRecoveryArchives.operatorId, authority.operatorId),
+        eq(founderRecoveryArchives.runtimeRevision, authority.runtimeRevision),
         eq(founderRecoveryArchives.status, "verified"),
         eq(founderRecoveryArchives.formatVersion, 1),
         eq(founderRecoveryArchives.restorableVerified, true),
@@ -218,7 +229,8 @@ export async function getFounderOwnerPreviewAccessInTransaction(
       availableCapabilities: latestDecision.capabilityManifest.filter(
         (capability): capability is FounderOwnerPreviewCapability =>
           isFounderOwnerPreviewCapability(capability) &&
-          priorAdmission.capabilityManifest.includes(capability),
+          priorAdmission.capabilityManifest.includes(capability) &&
+          qualificationIsCurrent(latestDecision, capability, input.now),
       ),
     };
   }
@@ -228,11 +240,39 @@ export async function getFounderOwnerPreviewAccessInTransaction(
       availableCapabilities: priorAdmission.capabilityManifest.filter(
         (capability): capability is FounderOwnerPreviewCapability =>
           isFounderOwnerPreviewCapability(capability) &&
-          !latestDecision.affectedCapabilities.includes(capability),
+          !latestDecision.affectedCapabilities.includes(capability) &&
+          qualificationIsCurrent(latestDecision, capability, input.now),
       ),
     };
   }
   return { admitted: true, availableCapabilities: [] };
+}
+
+function qualificationIsCurrent(
+  decision: {
+    openAiQualificationExpiresAt: Date | null;
+    calendarQualificationExpiresAt: Date | null;
+  },
+  capability: FounderOwnerPreviewCapability,
+  now: Date,
+): boolean {
+  const expiresAt =
+    capability === "openai"
+      ? decision.openAiQualificationExpiresAt
+      : decision.calendarQualificationExpiresAt;
+  return expiresAt !== null && expiresAt > now;
+}
+
+function resolveApplicationRevision(dependencies: {
+  applicationRevision?: string;
+  env?: Record<string, string | undefined>;
+}): string {
+  return (
+    dependencies.applicationRevision ??
+    dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
+    process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
+    ""
+  );
 }
 
 function requirementsAvailable(

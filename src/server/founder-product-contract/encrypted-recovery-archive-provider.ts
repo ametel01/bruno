@@ -15,6 +15,7 @@ import {
   type FounderRecoveryArchiveDeletionOutcome,
   type FounderRecoveryArchiveDurableState,
   type FounderRecoveryArchiveProvider,
+  FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON,
   founderRecoveryArchiveObjectIdentity,
 } from "./recovery-archive-provider";
 import {
@@ -437,8 +438,7 @@ function isPersistableExternalActionPause(operator: Record<string, unknown>): bo
   }
   return (
     operator.externalActionPaused === true &&
-    typeof operator.externalActionPauseReason === "string" &&
-    operator.externalActionPauseReason.trim().length > 0 &&
+    operator.externalActionPauseReason === FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON &&
     isIsoDate(operator.externalActionPausedAt)
   );
 }

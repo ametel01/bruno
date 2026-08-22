@@ -9,6 +9,7 @@ export type FounderOwnerPreviewCapability = (typeof FOUNDER_OWNER_PREVIEW_CAPABI
 export const FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS = {
   conversation: ["openai"],
   calendarLimitedOperation: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+  calendarRelationshipEvidence: ["calendar_reading"],
   forbidden: [],
 } as const satisfies Record<string, readonly FounderOwnerPreviewCapability[]>;
 type PreviewQualificationEnvironment = Record<string, string | undefined>;

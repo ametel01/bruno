@@ -1,8 +1,10 @@
+import type { AuthModeDecision } from "@/src/auth/auth-mode";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { admitFounderOperatorToOwnerPreview } from "@/src/server/founder-product-contract/owner-preview-admission";
 import {
   getFounderOwnerPreviewAccessForUser,
   hasFounderOwnerPreviewCapabilities,
+  requiresFounderReleaseStageAuthority,
 } from "@/src/server/founder-product-contract/release-stage-access";
 import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
 import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
@@ -22,6 +24,7 @@ type OperatorRouteDependencies = {
   prepareRuntime?: typeof prepareFounderOperatorRuntimeForUser;
   getRecoveryArchiveStatus?: typeof getFounderRecoveryArchiveStatusForUser;
   getOwnerPreviewAccess?: typeof getFounderOwnerPreviewAccessForUser;
+  authMode?: AuthModeDecision["mode"];
 };
 
 type OperatorRouteContext = {
@@ -49,16 +52,16 @@ export async function GET(
   const recoveryArchive = await (
     dependencies.getRecoveryArchiveStatus ?? getFounderRecoveryArchiveStatusForUser
   )(applicationUser.userId, new Date());
-  const ownerPreviewAccess =
-    resolveAuthMode(process.env).mode === "clerk"
-      ? await (dependencies.getOwnerPreviewAccess ?? getFounderOwnerPreviewAccessForUser)(
-          applicationUser.userId,
-          new Date(),
-        )
-      : {
-          admitted: true,
-          availableCapabilities: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
-        };
+  const authMode = dependencies.authMode ?? resolveAuthMode(process.env).mode;
+  const ownerPreviewAccess = requiresFounderReleaseStageAuthority(authMode)
+    ? await (dependencies.getOwnerPreviewAccess ?? getFounderOwnerPreviewAccessForUser)(
+        applicationUser.userId,
+        new Date(),
+      )
+    : {
+        admitted: true,
+        availableCapabilities: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+      };
 
   return Response.json(
     {
@@ -98,9 +101,10 @@ export async function POST(
     const result = await (dependencies.prepareRuntime ?? prepareFounderOperatorRuntimeForUser)(
       applicationUser.userId,
     );
+    const authMode = dependencies.authMode ?? resolveAuthMode(process.env).mode;
     const ownerPreviewAdmission =
       dependencies.admitOwnerPreview ??
-      (resolveAuthMode(process.env).mode === "clerk" ? admitFounderOperatorToOwnerPreview : null);
+      (requiresFounderReleaseStageAuthority(authMode) ? admitFounderOperatorToOwnerPreview : null);
     if (result.runtime.status === "ready" && ownerPreviewAdmission) {
       try {
         await ownerPreviewAdmission(applicationUser.userId);

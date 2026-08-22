@@ -13,6 +13,11 @@ import {
   operatorRelationshipEvidence,
   operatorRelationshipRecords,
 } from "@/src/server/db/schema";
+import {
+  type FounderOwnerPreviewAccessRequirement,
+  requireFounderOwnerPreviewAccessInTransaction,
+} from "@/src/server/founder-product-contract/release-stage-access";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 
 type FounderRelationshipTransaction = Parameters<
@@ -112,8 +117,10 @@ export type FounderRelationshipObservation = {
 
 export type FounderRelationshipsDependencies = {
   createConnection?: () => DatabaseConnection;
+  env?: Record<string, string | undefined>;
   now?: () => Date;
   randomUUID?: () => string;
+  requireReleaseStageAccess?: typeof requireFounderOwnerPreviewAccessInTransaction;
 };
 
 export class FounderRelationshipsError extends Error {
@@ -172,6 +179,14 @@ export async function ingestFounderRelationshipEvidenceForUser(
   const makeId = dependencies.randomUUID ?? randomUUID;
   try {
     await connection.db.transaction(async (tx) => {
+      await (
+        dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction
+      )(tx, {
+        userId,
+        now: now(),
+        applicationRevision: resolveApplicationRevision(dependencies.env),
+        requiredCapabilities: founderRelationshipEvidenceRequirement(observations),
+      });
       await lockOperator(tx, operator.id);
       for (const rawObservation of observations) {
         const observation = normalizeObservation(rawObservation);
@@ -231,6 +246,18 @@ export async function ingestFounderRelationshipEvidenceForUser(
   } finally {
     if (ownsConnection) await connection.close();
   }
+}
+
+export function founderRelationshipEvidenceRequirement(
+  observations: readonly Pick<FounderRelationshipObservation, "sourceKind">[],
+): Exclude<FounderOwnerPreviewAccessRequirement, "workspace"> {
+  return observations.some((observation) => observation.sourceKind === "mail")
+    ? FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden
+    : FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarRelationshipEvidence;
+}
+
+function resolveApplicationRevision(env?: Record<string, string | undefined>): string {
+  return env?.VERCEL_GIT_COMMIT_SHA?.trim() ?? process.env.VERCEL_GIT_COMMIT_SHA?.trim() ?? "";
 }
 
 export async function updateFounderRelationshipRecordForUser(

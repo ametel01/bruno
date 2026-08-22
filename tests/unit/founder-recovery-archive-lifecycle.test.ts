@@ -31,6 +31,7 @@ import {
   reconcileFounderRecoveryArchives,
 } from "@/src/server/founder-product-contract/recovery-archive";
 import { prepareFounderOperatorRuntimeForUser } from "@/src/server/operators/founder-operator-runtime";
+import { FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON } from "@/src/server/founder-product-contract/recovery-archive-provider";
 
 const USER_ID = "00000000-0000-4000-8000-000000003730";
 const OPERATOR_ID = "00000000-0000-4000-8000-000000003731";
@@ -73,6 +74,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     expect(archive).toMatchObject({
       userId: USER_ID,
       operatorId: OPERATOR_ID,
+      runtimeRevision: "runtime-v1",
       status: "verified",
       formatVersion: 1,
       restorableVerified: true,
@@ -115,6 +117,99 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       ),
     ).resolves.toBe(archiveId);
     expect(await connection.db.select().from(founderRecoveryArchives)).toHaveLength(1);
+  });
+
+  it("does not reuse or authorize an archive from a different runtime revision", async () => {
+    const firstArchiveId = await createDurableRecoveryArchive(
+      { action: "release_stage_admission", userId: USER_ID, now: START },
+      provider,
+      connection,
+      () => START,
+    );
+    const nextRevisionAt = new Date(START.valueOf() + 60_000);
+    await connection.db
+      .update(operatorRuntimes)
+      .set({ configRevision: "runtime-v2", updatedAt: nextRevisionAt })
+      .where(eq(operatorRuntimes.operatorId, OPERATOR_ID));
+    await connection.db.insert(founderReleaseDecisions).values({
+      userId: USER_ID,
+      operatorId: OPERATOR_ID,
+      stage: "owner_preview",
+      outcome: "enter",
+      applicationRevision: "a".repeat(40),
+      runtimeRevision: "runtime-v2",
+      capabilityManifest: ["openai", "calendar_reading"],
+      openAiQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
+      calendarQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
+      evidenceDigests: [`sha256:${"9".repeat(64)}`],
+      decidedAt: nextRevisionAt,
+      createdAt: nextRevisionAt,
+    });
+    const refreshedAt = new Date(START.valueOf() + 60 * 60 * 1_000);
+
+    await expect(
+      getFounderOwnerPreviewAccessForUser(USER_ID, refreshedAt, {
+        applicationRevision: "a".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ admitted: true, availableCapabilities: [] });
+    await expect(
+      getFounderRecoveryArchiveStatusForUser(USER_ID, refreshedAt, {
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({ state: "due" });
+
+    const secondArchiveId = await createDurableRecoveryArchive(
+      { action: "release_stage_admission", userId: USER_ID, now: refreshedAt },
+      provider,
+      connection,
+      () => refreshedAt,
+    );
+    expect(secondArchiveId).not.toBe(firstArchiveId);
+    await expect(
+      connection.db
+        .select({ runtimeRevision: founderRecoveryArchives.runtimeRevision })
+        .from(founderRecoveryArchives)
+        .orderBy(founderRecoveryArchives.observedAt),
+    ).resolves.toEqual([{ runtimeRevision: "runtime-v1" }, { runtimeRevision: "runtime-v2" }]);
+    await expect(
+      getFounderOwnerPreviewAccessForUser(USER_ID, refreshedAt, {
+        applicationRevision: "a".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({
+      admitted: true,
+      availableCapabilities: ["openai", "calendar_reading"],
+    });
+  });
+
+  it("archives a closed pause reason without Founder-controlled text", async () => {
+    const embeddedCredential = "Founder paused after seeing Bearer secret-token-value";
+    await connection.db
+      .update(operators)
+      .set({
+        externalActionPause: true,
+        externalActionPauseReason: embeddedCredential,
+        externalActionPausedAt: START,
+      })
+      .where(eq(operators.id, OPERATOR_ID));
+    let archivedReason: string | null | undefined;
+
+    await createDurableRecoveryArchive(
+      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        async createRecoveryArchive(input) {
+          archivedReason = input.state.operator.externalActionPauseReason;
+          expect(JSON.stringify(input.state)).not.toContain(embeddedCredential);
+          return provider.createRecoveryArchive(input);
+        },
+        deleteRecoveryArchive: (input) => provider.deleteRecoveryArchive(input),
+      },
+      connection,
+      () => START,
+    );
+
+    expect(archivedReason).toBe(FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON);
   });
 
   it("separates persisted Owner Preview access from current work protection", async () => {
@@ -282,10 +377,27 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     });
 
     const observedAt = new Date(expiresAt.valueOf() + 1);
-    await getFounderOwnerPreviewAccessForUser(USER_ID, observedAt, {
-      applicationRevision,
-      createConnection: () => connection,
-    });
+    await expect(
+      getFounderOwnerPreviewAccessForUser(USER_ID, observedAt, {
+        applicationRevision,
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ admitted: true, availableCapabilities: ["calendar_reading"] });
+
+    const beforeWork = await connection.db
+      .select()
+      .from(founderReleaseDecisions)
+      .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision));
+    expect(beforeWork.map((decision) => decision.outcome)).toEqual(["enter"]);
+
+    await expect(
+      requireFounderOwnerPreviewAccessForUser(
+        USER_ID,
+        observedAt,
+        { applicationRevision, createConnection: () => connection },
+        ["openai"],
+      ),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
 
     const decisions = await connection.db
       .select()
@@ -528,6 +640,32 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     ).resolves.toEqual([]);
   });
 
+  it("admits the authenticated internal Owner in supported production operator mode", async () => {
+    const applicationRevision = "3".repeat(40);
+    await connection.db.update(users).set({ clerkUserId: null }).where(eq(users.id, USER_ID));
+    const environment = {
+      ...ownerPreviewEnvironment(applicationRevision),
+      BRUNO_AUTH_MODE: "operator",
+      BRUNO_OPERATOR_PASSWORD: "test-operator-password",
+    };
+
+    await expect(
+      admitFounderOperatorToOwnerPreview(USER_ID, {
+        applicationRevision,
+        createConnection: () => connection,
+        createProvider: () => provider,
+        env: environment,
+        now: () => START,
+      }),
+    ).resolves.toEqual({ archiveId: expect.any(String) });
+    await expect(
+      connection.db
+        .select({ outcome: founderReleaseDecisions.outcome })
+        .from(founderReleaseDecisions)
+        .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision)),
+    ).resolves.toEqual([{ outcome: "enter" }]);
+  });
+
   it("rejects Preview Qualification scoped to a different runtime", async () => {
     const applicationRevision = "6".repeat(40);
     const environment = ownerPreviewEnvironment(applicationRevision);
@@ -722,6 +860,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       persistFounderRecoveryArchiveIntentInTransaction(tx, {
         userId: USER_ID,
         operatorId: OPERATOR_ID,
+        runtimeRevision: "runtime-v1",
         now: new Date(START.valueOf() + 1_000),
         pendingIntentPolicy: "supersede_for_retirement",
       }),
@@ -742,6 +881,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       }),
       expect.objectContaining({
         id: retirementArchiveId,
+        runtimeRevision: "runtime-v1",
         status: "pending",
         failureCode: null,
         storageObjectKey: `founder-recovery/${USER_ID}/${retirementArchiveId}.age`,
@@ -755,6 +895,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       persistFounderRecoveryArchiveIntentInTransaction(tx, {
         userId: USER_ID,
         operatorId: OPERATOR_ID,
+        runtimeRevision: "runtime-v1",
         now: START,
       }),
     );
@@ -764,6 +905,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       .from(founderRecoveryArchives)
       .where(eq(founderRecoveryArchives.id, archiveId));
     expect(intent).toMatchObject({
+      runtimeRevision: "runtime-v1",
       status: "pending",
       storageObjectKey: `founder-recovery/${USER_ID}/${archiveId}.age`,
       recoveryCredentialObjectKey: `founder-recovery/${USER_ID}/${archiveId}.key`,
@@ -966,6 +1108,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       persistFounderRecoveryArchiveIntentInTransaction(tx, {
         userId: USER_ID,
         operatorId: OPERATOR_ID,
+        runtimeRevision: "runtime-v1",
         now: START,
       }),
     );

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { and, desc, eq, gt, inArray, lte } from "drizzle-orm";
+import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { founderRecoveryArchives, founderReleaseDecisions, users } from "@/src/server/db/schema";
 import { evaluateFounderGoogleCalendarRelease } from "@/src/server/operators/founder-google-reading-release";
@@ -33,6 +34,7 @@ type QualifiedOwnerPreviewAdmissionInput = {
   operatorId: string;
   applicationRevision: string;
   runtimeRevision: string;
+  identityKind: "clerk" | "operator";
   identitySubject: string;
   qualificationEvidenceDigests: readonly `sha256:${string}`[];
   freshQualificationEvidenceDigests: readonly `sha256:${string}`[];
@@ -75,10 +77,16 @@ export async function admitFounderOperatorToOwnerPreview(
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
-    if (!identity?.subject) {
-      throw new Error("Owner Preview requires an authenticated Clerk identity.");
+    const authMode = resolveAuthMode(environment).mode;
+    const identityEvidence =
+      authMode === "operator"
+        ? { kind: "operator" as const, subject: userId }
+        : identity?.subject
+          ? { kind: "clerk" as const, subject: identity.subject }
+          : null;
+    if (!identityEvidence) {
+      throw new Error("Owner Preview requires an authenticated production identity.");
     }
-    const identitySubject = identity.subject;
     const authority = await connection.db.transaction((tx) =>
       requireReadyFounderOperatorAuthorityInTransaction(tx, userId),
     );
@@ -134,6 +142,7 @@ export async function admitFounderOperatorToOwnerPreview(
             eq(founderRecoveryArchives.id, archiveId),
             eq(founderRecoveryArchives.userId, userId),
             eq(founderRecoveryArchives.operatorId, operatorId),
+            eq(founderRecoveryArchives.runtimeRevision, runtimeRevision),
             eq(founderRecoveryArchives.status, "verified"),
             eq(founderRecoveryArchives.formatVersion, 1),
             eq(founderRecoveryArchives.restorableVerified, true),
@@ -152,7 +161,8 @@ export async function admitFounderOperatorToOwnerPreview(
         operatorId,
         applicationRevision,
         runtimeRevision,
-        identitySubject,
+        identityKind: identityEvidence.kind,
+        identitySubject: identityEvidence.subject,
         qualificationEvidenceDigests: [
           ...committedPreviewQualifications.map((qualification) => qualification.evidenceDigest),
           committedOpenAIQualification.evidence.evidenceDigest,
@@ -209,7 +219,7 @@ export async function persistQualifiedFounderOwnerPreviewAdmissionInTransaction(
     `recovery-archive:${input.recoveryArchiveId}`,
   );
   const evidenceDigests = [
-    founderProductContractDigest(`clerk:${input.identitySubject}`),
+    founderProductContractDigest(`${input.identityKind}:${input.identitySubject}`),
     ...input.qualificationEvidenceDigests,
     archiveEvidenceDigest,
   ];

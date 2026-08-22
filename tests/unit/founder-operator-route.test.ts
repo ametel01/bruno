@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   confirmTimezone: vi.fn(),
   ensureOperator: vi.fn(),
   getRecoveryArchiveStatus: vi.fn(),
+  getOwnerPreviewAccess: vi.fn(),
   prepareRuntime: vi.fn(),
   requireApplicationUser: vi.fn(),
 }));
@@ -55,6 +56,10 @@ describe("Founder Operator route", () => {
       nextArchiveDueAt: "2026-08-23T00:00:00.000Z",
       retentionEndsAt: "2026-09-21T00:00:00.000Z",
       deletion: null,
+    });
+    mocks.getOwnerPreviewAccess.mockResolvedValue({
+      admitted: true,
+      availableCapabilities: ["calendar_reading"],
     });
     mocks.confirmTimezone.mockResolvedValue({
       ...OPERATOR,
@@ -108,6 +113,7 @@ describe("Founder Operator route", () => {
     mocks.confirmTimezone.mockReset();
     mocks.ensureOperator.mockReset();
     mocks.getRecoveryArchiveStatus.mockReset();
+    mocks.getOwnerPreviewAccess.mockReset();
     mocks.prepareRuntime.mockReset();
     mocks.requireApplicationUser.mockReset();
   });
@@ -133,6 +139,23 @@ describe("Founder Operator route", () => {
     });
     expect(mocks.ensureOperator).toHaveBeenCalledWith(USER_ID);
     expect(mocks.getRecoveryArchiveStatus).toHaveBeenCalledWith(USER_ID, expect.any(Date));
+  });
+
+  it("enforces persisted Release Stage authority in supported production operator mode", async () => {
+    const { GET } = await import("@/app/api/operator/route");
+
+    const response = await GET(new Request("http://localhost/api/operator"), undefined, {
+      authMode: "operator",
+      getOwnerPreviewAccess: mocks.getOwnerPreviewAccess,
+      getRecoveryArchiveStatus: mocks.getRecoveryArchiveStatus,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ownerPreviewAdmitted: true,
+      ownerPreviewWorkAllowed: false,
+    });
+    expect(mocks.getOwnerPreviewAccess).toHaveBeenCalledWith(USER_ID, expect.any(Date));
   });
 
   it("confirms a plain-language timezone for the authenticated Owner", async () => {

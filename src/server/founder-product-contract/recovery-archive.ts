@@ -27,6 +27,7 @@ import {
   type FounderRecoveryArchiveCreationProvider,
   type FounderRecoveryArchiveDurableState,
   type FounderRecoveryArchiveProvider,
+  FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON,
   founderRecoveryArchiveObjectIdentity,
 } from "./recovery-archive-provider";
 
@@ -82,6 +83,8 @@ export async function createDurableRecoveryArchive(
         .where(
           and(
             eq(founderRecoveryArchives.userId, input.userId),
+            eq(founderRecoveryArchives.operatorId, operatorId),
+            eq(founderRecoveryArchives.runtimeRevision, runtimeRevision),
             eq(founderRecoveryArchives.status, "verified"),
             eq(founderRecoveryArchives.formatVersion, 1),
             eq(founderRecoveryArchives.restorableVerified, true),
@@ -98,6 +101,7 @@ export async function createDurableRecoveryArchive(
     const archiveId = await persistFounderRecoveryArchiveIntentInTransaction(tx, {
       userId: input.userId,
       operatorId,
+      runtimeRevision,
       now: input.now,
     });
     return { archiveId, operatorId, runtimeRevision, alreadyCurrent: false };
@@ -123,6 +127,7 @@ export async function persistFounderRecoveryArchiveIntentInTransaction(
   input: {
     userId: string;
     operatorId: string;
+    runtimeRevision: string;
     now: Date;
     pendingIntentPolicy?: "reject_recent" | "supersede_for_retirement";
   },
@@ -174,6 +179,7 @@ export async function persistFounderRecoveryArchiveIntentInTransaction(
       id: archiveId,
       userId: input.userId,
       operatorId: input.operatorId,
+      runtimeRevision: input.runtimeRevision,
       status: "pending",
       formatVersion: null,
       ...objectIdentity,
@@ -507,6 +513,13 @@ export async function getFounderRecoveryArchiveStatusForUser(
     (await import("@/src/server/db/client")).createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
+    const [authority] = await connection.db
+      .select({ operatorId: operators.id, runtimeRevision: operatorRuntimes.configRevision })
+      .from(operators)
+      .innerJoin(operatorRuntimes, eq(operatorRuntimes.operatorId, operators.id))
+      .where(and(eq(operators.userId, userId), eq(operators.status, "active")))
+      .orderBy(desc(operatorRuntimes.updatedAt))
+      .limit(1);
     const [latest] = await connection.db
       .select()
       .from(founderRecoveryArchives)
@@ -524,7 +537,12 @@ export async function getFounderRecoveryArchiveStatusForUser(
       .where(eq(founderRecoveryArchiveDeletionReceipts.userId, userId))
       .orderBy(desc(founderRecoveryArchiveDeletionReceipts.attemptedAt))
       .limit(1);
-    const current = latest ? isCurrentVerifiedRecoveryArchive(latest, now) : false;
+    const current =
+      latest !== undefined &&
+      Boolean(authority?.runtimeRevision) &&
+      latest.operatorId === authority?.operatorId &&
+      latest.runtimeRevision === authority?.runtimeRevision &&
+      isCurrentVerifiedRecoveryArchive(latest, now);
     return {
       state: current
         ? "current"
@@ -646,7 +664,9 @@ async function loadFounderRecoveryArchiveDurableState(
         createdAt: row.operator.createdAt.toISOString(),
         mailOfferDisposition: row.operator.mailOfferDisposition,
         externalActionPaused: row.operator.externalActionPause,
-        externalActionPauseReason: row.operator.externalActionPauseReason,
+        externalActionPauseReason: row.operator.externalActionPause
+          ? FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON
+          : null,
         externalActionPausedAt: row.operator.externalActionPausedAt?.toISOString() ?? null,
       },
       preparation: {

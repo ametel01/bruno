@@ -1,0 +1,37 @@
+import { describe, expect, it, vi } from "vitest";
+import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
+
+const USER_ID = "00000000-0000-4000-8000-000000003381";
+const NOW = new Date("2026-08-22T00:00:00.000Z");
+
+describe("Founder Owner Preview route access", () => {
+  it("enforces persisted authority in operator and Clerk production modes", async () => {
+    for (const authMode of ["operator", "clerk"] as const) {
+      const requireAccess = vi.fn(async () => {
+        throw new FounderReleaseStageAccessError();
+      });
+
+      const response = await requireFounderOperatorWorkspaceAccess(USER_ID, "workspace", {
+        authMode,
+        now: () => NOW,
+        requireAccess,
+      });
+
+      expect(response?.status).toBe(403);
+      expect(requireAccess).toHaveBeenCalledWith(USER_ID, NOW, {}, "workspace");
+    }
+  });
+
+  it("keeps the explicit development-only bypass", async () => {
+    const requireAccess = vi.fn();
+
+    await expect(
+      requireFounderOperatorWorkspaceAccess(USER_ID, "workspace", {
+        authMode: "development",
+        requireAccess,
+      }),
+    ).resolves.toBeNull();
+    expect(requireAccess).not.toHaveBeenCalled();
+  });
+});

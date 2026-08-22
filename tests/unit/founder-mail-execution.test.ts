@@ -394,6 +394,7 @@ describe("Founder approved Gmail execution", () => {
       id: archiveId,
       userId: OWNER_ID,
       operatorId,
+      runtimeRevision: "runtime-mail-v1",
       status: "verified",
       formatVersion: 1,
       storageObjectKey: `founder-recovery/${OWNER_ID}/${archiveId}.age`,

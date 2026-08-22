@@ -1018,6 +1018,7 @@ export const founderRecoveryArchives = pgTable(
     operatorId: uuid("operator_id")
       .notNull()
       .references(() => operators.id),
+    runtimeRevision: text("runtime_revision"),
     status: founderRecoveryArchiveStatusEnum("status").notNull(),
     formatVersion: integer("format_version"),
     storageObjectKey: text("storage_object_key"),
@@ -1049,6 +1050,10 @@ export const founderRecoveryArchives = pgTable(
     check(
       "founder_recovery_archives_state_digest_check",
       sql`${table.stateDigest} IS NULL OR ${table.stateDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_recovery_archives_runtime_revision_check",
+      sql`${table.runtimeRevision} IS NULL OR length(trim(${table.runtimeRevision})) > 0`,
     ),
     check(
       "founder_recovery_archives_v1_verification_check",
