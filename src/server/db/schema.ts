@@ -1127,6 +1127,169 @@ export const founderExternalBetaInvitations = pgTable(
   ],
 );
 
+export const founderExternalBetaConsentReceipts = pgTable(
+  "founder_external_beta_consent_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    invitationId: uuid("invitation_id")
+      .notNull()
+      .references(() => founderExternalBetaInvitations.id),
+    participantUserId: uuid("participant_user_id")
+      .notNull()
+      .references(() => users.id),
+    participantOperatorId: uuid("participant_operator_id")
+      .notNull()
+      .references(() => operators.id),
+    workspaceDigest: text("workspace_digest").notNull(),
+    purpose: text("purpose").notNull(),
+    decision: text("decision").notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "founder_external_beta_consent_receipts_purpose_check",
+      sql`${table.purpose} IN ('measurement', 'feedback', 'recording', 'testimonial', 'identity', 'name', 'logo', 'quotation', 'case_study')`,
+    ),
+    check(
+      "founder_external_beta_consent_receipts_decision_check",
+      sql`${table.decision} IN ('grant', 'refuse', 'withdraw')`,
+    ),
+    check(
+      "founder_external_beta_consent_receipts_workspace_check",
+      sql`${table.workspaceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    index("founder_external_beta_consent_receipts_latest_idx").on(
+      table.invitationId,
+      table.purpose,
+      table.decidedAt,
+    ),
+    index("founder_external_beta_consent_receipts_participant_idx").on(
+      table.participantUserId,
+      table.participantOperatorId,
+    ),
+  ],
+);
+
+export const founderExternalBetaMeasurements = pgTable(
+  "founder_external_beta_measurements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    invitationId: uuid("invitation_id")
+      .notNull()
+      .references(() => founderExternalBetaInvitations.id),
+    participantUserId: uuid("participant_user_id")
+      .notNull()
+      .references(() => users.id),
+    participantOperatorId: uuid("participant_operator_id")
+      .notNull()
+      .references(() => operators.id),
+    workspaceDigest: text("workspace_digest").notNull(),
+    event: text("event").notNull(),
+    journey: text("journey"),
+    durationSeconds: integer("duration_seconds"),
+    capability: text("capability"),
+    capabilityState: text("capability_state"),
+    safeFailureCategory: text("safe_failure_category"),
+    evidenceClassification: text("evidence_classification").notNull().default("product_hardening"),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "founder_external_beta_measurements_workspace_check",
+      sql`${table.workspaceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_external_beta_measurements_event_check",
+      sql`${table.event} IN ('activation_completed', 'journey_completed', 'journey_timing_recorded', 'capability_state_observed', 'safe_failure_observed', 'support_duration_recorded')`,
+    ),
+    check(
+      "founder_external_beta_measurements_journey_check",
+      sql`${table.journey} IS NULL OR ${table.journey} IN ('activation', 'operator_setup', 'company_connections', 'morning_brief', 'lead_to_client_loop', 'authority', 'recovery', 'privacy')`,
+    ),
+    check(
+      "founder_external_beta_measurements_duration_check",
+      sql`${table.durationSeconds} IS NULL OR ${table.durationSeconds} BETWEEN 0 AND 2592000`,
+    ),
+    check(
+      "founder_external_beta_measurements_capability_check",
+      sql`${table.capability} IS NULL OR ${table.capability} IN ('openai', 'anthropic', 'calendar_reading', 'gmail_reading', 'gmail_sending')`,
+    ),
+    check(
+      "founder_external_beta_measurements_capability_state_check",
+      sql`${table.capabilityState} IS NULL OR ${table.capabilityState} IN ('available', 'paused')`,
+    ),
+    check(
+      "founder_external_beta_measurements_safe_failure_check",
+      sql`${table.safeFailureCategory} IS NULL OR ${table.safeFailureCategory} IN ('provider_unavailable', 'authorization_required', 'qualification_expired', 'connection_unavailable', 'recovery_exhausted', 'support_required')`,
+    ),
+    check(
+      "founder_external_beta_measurements_shape_check",
+      sql`(${table.event} = 'activation_completed' AND ${table.journey} IS NULL AND ${table.durationSeconds} IS NULL AND ${table.capability} IS NULL AND ${table.capabilityState} IS NULL AND ${table.safeFailureCategory} IS NULL) OR (${table.event} = 'journey_completed' AND ${table.journey} IS NOT NULL AND ${table.durationSeconds} IS NULL AND ${table.capability} IS NULL AND ${table.capabilityState} IS NULL AND ${table.safeFailureCategory} IS NULL) OR (${table.event} = 'journey_timing_recorded' AND ${table.journey} IS NOT NULL AND ${table.durationSeconds} IS NOT NULL AND ${table.capability} IS NULL AND ${table.capabilityState} IS NULL AND ${table.safeFailureCategory} IS NULL) OR (${table.event} = 'capability_state_observed' AND ${table.journey} IS NULL AND ${table.durationSeconds} IS NULL AND ${table.capability} IS NOT NULL AND ${table.capabilityState} IS NOT NULL AND ${table.safeFailureCategory} IS NULL) OR (${table.event} = 'safe_failure_observed' AND ${table.journey} IS NULL AND ${table.durationSeconds} IS NULL AND ${table.capability} IS NULL AND ${table.capabilityState} IS NULL AND ${table.safeFailureCategory} IS NOT NULL) OR (${table.event} = 'support_duration_recorded' AND ${table.journey} IS NULL AND ${table.durationSeconds} IS NOT NULL AND ${table.capability} IS NULL AND ${table.capabilityState} IS NULL AND ${table.safeFailureCategory} IS NULL)`,
+    ),
+    check(
+      "founder_external_beta_measurements_classification_check",
+      sql`${table.evidenceClassification} = 'product_hardening'`,
+    ),
+    index("founder_external_beta_measurements_participant_idx").on(
+      table.participantUserId,
+      table.participantOperatorId,
+      table.capturedAt,
+    ),
+    index("founder_external_beta_measurements_workspace_idx").on(
+      table.workspaceDigest,
+      table.capturedAt,
+    ),
+  ],
+);
+
+export const founderExternalBetaRecordings = pgTable(
+  "founder_external_beta_recordings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    invitationId: uuid("invitation_id")
+      .notNull()
+      .references(() => founderExternalBetaInvitations.id),
+    participantUserId: uuid("participant_user_id")
+      .notNull()
+      .references(() => users.id),
+    participantOperatorId: uuid("participant_operator_id")
+      .notNull()
+      .references(() => operators.id),
+    workspaceDigest: text("workspace_digest").notNull(),
+    artifactReferenceDigest: text("artifact_reference_digest").notNull(),
+    status: text("status").notNull().default("active"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+    deletionDueAt: timestamp("deletion_due_at", { withTimezone: true }).notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    providerDeletionVerified: boolean("provider_deletion_verified").notNull().default(false),
+    deletionReceiptDigest: text("deletion_receipt_digest"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("founder_external_beta_recordings_reference_idx").on(table.artifactReferenceDigest),
+    check(
+      "founder_external_beta_recordings_digest_check",
+      sql`${table.workspaceDigest} ~ '^sha256:[a-f0-9]{64}$' AND ${table.artifactReferenceDigest} ~ '^sha256:[a-f0-9]{64}$' AND (${table.deletionReceiptDigest} IS NULL OR ${table.deletionReceiptDigest} ~ '^sha256:[a-f0-9]{64}$')`,
+    ),
+    check(
+      "founder_external_beta_recordings_retention_check",
+      sql`${table.deletionDueAt} = ${table.recordedAt} + interval '30 days'`,
+    ),
+    check(
+      "founder_external_beta_recordings_state_check",
+      sql`(${table.status} = 'active' AND ${table.deletedAt} IS NULL AND ${table.providerDeletionVerified} = false AND ${table.deletionReceiptDigest} IS NULL) OR (${table.status} = 'deleted' AND ${table.deletedAt} IS NOT NULL AND ${table.deletedAt} <= ${table.deletionDueAt} AND ${table.providerDeletionVerified} = true AND ${table.deletionReceiptDigest} IS NOT NULL)`,
+    ),
+    index("founder_external_beta_recordings_retention_idx").on(table.status, table.deletionDueAt),
+    index("founder_external_beta_recordings_participant_idx").on(
+      table.participantUserId,
+      table.participantOperatorId,
+    ),
+  ],
+);
+
 export const founderCheckoutCorrelations = pgTable(
   "founder_checkout_correlations",
   {

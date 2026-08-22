@@ -108,6 +108,8 @@ describe("Founder External Beta retirement route", () => {
       calls: () => [],
     };
     const reconcile = vi.fn(async () => ({ expired: 1, retired: 1, failed: 0 }));
+    const reconcileRecordings = vi.fn(async () => ({ deleted: 1, failed: 0 }));
+    const recordingProvider = { deleteAndVerifyAbsent: vi.fn() };
     const response = await GET_RETIREMENTS(
       new Request("http://localhost/api/internal/operator/external-beta"),
       undefined,
@@ -117,6 +119,8 @@ describe("Founder External Beta retirement route", () => {
         readApplicationRevision: () => REVISION,
         createProviders: () => providers,
         reconcile,
+        reconcileRecordings,
+        createRecordingProvider: () => recordingProvider,
         now: () => now,
       },
     );
@@ -126,11 +130,13 @@ describe("Founder External Beta retirement route", () => {
       now,
       providers,
     });
+    expect(reconcileRecordings).toHaveBeenCalledWith(now, recordingProvider);
     await expect(response.json()).resolves.toEqual({
       ok: true,
       expired: 1,
       retired: 1,
       failed: 0,
+      recordingDeletion: { deleted: 1, failed: 0 },
     });
   });
 });

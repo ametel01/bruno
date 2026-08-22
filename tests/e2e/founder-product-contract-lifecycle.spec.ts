@@ -134,6 +134,21 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                   newCohortRequired: boolean;
                   retirementCompleted: boolean;
                 };
+                externalBetaPrivacy?: {
+                  allowlistedMeasurementAccepted: boolean;
+                  sensitiveContentRejected: boolean;
+                  participantIsolationEnforced: boolean;
+                  workspaceIsolationEnforced: boolean;
+                  separateRecordingConsent: boolean;
+                  recordingDeletionDueAt: string;
+                  recordingDeletionVerified: boolean;
+                  separateFeedbackConsent: boolean;
+                  separateMarketingConsents: boolean;
+                  refusalPreservedAccess: boolean;
+                  exportAndDeletionVerified: boolean;
+                  evidenceClassification: string;
+                  founderAcceptanceEligible: boolean;
+                };
                 cleanup: {
                   resourcesBefore: number;
                   resourcesAfter: number;
@@ -229,6 +244,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                   "digitalOcean.delete_firewall",
                   "digitalOcean.delete_droplet",
                   "digitalOcean.observe_owned_resources_absent",
+                  "recording.delete_and_verify_absent",
                 ]),
               );
               expect(body.outcome.externalBetaCohort).toEqual({
@@ -255,6 +271,23 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                 founderAcceptanceEligible: false,
                 newCohortRequired: true,
                 retirementCompleted: true,
+              });
+              expect(body.outcome.externalBetaPrivacy).toEqual({
+                allowlistedMeasurementAccepted: true,
+                sensitiveContentRejected: true,
+                participantIsolationEnforced: true,
+                workspaceIsolationEnforced: true,
+                separateRecordingConsent: true,
+                recordingDeletionDueAt: new Date(
+                  clock.now().valueOf() + 30 * 24 * 60 * 60 * 1_000 + 1,
+                ).toISOString(),
+                recordingDeletionVerified: true,
+                separateFeedbackConsent: true,
+                separateMarketingConsents: true,
+                refusalPreservedAccess: true,
+                exportAndDeletionVerified: true,
+                evidenceClassification: "product_hardening",
+                founderAcceptanceEligible: false,
               });
             }
             clock.advance(id === "release_stage_admission" ? 3 : 1);

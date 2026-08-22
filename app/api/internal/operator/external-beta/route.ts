@@ -6,6 +6,11 @@ import {
 import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 import { createEncryptedFounderRecoveryArchiveProvider } from "@/src/server/founder-product-contract/encrypted-recovery-archive-provider";
 import { reconcileFounderExternalBetaRetirements } from "@/src/server/founder-product-contract/external-beta-retirement";
+import {
+  createFounderExternalBetaRecordingProvider,
+  reconcileFounderExternalBetaRecordingRetention,
+  type FounderExternalBetaRecordingProvider,
+} from "@/src/server/founder-product-contract/external-beta-privacy";
 import type { FounderInfrastructureRetirementProvider } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import { DigitalOceanApiProvider } from "@/src/server/runners/digitalocean-provider";
 
@@ -17,7 +22,9 @@ type RouteDependencies = {
   authorize?: typeof isAuthorizedCronRequest;
   readApplicationRevision?: () => string | null;
   createProviders?: () => FounderInfrastructureRetirementProvider | null;
+  createRecordingProvider?: () => FounderExternalBetaRecordingProvider | null;
   reconcile?: typeof reconcileFounderExternalBetaRetirements;
+  reconcileRecordings?: typeof reconcileFounderExternalBetaRecordingRetention;
   now?: () => Date;
 };
 
@@ -54,12 +61,16 @@ export async function GET(
   if (!providers) return errorResponse(503, "external_beta_retirement_configuration_invalid");
 
   try {
+    const now = dependencies.now?.() ?? new Date();
     const result = await (dependencies.reconcile ?? reconcileFounderExternalBetaRetirements)({
       applicationRevision,
-      now: dependencies.now?.() ?? new Date(),
+      now,
       providers,
     });
-    return Response.json({ ok: true, ...result }, { headers: noStoreHeaders() });
+    const recordingDeletion = await (
+      dependencies.reconcileRecordings ?? reconcileFounderExternalBetaRecordingRetention
+    )(now, (dependencies.createRecordingProvider ?? createFounderExternalBetaRecordingProvider)());
+    return Response.json({ ok: true, ...result, recordingDeletion }, { headers: noStoreHeaders() });
   } catch {
     return errorResponse(500, "external_beta_retirement_processing_failed");
   }

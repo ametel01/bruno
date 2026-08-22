@@ -14,6 +14,16 @@ import {
   issueFounderExternalBetaInvitation,
 } from "./external-beta-admission";
 import { assessFounderExternalBetaPromotionEvidenceForCohort } from "./external-beta-promotion";
+import {
+  captureFounderExternalBetaMeasurement,
+  decideFounderExternalBetaConsent,
+  deleteFounderExternalBetaMeasurements,
+  exportFounderExternalBetaPrivacyData,
+  FOUNDER_EXTERNAL_BETA_RECORDING_RETENTION_MS,
+  getFounderExternalBetaPrivacyStatusForUser,
+  reconcileFounderExternalBetaRecordingRetention,
+  registerFounderExternalBetaRecording,
+} from "./external-beta-privacy";
 import { reconcileFounderExternalBetaRetirements } from "./external-beta-retirement";
 import { reconcileFounderCommerceEvent } from "./entitlement";
 import { executeFounderInfrastructureRetirement } from "./infrastructure-retirement";
@@ -70,6 +80,9 @@ export type FounderLifecycleProviderBoundary = FounderRecoveryArchiveProvider & 
     gmailSending: true;
   }>;
   readSubscription(input: { subscriptionId: string }): Promise<{ status: FounderCommerceStatus }>;
+  deleteExternalBetaRecording(input: {
+    artifactReferenceDigest: `sha256:${string}`;
+  }): Promise<{ absent: true }>;
   digitalOcean: DigitalOceanOwnedSetProvider;
   calls(): readonly string[];
 };
@@ -106,6 +119,21 @@ export type FounderLifecycleOutcome = {
     founderAcceptanceEligible: false;
     newCohortRequired: true;
     retirementCompleted: true;
+  };
+  externalBetaPrivacy?: {
+    allowlistedMeasurementAccepted: true;
+    sensitiveContentRejected: true;
+    participantIsolationEnforced: true;
+    workspaceIsolationEnforced: true;
+    separateRecordingConsent: true;
+    recordingDeletionDueAt: string;
+    recordingDeletionVerified: true;
+    separateFeedbackConsent: true;
+    separateMarketingConsents: true;
+    refusalPreservedAccess: true;
+    exportAndDeletionVerified: true;
+    evidenceClassification: "product_hardening";
+    founderAcceptanceEligible: false;
   };
 };
 
@@ -470,6 +498,22 @@ async function executeFounderExternalBetaContractLifecycle(
     throw new Error("External Beta visible Compact boundaries were incomplete.");
   }
 
+  const privacy = await exerciseExternalBetaPrivacyContract({
+    participantUserId: contract.participantUserId,
+    otherUserId: input.userId,
+    workspaceDigest: founderProductContractDigest(`external-beta-workspace:${workspaceReference}`),
+    now: input.now,
+    providers: dependencies.providers,
+  });
+  const afterRefusal = await getFounderExternalBetaStatusForUser(
+    contract.participantUserId,
+    input.now,
+    { applicationRevision: dependencies.applicationRevision },
+  );
+  if (afterRefusal.state !== "active" || !afterRefusal.withdrawalAvailable) {
+    throw new Error("External Beta privacy refusal changed product access.");
+  }
+
   const retirement = await reconcileFounderExternalBetaRetirements({
     applicationRevision: dependencies.applicationRevision,
     now: accessExpiresAt,
@@ -532,6 +576,187 @@ async function executeFounderExternalBetaContractLifecycle(
       newCohortRequired: true,
       retirementCompleted: true,
     },
+    externalBetaPrivacy: privacy,
+  };
+}
+
+async function exerciseExternalBetaPrivacyContract(input: {
+  participantUserId: string;
+  otherUserId: string;
+  workspaceDigest: `sha256:${string}`;
+  now: Date;
+  providers: FounderLifecycleProviderBoundary;
+}): Promise<NonNullable<FounderLifecycleOutcome["externalBetaPrivacy"]>> {
+  const initial = await getFounderExternalBetaPrivacyStatusForUser(input.participantUserId);
+  if (
+    initial.state !== "available" ||
+    Object.values(initial.consent).some((state) => state !== "not_granted") ||
+    initial.collection.autocapture ||
+    initial.collection.sessionReplay ||
+    initial.collection.personProfiles
+  ) {
+    throw new Error("External Beta privacy did not start private by default.");
+  }
+  let measurementWithoutConsentRejected = false;
+  try {
+    await captureFounderExternalBetaMeasurement(
+      input.participantUserId,
+      { event: "activation_completed" },
+      input.now,
+    );
+  } catch {
+    measurementWithoutConsentRejected = true;
+  }
+  if (!measurementWithoutConsentRejected) {
+    throw new Error("External Beta measurement did not require explicit consent.");
+  }
+  await decideFounderExternalBetaConsent(input.participantUserId, {
+    purpose: "measurement",
+    decision: "grant",
+    decidedAt: input.now,
+    expectedWorkspaceDigest: input.workspaceDigest,
+  });
+  await captureFounderExternalBetaMeasurement(
+    input.participantUserId,
+    { event: "activation_completed" },
+    input.now,
+    { expectedWorkspaceDigest: input.workspaceDigest },
+  );
+
+  let sensitiveContentRejected = false;
+  try {
+    await captureFounderExternalBetaMeasurement(
+      input.participantUserId,
+      { event: "activation_completed", messageBody: "private company content" },
+      input.now,
+    );
+  } catch {
+    sensitiveContentRejected = true;
+  }
+  let participantIsolationEnforced = false;
+  try {
+    await captureFounderExternalBetaMeasurement(
+      input.otherUserId,
+      { event: "activation_completed" },
+      input.now,
+    );
+  } catch {
+    participantIsolationEnforced = true;
+  }
+  let workspaceIsolationEnforced = false;
+  try {
+    await captureFounderExternalBetaMeasurement(
+      input.participantUserId,
+      { event: "activation_completed" },
+      input.now,
+      { expectedWorkspaceDigest: founderProductContractDigest("wrong-workspace") },
+    );
+  } catch {
+    workspaceIsolationEnforced = true;
+  }
+  if (!sensitiveContentRejected || !participantIsolationEnforced || !workspaceIsolationEnforced) {
+    throw new Error("External Beta privacy isolation or sensitive-content rejection failed.");
+  }
+
+  await decideFounderExternalBetaConsent(input.participantUserId, {
+    purpose: "recording",
+    decision: "refuse",
+    decidedAt: input.now,
+  });
+  const artifactReferenceDigest = founderProductContractDigest(
+    `external-beta-recording:${input.participantUserId}`,
+  );
+  let recordingWithoutConsentRejected = false;
+  try {
+    await registerFounderExternalBetaRecording(input.participantUserId, {
+      artifactReferenceDigest,
+      recordedAt: input.now,
+    });
+  } catch {
+    recordingWithoutConsentRejected = true;
+  }
+  if (!recordingWithoutConsentRejected) {
+    throw new Error("External Beta recording did not require separate consent.");
+  }
+  await decideFounderExternalBetaConsent(input.participantUserId, {
+    purpose: "recording",
+    decision: "grant",
+    decidedAt: new Date(input.now.valueOf() + 1),
+  });
+  const recording = await registerFounderExternalBetaRecording(input.participantUserId, {
+    artifactReferenceDigest,
+    recordedAt: new Date(input.now.valueOf() + 1),
+  });
+  await decideFounderExternalBetaConsent(input.participantUserId, {
+    purpose: "feedback",
+    decision: "refuse",
+    decidedAt: new Date(input.now.valueOf() + 2),
+  });
+  const marketingPurposes = [
+    "testimonial",
+    "identity",
+    "name",
+    "logo",
+    "quotation",
+    "case_study",
+  ] as const;
+  for (const purpose of marketingPurposes) {
+    await decideFounderExternalBetaConsent(input.participantUserId, {
+      purpose,
+      decision: "refuse",
+      decidedAt: new Date(input.now.valueOf() + 2),
+    });
+  }
+  const current = await getFounderExternalBetaPrivacyStatusForUser(input.participantUserId);
+  if (
+    current.state !== "available" ||
+    current.consent.feedback !== "refused" ||
+    marketingPurposes.some((purpose) => current.consent[purpose] !== "refused")
+  ) {
+    throw new Error("External Beta marketing consent was not separate and specific.");
+  }
+
+  const exported = await exportFounderExternalBetaPrivacyData(input.participantUserId);
+  if (
+    exported.evidenceClassification !== "product_hardening" ||
+    exported.measurements.length !== 1 ||
+    JSON.stringify(exported).includes("private company content")
+  ) {
+    throw new Error("External Beta privacy export crossed its evidence boundary.");
+  }
+  const deletedMeasurements = await deleteFounderExternalBetaMeasurements(input.participantUserId);
+  if (deletedMeasurements.deleted !== 1) {
+    throw new Error("External Beta measurement deletion was not verified.");
+  }
+  const afterDeletion = await exportFounderExternalBetaPrivacyData(input.participantUserId);
+  if (afterDeletion.measurements.length !== 0) {
+    throw new Error("External Beta measurement deletion remained visible in export.");
+  }
+
+  const deletionAt = new Date(
+    input.now.valueOf() + 1 + FOUNDER_EXTERNAL_BETA_RECORDING_RETENTION_MS,
+  );
+  const recordingDeletion = await reconcileFounderExternalBetaRecordingRetention(deletionAt, {
+    deleteAndVerifyAbsent: (deletion) => input.providers.deleteExternalBetaRecording(deletion),
+  });
+  if (recordingDeletion.deleted !== 1 || recordingDeletion.failed !== 0) {
+    throw new Error("External Beta recording deletion was not verified within 30 days.");
+  }
+
+  return {
+    allowlistedMeasurementAccepted: true,
+    sensitiveContentRejected: true,
+    participantIsolationEnforced: true,
+    workspaceIsolationEnforced: true,
+    separateRecordingConsent: true,
+    recordingDeletionDueAt: recording.deletionDueAt,
+    recordingDeletionVerified: true,
+    separateFeedbackConsent: true,
+    separateMarketingConsents: true,
+    refusalPreservedAccess: true,
+    exportAndDeletionVerified: true,
+    evidenceClassification: "product_hardening",
+    founderAcceptanceEligible: false,
   };
 }
 

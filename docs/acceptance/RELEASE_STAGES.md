@@ -182,8 +182,25 @@ not contain message bodies, calendar content, recipients, prompts, provider resp
 unrestricted metadata.
 
 Recordings require separate opt-in and deletion within 30 days. Beta Compact acceptance grants no
-testimonial, identity, logo, quotation, case-study, or other marketing consent; each use requires a
-separate specific decision and cannot be presented as General Release proof.
+feedback, testimonial, identity, name, logo, quotation, case-study, or other marketing consent; each
+use requires a separate specific decision and cannot be presented as General Release proof.
+
+The product starts External Beta measurement opted out. It accepts only six static event shapes:
+activation completion, allowlisted journey completion or timing, allowlisted capability state,
+allowlisted safe failure category, and support duration. It rejects unknown event names and
+properties before persistence; no autocapture, session replay, person profile, shared participant
+identity, message or Calendar content, recipient, prompt, provider response, credential, or
+unrestricted metadata path is permitted. Every accepted fact remains bound to the admitted
+participant, Operator, and invitation workspace and is permanently classified as product-hardening
+evidence.
+
+Measurement, recording, testimonial, identity, name, logo, quotation, and case-study purposes each
+have their own append-only consent decision. Refusal or withdrawal changes only that purpose and
+cannot change External Beta admission or its 14-day window. Recording deletion stays pending until
+the configured object provider verifies absence no later than the exact 30-day deadline. The
+Founder-visible External Beta privacy controls show the allowlist and exclusions, permit every
+purpose to be allowed, refused, or withdrawn separately, and provide a bounded privacy export and
+measurement deletion.
 
 Every External Beta surface must identify the stage and show the remaining access window, available
 and unavailable capabilities, support boundary, and withdrawal, export, and deletion controls.

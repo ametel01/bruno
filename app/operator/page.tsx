@@ -5,6 +5,7 @@ import { FounderOperatorShell } from "@/app/operator/_components/founder-operato
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 import { getFounderExternalBetaStatusForUser } from "@/src/server/founder-product-contract/external-beta-admission";
+import { getFounderExternalBetaPrivacyStatusForUser } from "@/src/server/founder-product-contract/external-beta-privacy";
 import { getFounderInfrastructureRetirementStatusForUser } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import { getFounderExternalBetaManifestStatusForUser } from "@/src/server/founder-product-contract/external-beta-manifest";
 import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
@@ -75,6 +76,7 @@ export default async function FounderOperatorPage({
     ownerPreviewAccess,
     externalBetaStatus,
     externalBetaAccess,
+    externalBetaPrivacy,
   ] = await Promise.all([
     operator ? getFounderOnboardingForUser(applicationUser.userId) : Promise.resolve(undefined),
     applicationRevision
@@ -95,6 +97,7 @@ export default async function FounderOperatorPage({
           applicationRevision,
         })
       : Promise.resolve({ state: "unavailable" as const }),
+    getFounderExternalBetaPrivacyStatusForUser(applicationUser.userId),
   ]);
   const calendarReadingReleased = isFounderGoogleCalendarReleased();
   const mailReadingReleased = isFounderGoogleMailReadingReleased();
@@ -105,6 +108,7 @@ export default async function FounderOperatorPage({
     <FounderOperatorShell>
       <FounderExternalBeta
         initialStatus={externalBetaAccess}
+        initialPrivacy={externalBetaPrivacy}
         {...(externalBetaInvitation
           ? {
               invitationToken: externalBetaInvitation.invitationToken,

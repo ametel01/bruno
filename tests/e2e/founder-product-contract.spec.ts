@@ -76,6 +76,27 @@ test("Operator UI remains usable across the required browser matrix", async ({ p
           deletionAvailable: true,
         },
       });
+      const initialPrivacyResponse = await request.get("/api/operator/external-beta/privacy");
+      expect(initialPrivacyResponse.status()).toBe(200);
+      await expect(initialPrivacyResponse.json()).resolves.toMatchObject({
+        privacy: {
+          state: "available",
+          collection: { autocapture: false, sessionReplay: false, personProfiles: false },
+          consent: { measurement: "not_granted", recording: "not_granted" },
+          recordingRetentionDays: 30,
+          accessUnaffectedByRefusal: true,
+          evidenceClassification: "Product-hardening only; never Founder Acceptance Evidence",
+        },
+      });
+      const refusal = await request.post("/api/operator/external-beta/privacy", {
+        data: { action: "decide_consent", purpose: "recording", decision: "refuse" },
+      });
+      expect(refusal.status()).toBe(200);
+      await expect(
+        request.get("/api/operator/external-beta").then((response) => response.json()),
+      ).resolves.toMatchObject({
+        externalBeta: { state: "active", withdrawalAvailable: true },
+      });
       await page.reload();
       const externalBetaStatus = page.getByRole("heading", { name: /remaining$/ }).locator("..");
       await expect(externalBetaStatus.getByText("External Beta", { exact: true })).toBeVisible();
@@ -86,6 +107,17 @@ test("Operator UI remains usable across the required browser matrix", async ({ p
       await expect(page.getByRole("link", { name: "Create Founder Data Export" })).toBeVisible();
       await expect(page.getByRole("link", { name: "Request Bruno Data Deletion" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Withdraw from External Beta" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "External Beta privacy" })).toBeVisible();
+      await expect(page.getByText(/Nothing is measured until you opt in/)).toBeVisible();
+      await expect(page.getByText(/Message bodies/)).toBeVisible();
+      await expect(page.getByText(/deleted within 30 days/)).toBeVisible();
+      await expect(page.getByText(/never reduces your 14-day access/)).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Export External Beta privacy data" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Delete External Beta measurements" }),
+      ).toBeVisible();
       const externalBetaAccessibility = await new AxeBuilder({ page })
         .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
         .analyze();

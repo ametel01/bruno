@@ -46,6 +46,47 @@ describe("External Beta Founder surface", () => {
           deletionAvailable: true,
           retirementDueAt: "2026-09-06T01:00:00.000Z",
         }}
+        initialPrivacy={{
+          state: "available",
+          collection: {
+            allowlistedFacts: [
+              "Activation",
+              "Journey completion",
+              "Timing",
+              "Capability state",
+              "Safe failure category",
+              "Support duration",
+            ],
+            neverCollected: [
+              "Message bodies",
+              "Calendar content",
+              "Recipients",
+              "Prompts",
+              "Provider responses",
+              "Credentials",
+              "Unrestricted metadata",
+            ],
+            autocapture: false,
+            sessionReplay: false,
+            personProfiles: false,
+          },
+          consent: {
+            measurement: "not_granted",
+            feedback: "refused",
+            recording: "refused",
+            testimonial: "not_granted",
+            identity: "not_granted",
+            name: "not_granted",
+            logo: "not_granted",
+            quotation: "not_granted",
+            case_study: "not_granted",
+          },
+          recordingRetentionDays: 30,
+          exportAvailable: true,
+          deletionAvailable: true,
+          accessUnaffectedByRefusal: true,
+          evidenceClassification: "Product-hardening only; never Founder Acceptance Evidence",
+        }}
       />,
     );
     for (const copy of [
@@ -63,6 +104,21 @@ describe("External Beta Founder surface", () => {
       "Withdraw from External Beta",
       "Create Founder Data Export",
       "Request Bruno Data Deletion",
+      "External Beta privacy",
+      "Nothing is measured until you opt in",
+      "Message bodies",
+      "Research recording",
+      "Beta feedback",
+      "Testimonial use",
+      "Identity use",
+      "Name use",
+      "Logo use",
+      "Quotation use",
+      "Case-study use",
+      "within 30 days",
+      "never reduces your 14-day access",
+      "Export External Beta privacy data",
+      "Delete External Beta measurements",
     ]) {
       expect(html).toContain(copy);
     }

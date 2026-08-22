@@ -664,6 +664,7 @@ describe("Founder Infrastructure Retirement deadline", () => {
         gmailSending: true,
       }),
       readSubscription: async () => ({ status: "unpaid" }),
+      deleteExternalBetaRecording: async () => ({ absent: true }),
       createRecoveryArchive:
         input.createRecoveryArchive ??
         ((archiveInput) => archiveProvider.createRecoveryArchive(archiveInput)),

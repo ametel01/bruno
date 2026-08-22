@@ -186,6 +186,9 @@ export async function deleteFounderProductContractFixture(
       await sql`delete from founder_product_contract_scenario_executions where user_id = ${fixture.userId}`;
     }
     await sql`delete from founder_infrastructure_retirements where user_id = any(${allUserIds})`;
+    await sql`delete from founder_external_beta_recordings where participant_user_id = any(${allUserIds})`;
+    await sql`delete from founder_external_beta_measurements where participant_user_id = any(${allUserIds})`;
+    await sql`delete from founder_external_beta_consent_receipts where participant_user_id = any(${allUserIds})`;
     await sql`delete from founder_external_beta_invitations where cohort_owner_user_id = ${fixture.externalBetaOwnerUserId} or participant_user_id = any(${[fixture.userId, fixture.externalBetaParticipantUserId]})`;
     await sql`delete from founder_product_entitlements where user_id = ${fixture.userId}`;
     await sql`delete from founder_commerce_events where user_id = ${fixture.userId}`;

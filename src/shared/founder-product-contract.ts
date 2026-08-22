@@ -50,6 +50,7 @@ export const FOUNDER_PRODUCT_CONTRACT_INVARIANTS = [
       "tests/unit/founder-data-export.test.ts",
       "tests/unit/founder-deletion-db.test.ts",
       "tests/unit/founder-retention-db.test.ts",
+      "tests/unit/founder-external-beta-privacy.test.ts",
     ],
   },
   {
@@ -117,6 +118,8 @@ export const FOUNDER_PRODUCT_CONTRACT_UNIT_FILES = [
   "tests/unit/founder-external-beta-promotion.test.ts",
   "tests/unit/founder-external-beta-ui.test.tsx",
   "tests/unit/founder-external-beta-route.test.ts",
+  "tests/unit/founder-external-beta-privacy.test.ts",
+  "tests/unit/founder-external-beta-privacy-route.test.ts",
   "tests/unit/founder-recovery-archive-route.test.ts",
   "tests/unit/founder-product-entitlement-policy-db.test.ts",
   "tests/unit/founder-product-entitlement-policy.test.ts",
