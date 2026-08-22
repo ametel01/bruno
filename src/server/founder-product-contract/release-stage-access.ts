@@ -196,6 +196,7 @@ export async function getFounderOwnerPreviewAccessInTransaction(
       and(
         eq(founderRecoveryArchives.userId, input.userId),
         eq(founderRecoveryArchives.operatorId, authority.operatorId),
+        eq(founderRecoveryArchives.applicationRevision, input.applicationRevision),
         eq(founderRecoveryArchives.runtimeRevision, authority.runtimeRevision),
         eq(founderRecoveryArchives.status, "verified"),
         eq(founderRecoveryArchives.formatVersion, 1),

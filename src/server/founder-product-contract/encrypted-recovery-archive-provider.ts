@@ -230,6 +230,7 @@ export class EncryptedFounderRecoveryArchiveProvider implements FounderRecoveryA
       key: input.recoveryCredentialObjectKey,
     });
     if (!credentialDeletion.ok) throw new Error("Recovery Archive credential deletion failed.");
+    await requirePermanentDeletionSafety(this.storage);
     const [archivePresence, credentialPresence] = await Promise.all([
       this.storage.exists({ key: input.storageObjectKey }),
       this.storage.exists({ key: input.recoveryCredentialObjectKey }),

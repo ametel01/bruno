@@ -123,7 +123,7 @@ export async function executeFounderProductContractLifecycleAction(
     const lifecycleArchiveId =
       input.action === "release_stage_admission" || input.action === "recovery_archive_lifecycle"
         ? await createDurableRecoveryArchive(
-            input,
+            { ...input, applicationRevision: dependencies.applicationRevision },
             dependencies.providers,
             connection,
             () => input.now,
@@ -445,6 +445,7 @@ async function prepareInfrastructureRetirement(
       recoveryArchiveId = await persistFounderRecoveryArchiveIntentInTransaction(tx, {
         userId: input.userId,
         operatorId,
+        applicationRevision: dependencies.applicationRevision,
         runtimeRevision: runtime.configRevision,
         now: input.now,
         pendingIntentPolicy: "supersede_for_retirement",

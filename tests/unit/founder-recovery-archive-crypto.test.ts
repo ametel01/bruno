@@ -183,6 +183,7 @@ describe("encrypted Founder Recovery Archive provider", () => {
     const provider = new EncryptedFounderRecoveryArchiveProvider({
       storage,
       masterKey: MASTER_KEY,
+      restoreBoundary: { rebuild: async (state) => structuredClone(state) },
     });
     const archiveId = randomUUID();
     const created = await provider.createRecoveryArchive({
@@ -207,6 +208,54 @@ describe("encrypted Founder Recovery Archive provider", () => {
     await expect(
       storage.download({ key: created.recoveryCredentialObjectKey }),
     ).resolves.toMatchObject({ ok: false });
+  });
+
+  it("fails deletion when bucket versioning changes during the deletion attempt", async () => {
+    const underlyingStorage = new FakeBackupObjectStorage("founder-recovery-test");
+    let safetyChecks = 0;
+    const storage = {
+      upload: (input: Parameters<typeof underlyingStorage.upload>[0]) =>
+        underlyingStorage.upload(input),
+      download: (input: Parameters<typeof underlyingStorage.download>[0]) =>
+        underlyingStorage.download(input),
+      delete: (input: Parameters<typeof underlyingStorage.delete>[0]) =>
+        underlyingStorage.delete(input),
+      exists: (input: Parameters<typeof underlyingStorage.exists>[0]) =>
+        underlyingStorage.exists(input),
+      async verifyDeletionSafety() {
+        safetyChecks += 1;
+        return safetyChecks <= 2
+          ? ({ ok: true, versioning: "disabled" } as const)
+          : ({
+              ok: false,
+              status: "failed",
+              message: "Bucket versioning changed during deletion.",
+            } as const);
+      },
+    };
+    const provider = new EncryptedFounderRecoveryArchiveProvider({
+      storage,
+      masterKey: MASTER_KEY,
+      restoreBoundary: { rebuild: async (state) => structuredClone(state) },
+    });
+    const archiveId = randomUUID();
+    const created = await provider.createRecoveryArchive({
+      archiveIntentId: archiveId,
+      userId: USER_ID,
+      operatorId: OPERATOR_ID,
+      observedAt: OBSERVED_AT,
+      state: durableState(),
+    });
+
+    await expect(
+      provider.deleteRecoveryArchive({
+        archiveId,
+        storageObjectKey: created.storageObjectKey,
+        recoveryCredentialObjectKey: created.recoveryCredentialObjectKey,
+        idempotencyKey: created.deletionIdempotencyKey,
+      }),
+    ).rejects.toThrow("cannot prove permanent object deletion");
+    expect(safetyChecks).toBe(3);
   });
 
   it("requires storage and a 256-bit server-only master key together", () => {

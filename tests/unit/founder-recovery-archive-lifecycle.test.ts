@@ -20,22 +20,23 @@ import { expireFounderRecoveryArchivesForUser } from "@/src/server/founder-produ
 import { EncryptedFounderRecoveryArchiveProvider } from "@/src/server/founder-product-contract/encrypted-recovery-archive-provider";
 import { admitFounderOperatorToOwnerPreview } from "@/src/server/founder-product-contract/owner-preview-admission";
 import {
-  getFounderOwnerPreviewAccessForUser,
-  requireFounderOwnerPreviewAccessForUser,
-} from "@/src/server/founder-product-contract/release-stage-access";
-import { persistFounderOwnerPreviewHoldInTransaction } from "@/src/server/founder-product-contract/release-stage-hold";
-import { withFounderOwnerPreviewWorkAuthority } from "@/src/server/founder-product-contract/work-authority";
-import {
   createDurableRecoveryArchive,
   getFounderRecoveryArchiveStatusForUser,
   persistFounderRecoveryArchiveIntentInTransaction,
   reconcileFounderRecoveryArchives,
 } from "@/src/server/founder-product-contract/recovery-archive";
-import { prepareFounderOperatorRuntimeForUser } from "@/src/server/operators/founder-operator-runtime";
 import { FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON } from "@/src/server/founder-product-contract/recovery-archive-provider";
+import {
+  getFounderOwnerPreviewAccessForUser,
+  requireFounderOwnerPreviewAccessForUser,
+} from "@/src/server/founder-product-contract/release-stage-access";
+import { persistFounderOwnerPreviewHoldInTransaction } from "@/src/server/founder-product-contract/release-stage-hold";
+import { withFounderOwnerPreviewWorkAuthority } from "@/src/server/founder-product-contract/work-authority";
+import { prepareFounderOperatorRuntimeForUser } from "@/src/server/operators/founder-operator-runtime";
 
 const USER_ID = "00000000-0000-4000-8000-000000003730";
 const OPERATOR_ID = "00000000-0000-4000-8000-000000003731";
+const APPLICATION_REVISION = "a".repeat(40);
 const START = new Date("2026-08-22T00:00:00.000Z");
 const QUALIFICATION_EXPIRES_AT = new Date(START.valueOf() + 8 * 24 * 60 * 60 * 1_000);
 
@@ -62,7 +63,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   it("fails Owner Preview admission closed unless a current v1 restore has rebuilt durable state", async () => {
     const archiveId = await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       provider,
       connection,
       () => START,
@@ -75,6 +81,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     expect(archive).toMatchObject({
       userId: USER_ID,
       operatorId: OPERATOR_ID,
+      applicationRevision: APPLICATION_REVISION,
       runtimeRevision: "runtime-v1",
       status: "verified",
       formatVersion: 1,
@@ -106,6 +113,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         {
           action: "release_stage_admission",
           userId: USER_ID,
+          applicationRevision: APPLICATION_REVISION,
           now: new Date(START.valueOf() + 60 * 60 * 1_000),
         },
         {
@@ -123,7 +131,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   it("keeps current verified coverage visible when a newer refresh attempt fails", async () => {
     await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       provider,
       connection,
       () => START,
@@ -155,7 +168,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   it("does not reuse or authorize an archive from a different runtime revision", async () => {
     const firstArchiveId = await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       provider,
       connection,
       () => START,
@@ -194,7 +212,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     ).resolves.toMatchObject({ state: "due" });
 
     const secondArchiveId = await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: refreshedAt },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: refreshedAt,
+      },
       provider,
       connection,
       () => refreshedAt,
@@ -230,7 +253,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     let archivedReason: string | null | undefined;
 
     await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       {
         async createRecoveryArchive(input) {
           archivedReason = input.state.operator.externalActionPauseReason;
@@ -248,7 +276,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   it("separates persisted Owner Preview access from current work protection", async () => {
     await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       provider,
       connection,
       () => START,
@@ -447,7 +480,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   it("retains the lifecycle lock through the authorized work transaction", async () => {
     await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       provider,
       connection,
       () => START,
@@ -483,7 +521,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   it("commits a scoped Hold when qualification expires at the fresh work check", async () => {
     await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       provider,
       connection,
       () => START,
@@ -531,7 +574,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   it("records runtime recovery failure against the admitted revision", async () => {
     await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       provider,
       connection,
       () => START,
@@ -672,6 +720,41 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision))
       .orderBy(founderReleaseDecisions.decidedAt);
     expect(decisions.map((decision) => decision.outcome)).toEqual(["enter", "hold", "resume"]);
+  });
+
+  it("reruns restoration proof when the admission application revision changes", async () => {
+    const firstArchiveId = await createDurableRecoveryArchive(
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
+      provider,
+      connection,
+      () => START,
+    );
+    const applicationRevision = "5".repeat(40);
+    const admittedAt = new Date(START.valueOf() + 60_000);
+
+    const admitted = await admitFounderOperatorToOwnerPreview(USER_ID, {
+      applicationRevision,
+      createConnection: () => connection,
+      createProvider: () => provider,
+      env: ownerPreviewEnvironment(applicationRevision),
+      now: () => admittedAt,
+    });
+
+    expect(admitted.archiveId).not.toBe(firstArchiveId);
+    const archives = await connection.db
+      .select()
+      .from(founderRecoveryArchives)
+      .orderBy(founderRecoveryArchives.observedAt);
+    expect(archives).toHaveLength(2);
+    expect(archives.map((archive) => archive.applicationRevision)).toEqual([
+      APPLICATION_REVISION,
+      applicationRevision,
+    ]);
   });
 
   it("rechecks Preview Qualification after Recovery Archive I/O before committing admission", async () => {
@@ -826,7 +909,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   it("refreshes with two cron intervals of verification margin", async () => {
     await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       provider,
       connection,
       () => START,
@@ -849,6 +937,53 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     ).resolves.toMatchObject({ eligible: 1, created: 0, failed: 0, deleted: 0 });
 
     expect(await connection.db.select().from(founderRecoveryArchives)).toHaveLength(2);
+  });
+
+  it("refreshes immediately when the admitted application revision changes", async () => {
+    await createDurableRecoveryArchive(
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
+      provider,
+      connection,
+      () => START,
+    );
+    const applicationRevision = "1".repeat(40);
+    const admittedAt = new Date(START.valueOf() + 60_000);
+    await connection.db.insert(founderReleaseDecisions).values({
+      userId: USER_ID,
+      operatorId: OPERATOR_ID,
+      stage: "owner_preview",
+      outcome: "resume",
+      applicationRevision,
+      runtimeRevision: "runtime-v1",
+      capabilityManifest: ["openai", "calendar_reading"],
+      openAiQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
+      calendarQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
+      evidenceDigests: [`sha256:${"2".repeat(64)}`],
+      decidedAt: admittedAt,
+      createdAt: admittedAt,
+    });
+
+    await expect(
+      reconcileFounderRecoveryArchives({
+        now: new Date(admittedAt.valueOf() + 60_000),
+        provider,
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ eligible: 1, created: 1, failed: 0, deleted: 0 });
+
+    const archives = await connection.db
+      .select({ applicationRevision: founderRecoveryArchives.applicationRevision })
+      .from(founderRecoveryArchives)
+      .orderBy(founderRecoveryArchives.observedAt);
+    expect(archives).toEqual([
+      { applicationRevision: APPLICATION_REVISION },
+      { applicationRevision },
+    ]);
   });
 
   it("continues daily protection through a capability-scoped Release Hold", async () => {
@@ -897,7 +1032,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         provider,
         createConnection: () => connection,
       }),
-    ).resolves.toEqual({ eligible: 1, created: 0, failed: 0, deleted: 0 });
+    ).resolves.toEqual({ eligible: 1, created: 1, failed: 0, deleted: 0 });
   });
 
   it("reserves one archive intent while its provider upload is still pending", async () => {
@@ -928,14 +1063,24 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     };
 
     const first = createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       blockingProvider,
       connection,
       () => START,
     );
     await firstUploadStarted;
     const second = createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       blockingProvider,
       connection,
       () => START,
@@ -960,7 +1105,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       releaseDailyUpload = resolve;
     });
     const dailyArchive = createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       {
         createRecoveryArchive: async (input) => {
           markDailyUploadStarted?.();
@@ -978,6 +1128,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       persistFounderRecoveryArchiveIntentInTransaction(tx, {
         userId: USER_ID,
         operatorId: OPERATOR_ID,
+        applicationRevision: APPLICATION_REVISION,
         runtimeRevision: "runtime-v1",
         now: new Date(START.valueOf() + 1_000),
         pendingIntentPolicy: "supersede_for_retirement",
@@ -1013,6 +1164,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       persistFounderRecoveryArchiveIntentInTransaction(tx, {
         userId: USER_ID,
         operatorId: OPERATOR_ID,
+        applicationRevision: APPLICATION_REVISION,
         runtimeRevision: "runtime-v1",
         now: START,
       }),
@@ -1034,7 +1186,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
   it("fails admission closed and records bounded failure state when storage is unavailable", async () => {
     await expect(
       createDurableRecoveryArchive(
-        { action: "release_stage_admission", userId: USER_ID, now: START },
+        {
+          action: "release_stage_admission",
+          userId: USER_ID,
+          applicationRevision: APPLICATION_REVISION,
+          now: START,
+        },
         {
           createRecoveryArchive: async () => {
             throw new Error("object storage unavailable");
@@ -1108,7 +1265,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       createdAt: oldObservedAt,
     });
     const archiveId = await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       provider,
       connection,
       () => START,
@@ -1187,7 +1349,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     });
     let cleanupObservedAt = START;
     const creation = createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       lateProvider,
       connection,
       () => cleanupObservedAt,
@@ -1226,6 +1393,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       persistFounderRecoveryArchiveIntentInTransaction(tx, {
         userId: USER_ID,
         operatorId: OPERATOR_ID,
+        applicationRevision: APPLICATION_REVISION,
         runtimeRevision: "runtime-v1",
         now: START,
       }),
@@ -1286,7 +1454,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   it("replaces expired archives while every admitted capability is held", async () => {
     const archiveId = await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       provider,
       connection,
       () => START,
@@ -1325,7 +1498,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   it("keeps daily archive eligibility scoped to each admitted Release Stage", async () => {
     await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       provider,
       connection,
       () => START,
@@ -1356,7 +1534,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   it("retains the final archive for expiry without minting replacements after retirement", async () => {
     await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        action: "release_stage_admission",
+        userId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        now: START,
+      },
       provider,
       connection,
       () => START,

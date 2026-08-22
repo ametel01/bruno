@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  confirmFounderTimezoneForUser,
-  ensureFounderOperatorForUser,
-  getFounderOperatorForUser,
-} from "@/src/server/operators/founder-operator";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { operatorPreparations, operatorRuntimes, operators, users } from "@/src/server/db/schema";
 import { getFounderActionPreviewForUser } from "@/src/server/operators/founder-action-previews";
 import { getFounderConversationForUser } from "@/src/server/operators/founder-conversation";
 import { getFounderCoreOperationForUser } from "@/src/server/operators/founder-core-operation";
 import { getFounderLimitedOperationForUser } from "@/src/server/operators/founder-limited-operation";
+import { getFounderOnboardingForUser } from "@/src/server/operators/founder-onboarding";
+import {
+  confirmFounderTimezoneForUser,
+  ensureFounderOperatorForUser,
+  getFounderOperatorForUser,
+} from "@/src/server/operators/founder-operator";
 import { getFounderProposedActionsForUser } from "@/src/server/operators/founder-proposed-actions";
 import { getFounderRelationshipsForUser } from "@/src/server/operators/founder-relationships";
 
@@ -63,6 +64,7 @@ describe("Founder Operator application seam", () => {
     await expect(getFounderLimitedOperationForUser(OWNER_A_ID, dependencies)).resolves.toBeNull();
     await expect(getFounderCoreOperationForUser(OWNER_A_ID, dependencies)).resolves.toBeNull();
     await expect(getFounderConversationForUser(OWNER_A_ID, dependencies)).resolves.toBeNull();
+    await expect(getFounderOnboardingForUser(OWNER_A_ID, dependencies)).resolves.toBeNull();
     await expect(getFounderProposedActionsForUser(OWNER_A_ID, dependencies)).resolves.toEqual([]);
     await expect(getFounderRelationshipsForUser(OWNER_A_ID, dependencies)).resolves.toMatchObject({
       records: [],

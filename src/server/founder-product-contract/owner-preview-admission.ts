@@ -101,7 +101,7 @@ export async function admitFounderOperatorToOwnerPreview(
       environment,
     );
     const archiveId = await createDurableRecoveryArchive(
-      { action: "release_stage_admission", userId, now },
+      { action: "release_stage_admission", userId, now, applicationRevision },
       provider,
       connection,
       clock,
@@ -142,6 +142,7 @@ export async function admitFounderOperatorToOwnerPreview(
             eq(founderRecoveryArchives.id, archiveId),
             eq(founderRecoveryArchives.userId, userId),
             eq(founderRecoveryArchives.operatorId, operatorId),
+            eq(founderRecoveryArchives.applicationRevision, applicationRevision),
             eq(founderRecoveryArchives.runtimeRevision, runtimeRevision),
             eq(founderRecoveryArchives.status, "verified"),
             eq(founderRecoveryArchives.formatVersion, 1),

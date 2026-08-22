@@ -305,6 +305,7 @@ export async function sendFounderConversationMessageForUser(
     const routed = await connection.db.transaction(async (tx) => {
       const decision = await routeFounderAiProvider(tx, operator.id, {
         now: now(),
+        allowedProviders: ["openai"],
         ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
       });
       if (!decision) return null;
@@ -342,6 +343,14 @@ export async function sendFounderConversationMessageForUser(
       );
     }
     const provider = routed?.provider ?? readyConnection.provider;
+    if (provider !== "openai") {
+      return finalizePausedConversation(
+        connection,
+        started,
+        "No Owner Preview-qualified OpenAI connection is ready. Bruno paused this message safely.",
+        now(),
+      );
+    }
     const adapter =
       dependencies.adapters?.[provider] ??
       dependencies.adapter ??
@@ -476,12 +485,9 @@ export async function resumeFounderConversationWorkForUser(
           };
         }
 
-        const attemptedProvider = work.providerAttempts.at(-1)?.provider as
-          | FounderAiProvider
-          | undefined;
         const decision = await routeFounderAiProvider(tx, operator.id, {
           now: checkedAt,
-          ...(attemptedProvider ? { excludedProviders: [attemptedProvider] } : {}),
+          allowedProviders: ["openai"],
           ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
         });
         if (!decision) return { kind: "unchanged" as const, conversation };

@@ -233,7 +233,7 @@ describe("Founder Conversation application seam", () => {
     await expect(connection.db.select().from(operatorConversationMessages)).resolves.toEqual([]);
   });
 
-  it("routes a work unit through the next Ready provider and records its account evidence", async () => {
+  it("keeps Anthropic hidden while Conversation is authorized only for Owner Preview OpenAI", async () => {
     const [anthropic] = await connection.db
       .insert(operatorAiConnections)
       .values({
@@ -269,14 +269,14 @@ describe("Founder Conversation application seam", () => {
       createConnection: () => connection,
       now: () => now,
     });
+    let anthropicCalls = 0;
     const sent = await sendFounderConversationMessageForUser(OWNER_ID, "Use the connected backup", {
       createConnection: () => connection,
       requireOwnerPreviewAccess: allowOwnerPreviewWork,
       adapters: {
         anthropic: {
-          async send(input) {
-            expect(input.provider).toBe("anthropic");
-            expect(input.approvedModelAssignment).toBe("anthropic-claude");
+          async send() {
+            anthropicCalls += 1;
             return { ok: true, response: "Handled by the connected backup." };
           },
         },
@@ -296,22 +296,22 @@ describe("Founder Conversation application seam", () => {
       }),
     });
     expect(sent.activeWork).toMatchObject({
-      provider: "anthropic",
+      provider: "openai",
       policyVersion: 2,
-      state: "completed",
+      state: "paused",
     });
+    expect(anthropicCalls).toBe(0);
     const [work] = await connection.db.select().from(operatorConversationWorks);
     expect(work).toMatchObject({
-      provider: "anthropic",
-      providerConnectionId: anthropic?.id,
-      providerSubjectId: "anthropic-account-1",
-      providerAccountLabel: "founder@anthropic.example",
+      provider: "openai",
+      providerConnectionId: null,
       policyVersion: 2,
     });
+    expect(anthropic?.id).toBeTruthy();
     expect(operator.id).toBeTruthy();
   });
 
-  it("changes providers only when explicitly resuming the same paused checkpoint", async () => {
+  it("keeps a paused Owner Preview checkpoint from failing over to hidden Anthropic", async () => {
     const competingConnection = createDatabaseConnection();
     const requireSerializedOwnerPreviewAccess = async () => {
       const rows = await competingConnection.db.execute<{ acquired: boolean }>(
@@ -407,6 +407,12 @@ describe("Founder Conversation application seam", () => {
         createConnection: () => connection,
         requireOwnerPreviewAccess: requireSerializedOwnerPreviewAccess,
         adapters: {
+          openai: {
+            async send(input) {
+              calls.push(`${input.provider}:resume`);
+              return { ok: true, response: "Recovered without exposing another provider." };
+            },
+          },
           anthropic: {
             async send(input) {
               calls.push(`${input.provider}:resume`);
@@ -418,13 +424,12 @@ describe("Founder Conversation application seam", () => {
         now: () => now,
       },
     );
-    expect(resumed.activeWork).toMatchObject({ provider: "anthropic", state: "completed" });
+    expect(resumed.activeWork).toMatchObject({ provider: "openai", state: "paused" });
     expect(resumed.messages.filter((message) => message.role === "operator")).toHaveLength(1);
-    expect(calls).toEqual(["openai:first", "anthropic:resume"]);
+    expect(calls).toEqual(["openai:first"]);
     const [persisted] = await connection.db.select().from(operatorConversationWorks);
     expect(persisted?.providerAttempts).toMatchObject([
       { provider: "openai", accountLabel: "founder@openai.example", state: "paused" },
-      { provider: "anthropic", accountLabel: "founder@anthropic.example", state: "completed" },
     ]);
     await competingConnection.close();
   });
