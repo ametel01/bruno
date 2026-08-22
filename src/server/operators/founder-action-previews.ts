@@ -6,6 +6,12 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
 import { operatorActionPreviewRevisions, operatorActionPreviews } from "@/src/server/db/schema";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import {
+  type FounderOwnerPreviewWorkAuthorityDependencies,
+  preflightFounderOwnerPreviewWorkAuthority,
+  requireFounderOwnerPreviewWorkAuthorityInTransaction,
+} from "@/src/server/founder-product-contract/work-authority";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 
 type ActionPreviewTransaction = Parameters<
@@ -53,7 +59,7 @@ export type FounderActionPreviewDraft = {
   expectedExternalEffect: string;
 };
 
-export type FounderActionPreviewDependencies = {
+export type FounderActionPreviewDependencies = FounderOwnerPreviewWorkAuthorityDependencies & {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
   randomUUID?: () => string;
@@ -92,9 +98,25 @@ export async function editFounderActionPreviewForUser(
 ): Promise<FounderActionPreviewDto> {
   const normalized = normalizeDraft(draft);
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const now = dependencies.now ?? (() => new Date());
+  await preflightFounderOwnerPreviewWorkAuthority(
+    userId,
+    now(),
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+    dependencies,
+  );
   return withConnection(dependencies, (connection) =>
     connection.db.transaction(async (tx) => {
-      const at = dependencies.now?.() ?? new Date();
+      const at = now();
+      await requireFounderOwnerPreviewWorkAuthorityInTransaction(
+        tx,
+        {
+          userId,
+          now: at,
+          requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+        },
+        dependencies,
+      );
       await lockOperator(tx, operator.id);
       const preview = await ensurePreview(
         tx,
@@ -146,9 +168,25 @@ export async function dismissFounderMailSendingOfferForUser(
   dependencies: FounderActionPreviewDependencies = {},
 ): Promise<FounderActionPreviewDto> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const now = dependencies.now ?? (() => new Date());
+  await preflightFounderOwnerPreviewWorkAuthority(
+    userId,
+    now(),
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+    dependencies,
+  );
   return withConnection(dependencies, (connection) =>
     connection.db.transaction(async (tx) => {
-      const at = dependencies.now?.() ?? new Date();
+      const at = now();
+      await requireFounderOwnerPreviewWorkAuthorityInTransaction(
+        tx,
+        {
+          userId,
+          now: at,
+          requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+        },
+        dependencies,
+      );
       await lockOperator(tx, operator.id);
       const preview = await ensurePreview(tx, operator.id, at, {
         ...(dependencies.randomUUID ? { randomUUID: dependencies.randomUUID } : {}),

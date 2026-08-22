@@ -18,9 +18,10 @@ import {
 } from "@/src/server/db/schema";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
-  requireFounderOwnerPreviewAccessForUser,
-  requireFounderOwnerPreviewAccessInTransaction,
-} from "@/src/server/founder-product-contract/release-stage-access";
+  type FounderOwnerPreviewWorkAuthorityDependencies,
+  preflightFounderOwnerPreviewWorkAuthority,
+  requireFounderOwnerPreviewWorkAuthorityInTransaction,
+} from "@/src/server/founder-product-contract/work-authority";
 import {
   type FounderActionPreviewDto,
   projectFounderActionPreview,
@@ -96,12 +97,9 @@ export type FounderLimitedOperationDto = {
   activatedAt: string | null;
 };
 
-export type FounderLimitedOperationDependencies = {
+export type FounderLimitedOperationDependencies = FounderOwnerPreviewWorkAuthorityDependencies & {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
-  env?: Record<string, string | undefined>;
-  requireReleaseStageAccess?: typeof requireFounderOwnerPreviewAccessInTransaction;
-  requireReleaseStageAccessForUser?: typeof requireFounderOwnerPreviewAccessForUser;
 };
 
 export class FounderLimitedOperationError extends Error {
@@ -141,11 +139,24 @@ export async function confirmFounderProcessingConsentForUser(
 ): Promise<FounderLimitedOperationDto> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const now = dependencies.now ?? (() => new Date());
-  const at = now();
-  await requireLimitedOperationReleaseStagePreflight(userId, at, dependencies);
+  await preflightFounderOwnerPreviewWorkAuthority(
+    userId,
+    now(),
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarLimitedOperation,
+    dependencies,
+  );
   return withConnection(dependencies, async (connection) => {
     return connection.db.transaction(async (tx) => {
-      await requireLimitedOperationReleaseStageAccess(tx, userId, at, dependencies);
+      const at = now();
+      await requireFounderOwnerPreviewWorkAuthorityInTransaction(
+        tx,
+        {
+          userId,
+          now: at,
+          requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarLimitedOperation,
+        },
+        dependencies,
+      );
       await lockOperator(tx, operator.id);
       const pair = await readyConnectionPair(tx, operator.id, at);
       if (!pair) {
@@ -245,11 +256,24 @@ export async function reconcileFounderLimitedOperationForUser(
 ): Promise<FounderLimitedOperationDto | null> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const now = dependencies.now ?? (() => new Date());
-  const at = now();
-  await requireLimitedOperationReleaseStagePreflight(userId, at, dependencies);
+  await preflightFounderOwnerPreviewWorkAuthority(
+    userId,
+    now(),
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarLimitedOperation,
+    dependencies,
+  );
   return withConnection(dependencies, async (connection) => {
     return connection.db.transaction(async (tx) => {
-      await requireLimitedOperationReleaseStageAccess(tx, userId, at, dependencies);
+      const at = now();
+      await requireFounderOwnerPreviewWorkAuthorityInTransaction(
+        tx,
+        {
+          userId,
+          now: at,
+          requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarLimitedOperation,
+        },
+        dependencies,
+      );
       await lockOperator(tx, operator.id);
       const operation = await ensureOperation(tx, operator.id, at);
       if (operation?.mailConnectionId) return null;
@@ -280,11 +304,24 @@ export async function openFounderMorningBriefForUser(
 ): Promise<FounderLimitedOperationDto> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const now = dependencies.now ?? (() => new Date());
-  const at = now();
-  await requireLimitedOperationReleaseStagePreflight(userId, at, dependencies);
+  await preflightFounderOwnerPreviewWorkAuthority(
+    userId,
+    now(),
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarLimitedOperation,
+    dependencies,
+  );
   return withConnection(dependencies, async (connection) => {
     return connection.db.transaction(async (tx) => {
-      await requireLimitedOperationReleaseStageAccess(tx, userId, at, dependencies);
+      const at = now();
+      await requireFounderOwnerPreviewWorkAuthorityInTransaction(
+        tx,
+        {
+          userId,
+          now: at,
+          requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarLimitedOperation,
+        },
+        dependencies,
+      );
       await lockOperator(tx, operator.id);
       const operation = await ensureOperation(tx, operator.id, at);
       if (operation?.status !== "limited") {
@@ -660,52 +697,6 @@ async function lockOperator(tx: LimitedOperationTransaction, operatorId: string)
 
 function digest(value: unknown): string {
   return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
-}
-
-async function requireLimitedOperationReleaseStageAccess(
-  tx: LimitedOperationTransaction,
-  userId: string,
-  now: Date,
-  dependencies: FounderLimitedOperationDependencies,
-): Promise<void> {
-  await (dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction)(
-    tx,
-    {
-      userId,
-      now,
-      applicationRevision:
-        dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
-        process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
-        "",
-      requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarLimitedOperation,
-    },
-  );
-}
-
-async function requireLimitedOperationReleaseStagePreflight(
-  userId: string,
-  now: Date,
-  dependencies: FounderLimitedOperationDependencies,
-): Promise<void> {
-  const accessDependencies = {
-    ...(dependencies.createConnection ? { createConnection: dependencies.createConnection } : {}),
-    ...(dependencies.env ? { env: dependencies.env } : {}),
-  };
-  if (dependencies.requireReleaseStageAccessForUser) {
-    await dependencies.requireReleaseStageAccessForUser(
-      userId,
-      now,
-      accessDependencies,
-      FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarLimitedOperation,
-    );
-  } else if (!dependencies.requireReleaseStageAccess) {
-    await requireFounderOwnerPreviewAccessForUser(
-      userId,
-      now,
-      accessDependencies,
-      FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarLimitedOperation,
-    );
-  }
 }
 
 async function withConnection<T>(

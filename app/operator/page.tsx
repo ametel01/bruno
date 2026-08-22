@@ -19,7 +19,7 @@ import {
 import { getFounderOnboardingForUser } from "@/src/server/operators/founder-onboarding";
 import { isFounderOpenAiReleased } from "@/src/server/operators/founder-openai-release";
 import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import { getFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import { buildFounderTimezoneOptions } from "@/src/shared/founder-timezones";
 
@@ -39,9 +39,9 @@ export default async function FounderOperatorPage() {
     );
   }
 
-  const operator = await ensureFounderOperatorForUser(applicationUser.userId);
+  const operator = await getFounderOperatorForUser(applicationUser.userId);
   const [onboarding, recoveryArchive, ownerPreviewAccess] = await Promise.all([
-    getFounderOnboardingForUser(applicationUser.userId),
+    operator ? getFounderOnboardingForUser(applicationUser.userId) : Promise.resolve(undefined),
     getFounderRecoveryArchiveStatusForUser(applicationUser.userId, new Date()),
     requiresFounderReleaseStageAuthority(resolveAuthMode(process.env).mode)
       ? getFounderOwnerPreviewAccessForUser(applicationUser.userId, new Date())
@@ -59,7 +59,7 @@ export default async function FounderOperatorPage() {
     <FounderOperatorShell>
       <FounderOperatorPreparation
         initialOperator={operator}
-        initialOnboarding={onboarding}
+        {...(onboarding ? { initialOnboarding: onboarding } : {})}
         initialRecoveryArchive={recoveryArchive}
         ownerPreviewAdmitted={ownerPreviewAccess.admitted}
         ownerPreviewWorkAllowed={hasFounderOwnerPreviewCapabilities(

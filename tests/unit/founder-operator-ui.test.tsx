@@ -27,6 +27,16 @@ const OPERATOR: FounderOperatorDto = {
 };
 
 describe("Founder Operator preparation shell", () => {
+  it("asks the Founder to begin preparation without creating state on page load", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, { initialOperator: null }),
+    );
+
+    expect(html).toContain("Create my Operator");
+    expect(html).toContain("Opening this page alone does not create one.");
+    expect(html).not.toContain("Confirm timezone");
+  });
+
   it("moves the legacy shell navigation to Founder outcomes", () => {
     const html = renderToStaticMarkup(
       createElement(

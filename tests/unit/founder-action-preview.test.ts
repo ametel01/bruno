@@ -9,6 +9,7 @@ import {
   editFounderActionPreviewForUser,
   getFounderActionPreviewForUser,
 } from "@/src/server/operators/founder-action-previews";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003461";
 const OTHER_OWNER_ID = "00000000-0000-4000-8000-000000003462";
@@ -46,7 +47,11 @@ describe("Founder Action Preview application seam", () => {
         supportingEvidence: [{ label: "Calendar", detail: "Planning call on 19 August." }],
         expectedExternalEffect: "A message would be prepared for review; nothing is sent.",
       },
-      { createConnection: () => connection, now: () => now },
+      {
+        createConnection: () => connection,
+        now: () => now,
+        requireReleaseStageAccess: async () => undefined,
+      },
     );
 
     expect(edited.authority).toBe("none");
@@ -73,12 +78,50 @@ describe("Founder Action Preview application seam", () => {
     const first = await editFounderActionPreviewForUser(OWNER_ID, draft, {
       createConnection: () => connection,
       now: () => now,
+      requireReleaseStageAccess: async () => undefined,
     });
     const second = await editFounderActionPreviewForUser(OTHER_OWNER_ID, draft, {
       createConnection: () => connection,
       now: () => now,
+      requireReleaseStageAccess: async () => undefined,
     });
     expect(second.id).not.toBe(first.id);
+  });
+
+  it("rejects an edit when protection expires before its transaction", async () => {
+    const expiredAt = new Date(now.getTime() + 24 * 60 * 60 * 1_000);
+    let current = now;
+    const guardedAt: Date[] = [];
+
+    await expect(
+      editFounderActionPreviewForUser(
+        OWNER_ID,
+        {
+          recipientName: "Ada Lovelace",
+          recipientAddress: "ada@example.com",
+          content: "Following up.",
+          supportingEvidence: [{ label: "Calendar", detail: "Planning call." }],
+          expectedExternalEffect: "Nothing is sent.",
+        },
+        {
+          createConnection: () => connection,
+          now: () => current,
+          requireReleaseStageAccessForUser: async () => {
+            current = expiredAt;
+          },
+          requireReleaseStageAccess: async (_tx, input) => {
+            guardedAt.push(input.now);
+            if (input.now >= expiredAt) throw new FounderReleaseStageAccessError();
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+
+    expect(guardedAt).toEqual([expiredAt]);
+    await expect(connection.db.select().from(operatorActionPreviews)).resolves.toHaveLength(0);
+    await expect(connection.db.select().from(operatorActionPreviewRevisions)).resolves.toHaveLength(
+      0,
+    );
   });
 });
 

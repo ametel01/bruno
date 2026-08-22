@@ -24,6 +24,7 @@ import {
   openFounderMorningBriefForUser,
   reconcileFounderLimitedOperationForUser,
 } from "@/src/server/operators/founder-limited-operation";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 import { getFounderMorningBriefPreferencesForUser } from "@/src/server/operators/founder-morning-brief";
 import {
   confirmFounderTimezoneForUser,
@@ -165,6 +166,31 @@ describe("Founder Calendar-only Limited Operation", () => {
         env: { VERCEL_GIT_COMMIT_SHA: "a".repeat(40) },
       }),
     ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+    await expect(connection.db.select().from(operatorLimitedOperations)).resolves.toHaveLength(0);
+    await expect(connection.db.select().from(operatorMorningBriefs)).resolves.toHaveLength(0);
+  });
+
+  it("resamples protection time inside the mutation transaction", async () => {
+    const expiredAt = new Date(NOW.getTime() + 24 * 60 * 60 * 1_000);
+    let current = NOW;
+    const guardedAt: Date[] = [];
+
+    await expect(
+      reconcileFounderLimitedOperationForUser(OWNER_ID, {
+        createConnection: () => connection,
+        now: () => current,
+        requireReleaseStageAccessForUser: async (_userId, preflightAt) => {
+          expect(preflightAt).toEqual(NOW);
+          current = expiredAt;
+        },
+        requireReleaseStageAccess: async (_tx, input) => {
+          guardedAt.push(input.now);
+          if (input.now >= expiredAt) throw new FounderReleaseStageAccessError();
+        },
+      }),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+
+    expect(guardedAt).toEqual([expiredAt]);
     await expect(connection.db.select().from(operatorLimitedOperations)).resolves.toHaveLength(0);
     await expect(connection.db.select().from(operatorMorningBriefs)).resolves.toHaveLength(0);
   });

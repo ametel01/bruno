@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   admitOwnerPreview: vi.fn(),
   confirmTimezone: vi.fn(),
   ensureOperator: vi.fn(),
+  getOperator: vi.fn(),
   getRecoveryArchiveStatus: vi.fn(),
   getOwnerPreviewAccess: vi.fn(),
   prepareRuntime: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock("@/src/server/operators/founder-operator", async (importOriginal) => {
     ...actual,
     confirmFounderTimezoneForUser: mocks.confirmTimezone,
     ensureFounderOperatorForUser: mocks.ensureOperator,
+    getFounderOperatorForUser: mocks.getOperator,
   };
 });
 
@@ -48,7 +50,8 @@ describe("Founder Operator route", () => {
   beforeEach(() => {
     mocks.admitOwnerPreview.mockResolvedValue({ archiveId: "archive-373" });
     mocks.requireApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
-    mocks.ensureOperator.mockResolvedValue(OPERATOR);
+    mocks.ensureOperator.mockRejectedValue(new Error("GET must not create Operator state"));
+    mocks.getOperator.mockResolvedValue(OPERATOR);
     mocks.getRecoveryArchiveStatus.mockResolvedValue({
       state: "current",
       lastVerifiedAt: "2026-08-22T00:00:00.000Z",
@@ -112,6 +115,7 @@ describe("Founder Operator route", () => {
     mocks.admitOwnerPreview.mockReset();
     mocks.confirmTimezone.mockReset();
     mocks.ensureOperator.mockReset();
+    mocks.getOperator.mockReset();
     mocks.getRecoveryArchiveStatus.mockReset();
     mocks.getOwnerPreviewAccess.mockReset();
     mocks.prepareRuntime.mockReset();
@@ -137,8 +141,23 @@ describe("Founder Operator route", () => {
         restoreVerifiedAt: "2026-08-22T00:00:00.000Z",
       }),
     });
-    expect(mocks.ensureOperator).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.getOperator).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.ensureOperator).not.toHaveBeenCalled();
     expect(mocks.getRecoveryArchiveStatus).toHaveBeenCalledWith(USER_ID, expect.any(Date));
+  });
+
+  it("returns an empty projection without creating workspace state before preparation", async () => {
+    const { GET } = await import("@/app/api/operator/route");
+    mocks.getOperator.mockResolvedValueOnce(null);
+
+    const response = await GET(new Request("http://localhost/api/operator"), undefined, {
+      getRecoveryArchiveStatus: mocks.getRecoveryArchiveStatus,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ operator: null });
+    expect(mocks.getOperator).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.ensureOperator).not.toHaveBeenCalled();
   });
 
   it("enforces persisted Release Stage authority in supported production operator mode", async () => {

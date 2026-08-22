@@ -10,8 +10,8 @@ import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product
 import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
 import {
   confirmFounderTimezoneForUser,
-  ensureFounderOperatorForUser,
   FounderOperatorTimezoneError,
+  getFounderOperatorForUser,
 } from "@/src/server/operators/founder-operator";
 import { prepareFounderOperatorRuntimeForUser } from "@/src/server/operators/founder-operator-runtime";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
@@ -19,7 +19,7 @@ import { requireConfiguredApplicationUser } from "@/src/server/users/configured-
 type OperatorRouteDependencies = {
   admitOwnerPreview?: typeof admitFounderOperatorToOwnerPreview;
   requireApplicationUser?: typeof requireConfiguredApplicationUser;
-  ensureOperator?: typeof ensureFounderOperatorForUser;
+  getOperator?: typeof getFounderOperatorForUser;
   confirmTimezone?: typeof confirmFounderTimezoneForUser;
   prepareRuntime?: typeof prepareFounderOperatorRuntimeForUser;
   getRecoveryArchiveStatus?: typeof getFounderRecoveryArchiveStatusForUser;
@@ -46,7 +46,7 @@ export async function GET(
     return authenticationResponse(applicationUser.status);
   }
 
-  const operator = await (dependencies.ensureOperator ?? ensureFounderOperatorForUser)(
+  const operator = await (dependencies.getOperator ?? getFounderOperatorForUser)(
     applicationUser.userId,
   );
   const recoveryArchive = await (

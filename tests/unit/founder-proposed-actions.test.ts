@@ -9,6 +9,7 @@ import {
   users,
 } from "@/src/server/db/schema";
 import { setFounderExternalActionPauseForUser } from "@/src/server/operators/founder-ai-work";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 import {
   changeFounderAuthorityPolicyForUser,
   claimFounderActionAuthorizationForUser,
@@ -16,6 +17,7 @@ import {
   decideFounderProposedActionForUser,
   getFounderProposedActionForUser,
   getFounderProposedActionsForUser,
+  reviseFounderProposedActionForUser,
 } from "@/src/server/operators/founder-proposed-actions";
 import { insertPastDueFounderEntitlementFixture } from "@/tests/helpers/founder-entitlement";
 
@@ -24,6 +26,7 @@ const OTHER_OWNER_ID = "00000000-0000-4000-8000-000000003472";
 const NOW = new Date("2026-08-19T04:00:00.000Z");
 const VALID_UNTIL = "2026-08-20T04:00:00.000Z";
 const CONTROLLED_DEADLINE = new Date("2099-01-01T00:00:00.000Z");
+const ALLOW_OWNER_PREVIEW_WORK = { requireReleaseStageAccess: async () => undefined };
 
 describe("Founder Proposed Actions application seam", () => {
   let connection: DatabaseConnection;
@@ -43,7 +46,7 @@ describe("Founder Proposed Actions application seam", () => {
     const action = await createFounderProposedActionForUser(
       OWNER_ID,
       draft({ actionFamily: "external_communication" }),
-      { createConnection: () => connection, now: () => NOW },
+      { createConnection: () => connection, now: () => NOW, ...ALLOW_OWNER_PREVIEW_WORK },
     );
 
     expect(action).toMatchObject({
@@ -62,11 +65,72 @@ describe("Founder Proposed Actions application seam", () => {
     expect(await connection.db.select().from(operatorProductGuardrails)).toHaveLength(1);
   });
 
+  it("rejects a proposal when protection expires before its transaction", async () => {
+    const expiredAt = new Date(NOW.getTime() + 24 * 60 * 60 * 1_000);
+    let current = NOW;
+    const guardedAt: Date[] = [];
+
+    await expect(
+      createFounderProposedActionForUser(
+        OWNER_ID,
+        draft({ validUntil: new Date(expiredAt.getTime() + 60_000).toISOString() }),
+        {
+          createConnection: () => connection,
+          now: () => current,
+          requireReleaseStageAccessForUser: async () => {
+            current = expiredAt;
+          },
+          requireReleaseStageAccess: async (_tx, input) => {
+            guardedAt.push(input.now);
+            if (input.now >= expiredAt) throw new FounderReleaseStageAccessError();
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+
+    expect(guardedAt).toEqual([expiredAt]);
+    await expect(connection.db.select().from(operatorProposedActions)).resolves.toHaveLength(0);
+  });
+
+  it("keeps the current proposal when protection expires before a revision transaction", async () => {
+    const action = await createFounderProposedActionForUser(OWNER_ID, draft(), {
+      createConnection: () => connection,
+      now: () => NOW,
+      ...ALLOW_OWNER_PREVIEW_WORK,
+    });
+    const expiredAt = new Date(NOW.getTime() + 24 * 60 * 60 * 1_000);
+    let current = NOW;
+
+    await expect(
+      reviseFounderProposedActionForUser(
+        OWNER_ID,
+        action.id,
+        1,
+        draft({ validUntil: new Date(expiredAt.getTime() + 60_000).toISOString() }),
+        {
+          createConnection: () => connection,
+          now: () => current,
+          requireReleaseStageAccessForUser: async () => {
+            current = expiredAt;
+          },
+          requireReleaseStageAccess: async (_tx, input) => {
+            if (input.now >= expiredAt) throw new FounderReleaseStageAccessError();
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+
+    await expect(
+      getFounderProposedActionForUser(OWNER_ID, { createConnection: () => connection }),
+    ).resolves.toMatchObject({ id: action.id, version: 1, state: "awaiting_approval" });
+    await expect(connection.db.select().from(operatorProposedActions)).resolves.toHaveLength(1);
+  });
+
   it("authorizes one exact version, creates one durable authorization, and wins duplicates", async () => {
     const action = await createFounderProposedActionForUser(
       OWNER_ID,
       draft({ actionFamily: "external_communication", idempotencyKey: "send-1" }),
-      { createConnection: () => connection, now: () => NOW },
+      { createConnection: () => connection, now: () => NOW, ...ALLOW_OWNER_PREVIEW_WORK },
     );
     const first = await decideFounderProposedActionForUser(
       OWNER_ID,
@@ -104,7 +168,7 @@ describe("Founder Proposed Actions application seam", () => {
     const action = await createFounderProposedActionForUser(
       OWNER_ID,
       draft({ actionFamily: "external_communication" }),
-      { createConnection: () => connection, now: () => NOW },
+      { createConnection: () => connection, now: () => NOW, ...ALLOW_OWNER_PREVIEW_WORK },
     );
     await setFounderExternalActionPauseForUser(OWNER_ID, true, {
       createConnection: () => connection,
@@ -141,7 +205,7 @@ describe("Founder Proposed Actions application seam", () => {
     const action = await createFounderProposedActionForUser(
       OWNER_ID,
       draft({ actionFamily: "external_communication", validUntil: "2100-01-01T00:00:00.000Z" }),
-      { createConnection: () => connection, now: () => NOW },
+      { createConnection: () => connection, now: () => NOW, ...ALLOW_OWNER_PREVIEW_WORK },
     );
     await decideFounderProposedActionForUser(OWNER_ID, action.id, "approve", 1, null, {
       createConnection: () => connection,
@@ -169,7 +233,7 @@ describe("Founder Proposed Actions application seam", () => {
     const action = await createFounderProposedActionForUser(
       OWNER_ID,
       draft({ actionFamily: "external_communication" }),
-      { createConnection: () => connection, now: () => NOW },
+      { createConnection: () => connection, now: () => NOW, ...ALLOW_OWNER_PREVIEW_WORK },
     );
     await expect(
       decideFounderProposedActionForUser(OWNER_ID, action.id, "approve", 1, null, {
@@ -204,7 +268,7 @@ describe("Founder Proposed Actions application seam", () => {
     const action = await createFounderProposedActionForUser(
       OWNER_ID,
       draft({ idempotencyKey: "concurrent-1" }),
-      { createConnection: () => connection, now: () => NOW },
+      { createConnection: () => connection, now: () => NOW, ...ALLOW_OWNER_PREVIEW_WORK },
     );
     const results = await Promise.all([
       decideFounderProposedActionForUser(OWNER_ID, action.id, "approve", 1, null, {
@@ -231,7 +295,7 @@ describe("Founder Proposed Actions application seam", () => {
     const action = await createFounderProposedActionForUser(
       OWNER_ID,
       draft({ actionFamily: "external_communication" }),
-      { createConnection: () => connection, now: () => NOW },
+      { createConnection: () => connection, now: () => NOW, ...ALLOW_OWNER_PREVIEW_WORK },
     );
     const changed = await decideFounderProposedActionForUser(
       OWNER_ID,
@@ -270,7 +334,7 @@ describe("Founder Proposed Actions application seam", () => {
     const blocked = await createFounderProposedActionForUser(
       OWNER_ID,
       draft({ actionFamily: "external_communication", actionSubtype: "bulk_outreach" }),
-      { createConnection: () => connection, now: () => NOW },
+      { createConnection: () => connection, now: () => NOW, ...ALLOW_OWNER_PREVIEW_WORK },
     );
     expect(blocked).toMatchObject({ state: "blocked", productGuardrails: { blocked: true } });
     await expect(
@@ -292,7 +356,7 @@ describe("Founder Proposed Actions application seam", () => {
     const action = await createFounderProposedActionForUser(
       OWNER_ID,
       draft({ actionFamily: "observe_evidence" }),
-      { createConnection: () => connection, now: () => NOW },
+      { createConnection: () => connection, now: () => NOW, ...ALLOW_OWNER_PREVIEW_WORK },
     );
     expect(action.state).toBe("authorized");
     expect(action.authorization).toMatchObject({ claimedAt: null });
@@ -303,7 +367,7 @@ describe("Founder Proposed Actions application seam", () => {
     const pending = await createFounderProposedActionForUser(
       OWNER_ID,
       draft({ actionFamily: "external_communication" }),
-      { createConnection: () => connection, now: () => NOW },
+      { createConnection: () => connection, now: () => NOW, ...ALLOW_OWNER_PREVIEW_WORK },
     );
     const policy = await changeFounderAuthorityPolicyForUser(
       OWNER_ID,

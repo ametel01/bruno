@@ -346,7 +346,11 @@ describe("Founder approved Gmail execution", () => {
         validUntil: "2026-08-20T05:00:00.000Z",
         ...overrides,
       },
-      { createConnection: () => connection, now: () => NOW },
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        requireReleaseStageAccess: async () => undefined,
+      },
     );
     await decideFounderProposedActionForUser(OWNER_ID, action.id, "approve", 1, null, {
       createConnection: () => connection,

@@ -19,6 +19,12 @@ import {
   operatorProductGuardrails,
   operatorProposedActions,
 } from "@/src/server/db/schema";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import {
+  type FounderOwnerPreviewWorkAuthorityDependencies,
+  preflightFounderOwnerPreviewWorkAuthority,
+  requireFounderOwnerPreviewWorkAuthorityInTransaction,
+} from "@/src/server/founder-product-contract/work-authority";
 import { assertFounderExternalActionsNotPausedInTransaction } from "@/src/server/operators/founder-ai-work";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
@@ -158,7 +164,7 @@ export type FounderActionExecutionClaimDto = {
   duplicate: boolean;
 };
 
-export type FounderProposedActionDependencies = {
+export type FounderProposedActionDependencies = FounderOwnerPreviewWorkAuthorityDependencies & {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
   randomUUID?: () => string;
@@ -199,14 +205,30 @@ export async function createFounderProposedActionForUser(
   draft: FounderProposedActionDraft,
   dependencies: FounderProposedActionDependencies = {},
 ): Promise<FounderProposedActionDto> {
-  const normalized = normalizeDraft(draft, dependencies.now?.() ?? new Date());
+  const now = dependencies.now ?? (() => new Date());
+  const normalized = normalizeDraft(draft, now());
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  await preflightFounderOwnerPreviewWorkAuthority(
+    userId,
+    now(),
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+    dependencies,
+  );
   return withConnection(dependencies, (connection) =>
     connection.db.transaction(async (tx) => {
-      const now = dependencies.now?.() ?? new Date();
+      const at = now();
+      await requireFounderOwnerPreviewWorkAuthorityInTransaction(
+        tx,
+        {
+          userId,
+          now: at,
+          requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+        },
+        dependencies,
+      );
       await lockOperator(tx, operator.id);
-      const policy = await ensureAuthorityPolicy(tx, operator.id, now);
-      const guardrails = await ensureProductGuardrails(tx, operator.id, now);
+      const policy = await ensureAuthorityPolicy(tx, operator.id, at);
+      const guardrails = await ensureProductGuardrails(tx, operator.id, at);
       const existing = normalized.idempotencyKey
         ? await findByIdempotency(tx, operator.id, normalized.idempotencyKey)
         : null;
@@ -240,8 +262,8 @@ export async function createFounderProposedActionForUser(
           executionWindowEnd: normalized.executionWindowEnd,
           idempotencyKey: normalized.idempotencyKey ?? (dependencies.randomUUID ?? randomUUID)(),
           state: state.state,
-          createdAt: now,
-          updatedAt: now,
+          createdAt: at,
+          updatedAt: at,
         })
         .returning();
       if (!created) {
@@ -259,7 +281,7 @@ export async function createFounderProposedActionForUser(
             operatorId: operator.id,
             proposedActionId: created.id,
             decisionId: null,
-            createdAt: now,
+            createdAt: at,
           })
           .onConflictDoNothing({ target: operatorActionAuthorizations.proposedActionId });
       }
@@ -403,11 +425,27 @@ export async function reviseFounderProposedActionForUser(
   draft: FounderProposedActionDraft,
   dependencies: FounderProposedActionDependencies = {},
 ): Promise<FounderProposedActionDto> {
-  const normalized = normalizeDraft(draft, dependencies.now?.() ?? new Date());
+  const now = dependencies.now ?? (() => new Date());
+  const normalized = normalizeDraft(draft, now());
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  await preflightFounderOwnerPreviewWorkAuthority(
+    userId,
+    now(),
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+    dependencies,
+  );
   return withConnection(dependencies, (connection) =>
     connection.db.transaction(async (tx) => {
-      const now = dependencies.now?.() ?? new Date();
+      const at = now();
+      await requireFounderOwnerPreviewWorkAuthorityInTransaction(
+        tx,
+        {
+          userId,
+          now: at,
+          requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+        },
+        dependencies,
+      );
       await lockOperator(tx, operator.id);
       const [action] = await tx
         .select()
@@ -434,12 +472,12 @@ export async function reviseFounderProposedActionForUser(
         ? await findByIdempotency(tx, operator.id, normalized.idempotencyKey)
         : null;
       if (existing) return projectProposedAction(tx, existing);
-      const policy = await ensureAuthorityPolicy(tx, operator.id, now);
-      const guardrails = await ensureProductGuardrails(tx, operator.id, now);
+      const policy = await ensureAuthorityPolicy(tx, operator.id, at);
+      const guardrails = await ensureProductGuardrails(tx, operator.id, at);
       const bound = await validateActionBindings(tx, operator.id, normalized);
       await tx
         .update(operatorProposedActions)
-        .set({ state: "superseded", updatedAt: now })
+        .set({ state: "superseded", updatedAt: at })
         .where(eq(operatorProposedActions.id, action.id));
       const revised = await insertActionVersion(
         tx,
@@ -451,7 +489,7 @@ export async function reviseFounderProposedActionForUser(
         bound.processingConsentVersion,
         policy,
         guardrails,
-        now,
+        at,
         dependencies.randomUUID,
       );
       return projectProposedAction(tx, revised);

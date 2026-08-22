@@ -33,7 +33,7 @@ export function FounderOperatorPreparation({
   mailSendingReleased = false,
   mailReleaseControls,
 }: {
-  initialOperator: FounderOperatorDto;
+  initialOperator: FounderOperatorDto | null;
   initialOnboarding?: FounderOnboardingDto;
   initialRecoveryArchive?: FounderRecoveryArchiveStatusDto;
   ownerPreviewAdmitted?: boolean;
@@ -46,7 +46,7 @@ export function FounderOperatorPreparation({
   mailReleaseControls?: FounderMailConnectionDto["release"] | undefined;
 }) {
   const [operator, setOperator] = useState(initialOperator);
-  const [timezone, setTimezone] = useState(initialOperator.preparation.timezone ?? "");
+  const [timezone, setTimezone] = useState(initialOperator?.preparation.timezone ?? "");
   const [detectedTimezone, setDetectedTimezone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -56,6 +56,7 @@ export function FounderOperatorPreparation({
   const lastOpenedStep = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!operator) return;
     let cancelled = false;
     const refresh = () => {
       void fetch("/api/operator/onboarding", { credentials: "same-origin" })
@@ -74,7 +75,7 @@ export function FounderOperatorPreparation({
       cancelled = true;
       window.removeEventListener("focus", refresh);
     };
-  }, []);
+  }, [operator]);
 
   useEffect(() => {
     if (
@@ -106,6 +107,7 @@ export function FounderOperatorPreparation({
 
   useEffect(() => {
     if (
+      !initialOperator ||
       initialOperator.preparation.status === "awaiting_timezone" ||
       (initialOperator.runtime && initialOperator.runtime.status !== "preparing")
     ) {
@@ -140,14 +142,6 @@ export function FounderOperatorPreparation({
       cancelled = true;
     };
   }, [initialOperator]);
-
-  const preparation = operator.preparation;
-  const awaitingTimezone = preparation.status === "awaiting_timezone";
-  const runtime = operator.runtime;
-  const runtimeReady = runtime?.status === "ready";
-  const runtimeNeedsAttention = runtime?.status === "needs_attention";
-  const activated = onboarding?.activated === true;
-  const workspaceAvailable = admitted;
 
   async function confirmTimezone(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -208,6 +202,92 @@ export function FounderOperatorPreparation({
       setSaving(false);
     }
   }
+
+  async function startPreparation() {
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/operator", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "prepare" }),
+      });
+      const body = (await response.json()) as
+        | {
+            operator: FounderOperatorDto;
+            ownerPreviewAdmitted?: boolean;
+            ownerPreviewWorkAllowed?: boolean;
+          }
+        | { error?: { message?: string } };
+      if (!response.ok || !("operator" in body)) {
+        throw new Error(
+          "error" in body
+            ? (body.error?.message ?? "We could not begin preparing your Operator.")
+            : "We could not begin preparing your Operator.",
+        );
+      }
+      setOperator(body.operator);
+      setTimezone(body.operator.preparation.timezone ?? "");
+      setAdmitted(body.ownerPreviewAdmitted === true);
+      setWorkAllowed(body.ownerPreviewWorkAllowed === true);
+    } catch (preparationError) {
+      setError(
+        preparationError instanceof Error
+          ? preparationError.message
+          : "We could not begin preparing your Operator.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!operator) {
+    return (
+      <div className={styles.content}>
+        <section className={styles.hero} aria-labelledby="operator-preparation-title">
+          <div className={styles.heroSignal} aria-hidden="true">
+            <span />
+          </div>
+          <p className={styles.kicker}>Your Bruno.Ai Operator</p>
+          <h2 id="operator-preparation-title">Create your private Operator workspace.</h2>
+          <p className={styles.intro}>
+            Bruno will prepare a resumable workspace after you choose to begin. Opening this page
+            alone does not create one.
+          </p>
+        </section>
+        <section className={styles.card} aria-labelledby="operator-create-title">
+          <div className={styles.cardHeading}>
+            <div>
+              <p className={styles.kicker}>Needs you</p>
+              <h3 id="operator-create-title">Begin Operator preparation</h3>
+            </div>
+          </div>
+          <button
+            className={styles.button}
+            type="button"
+            onClick={() => void startPreparation()}
+            disabled={saving}
+          >
+            {saving ? "Beginning…" : "Create my Operator"}
+          </button>
+          {error ? (
+            <p className={styles.error} role="alert">
+              {error}
+            </p>
+          ) : null}
+        </section>
+      </div>
+    );
+  }
+
+  const preparation = operator.preparation;
+  const awaitingTimezone = preparation.status === "awaiting_timezone";
+  const runtime = operator.runtime;
+  const runtimeReady = runtime?.status === "ready";
+  const runtimeNeedsAttention = runtime?.status === "needs_attention";
+  const activated = onboarding?.activated === true;
+  const workspaceAvailable = admitted;
 
   return (
     <div className={styles.content}>
