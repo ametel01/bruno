@@ -59,11 +59,18 @@ export async function createFounderCheckout(input: {
     const correlationId = await connection.db.transaction(async (tx) => {
       await lockFounderProductContractLifecycleInTransaction(tx, input.userId);
       await requireActiveFounderOperatorAuthorityInTransaction(tx, input.userId);
+      const [latest] = await tx
+        .select({ generation: founderCheckoutCorrelations.generation })
+        .from(founderCheckoutCorrelations)
+        .where(eq(founderCheckoutCorrelations.userId, input.userId))
+        .orderBy(desc(founderCheckoutCorrelations.generation))
+        .limit(1);
       const [created] = await tx
         .insert(founderCheckoutCorrelations)
         .values({
           userId: input.userId,
           correlationDigest: founderProductContractDigest(checkoutCorrelation),
+          generation: (latest?.generation ?? 0) + 1,
           createdAt: input.now,
           expiresAt,
         })
@@ -319,6 +326,29 @@ export async function reconcileFounderCommerceReceipt(input: {
         .where(eq(founderProductEntitlements.userId, receipt.userId))
         .limit(1)
         .for("update");
+      const [currentAuthority] = current
+        ? await tx
+            .select({
+              checkoutCorrelationId: founderCommerceEvents.checkoutCorrelationId,
+              generation: founderCheckoutCorrelations.generation,
+            })
+            .from(founderCommerceEvents)
+            .innerJoin(
+              founderCheckoutCorrelations,
+              eq(founderCheckoutCorrelations.id, founderCommerceEvents.checkoutCorrelationId),
+            )
+            .where(eq(founderCommerceEvents.id, current.sourceEventId))
+            .limit(1)
+        : [];
+      if (current && !currentAuthority) throw new Error("Current commerce authority disappeared.");
+      if (
+        currentAuthority &&
+        currentAuthority.checkoutCorrelationId !== correlation.id &&
+        currentAuthority.generation >= correlation.generation
+      ) {
+        await markReceipt(tx, lockedReceipt.id, "ignored", input.now);
+        return "ignored";
+      }
       const providerStateUpdatedAt = new Date(
         Math.max(new Date(subscription.updatedAt).valueOf(), new Date(order.updatedAt).valueOf()),
       );

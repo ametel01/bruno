@@ -24,6 +24,7 @@ import type { FounderInfrastructureRetirementProvider } from "@/src/server/found
 
 const USER_ID = "00000000-0000-4000-8000-000000000380";
 const CORRELATION = "a".repeat(43);
+const NEWER_CORRELATION = "b".repeat(43);
 const SUBSCRIPTION_ID = "789";
 const ORDER_ID = "101";
 const STARTED_AT = new Date("2026-08-23T00:00:00.000Z");
@@ -171,6 +172,60 @@ describe("persisted Founder commerce authority", () => {
     });
   });
 
+  it("does not let an older Checkout Correlation replace a newer entitlement", async () => {
+    const first = await record(webhook("first-generation", "2026-08-23T00:01:00.000Z"));
+    expect(await reconcile(first.receiptId)).toBe("applied");
+    await connection.db.insert(founderCheckoutCorrelations).values({
+      userId: USER_ID,
+      correlationDigest: digest(NEWER_CORRELATION),
+      generation: 2,
+      createdAt: new Date("2026-08-23T00:02:00.000Z"),
+      expiresAt: new Date("2026-08-23T01:02:00.000Z"),
+    });
+
+    subscription = {
+      subscriptionId: "790",
+      orderId: "102",
+      status: "active",
+      updatedAt: "2026-08-23T00:03:00.000Z",
+      endsAt: null,
+    };
+    order = {
+      orderId: "102",
+      status: "paid",
+      total: 3000,
+      refundedAmount: 0,
+      updatedAt: "2026-08-23T00:03:00.000Z",
+    };
+    const newer = await record(
+      webhook("second-generation", subscription.updatedAt, NEWER_CORRELATION, {
+        subscriptionId: subscription.subscriptionId,
+        orderId: order.orderId,
+      }),
+    );
+    expect(await reconcile(newer.receiptId)).toBe("applied");
+
+    subscription = {
+      subscriptionId: SUBSCRIPTION_ID,
+      orderId: ORDER_ID,
+      status: "unpaid",
+      updatedAt: "2026-08-23T00:04:00.000Z",
+      endsAt: null,
+    };
+    order = { ...order, orderId: ORDER_ID, status: "paid", updatedAt: subscription.updatedAt };
+    const delayed = await record(
+      webhook("delayed-first-generation", subscription.updatedAt, null, {
+        subscriptionId: SUBSCRIPTION_ID,
+        orderId: ORDER_ID,
+      }),
+    );
+    expect(await reconcile(delayed.receiptId)).toBe("ignored");
+    expect((await connection.db.select().from(founderProductEntitlements))[0]).toMatchObject({
+      providerSubscriptionId: "790",
+      status: "verified",
+    });
+  });
+
   it("refunds once after one hour, terminally fences late success, and requires fresh checkout", async () => {
     const receipt = await record(webhook("timeout", "2026-08-23T00:00:00.000Z"));
     const retirementProvider = {
@@ -265,6 +320,10 @@ function webhook(
   identity: string,
   occurredAt: string,
   checkoutCorrelation: string | null = CORRELATION,
+  providerIdentity: { subscriptionId: string; orderId: string } = {
+    subscriptionId: SUBSCRIPTION_ID,
+    orderId: ORDER_ID,
+  },
 ): VerifiedLemonSqueezyWebhook {
   const payloadDigest = digest(`${identity}:${occurredAt}`);
   return {
@@ -272,10 +331,10 @@ function webhook(
     payloadDigest,
     eventName: "subscription_updated",
     resourceType: "subscriptions",
-    resourceId: SUBSCRIPTION_ID,
+    resourceId: providerIdentity.subscriptionId,
     checkoutCorrelation,
-    subscriptionId: SUBSCRIPTION_ID,
-    orderId: ORDER_ID,
+    subscriptionId: providerIdentity.subscriptionId,
+    orderId: providerIdentity.orderId,
     occurredAt,
   };
 }

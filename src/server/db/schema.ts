@@ -1046,6 +1046,7 @@ export const founderCheckoutCorrelations = pgTable(
       .notNull()
       .references(() => users.id),
     correlationDigest: text("correlation_digest").notNull(),
+    generation: integer("generation").notNull().default(1),
     status: text("status").notNull().default("pending"),
     providerCheckoutId: text("provider_checkout_id"),
     providerSubscriptionId: text("provider_subscription_id"),
@@ -1066,12 +1067,17 @@ export const founderCheckoutCorrelations = pgTable(
   },
   (table) => [
     uniqueIndex("founder_checkout_correlations_digest_idx").on(table.correlationDigest),
+    uniqueIndex("founder_checkout_correlations_user_generation_idx").on(
+      table.userId,
+      table.generation,
+    ),
     uniqueIndex("founder_checkout_correlations_subscription_idx").on(table.providerSubscriptionId),
     uniqueIndex("founder_checkout_correlations_order_idx").on(table.providerOrderId),
     check(
       "founder_checkout_correlations_digest_check",
       sql`${table.correlationDigest} ~ '^sha256:[a-f0-9]{64}$'`,
     ),
+    check("founder_checkout_correlations_generation_check", sql`${table.generation} >= 1`),
     check(
       "founder_checkout_correlations_status_check",
       sql`${table.status} IN ('pending', 'consumed', 'refund_pending', 'closed')`,
