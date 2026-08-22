@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   confirmTimezone: vi.fn(),
   ensureOperator: vi.fn(),
   getOperator: vi.fn(),
+  getInfrastructureRetirementStatus: vi.fn(),
   getRecoveryArchiveStatus: vi.fn(),
   getOwnerPreviewAccess: vi.fn(),
   prepareRuntime: vi.fn(),
@@ -53,6 +54,7 @@ describe("Founder Operator route", () => {
     mocks.requireApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
     mocks.ensureOperator.mockRejectedValue(new Error("GET must not create Operator state"));
     mocks.getOperator.mockResolvedValue(OPERATOR);
+    mocks.getInfrastructureRetirementStatus.mockResolvedValue({ state: "unavailable" });
     mocks.getRecoveryArchiveStatus.mockResolvedValue({
       state: "current",
       lastVerifiedAt: "2026-08-22T00:00:00.000Z",
@@ -121,6 +123,7 @@ describe("Founder Operator route", () => {
     mocks.confirmTimezone.mockReset();
     mocks.ensureOperator.mockReset();
     mocks.getOperator.mockReset();
+    mocks.getInfrastructureRetirementStatus.mockReset();
     mocks.getRecoveryArchiveStatus.mockReset();
     mocks.getOwnerPreviewAccess.mockReset();
     mocks.prepareRuntime.mockReset();
@@ -132,6 +135,7 @@ describe("Founder Operator route", () => {
 
     const response = await GET(new Request("http://localhost/api/operator"), undefined, {
       authMode: "development",
+      getInfrastructureRetirementStatus: mocks.getInfrastructureRetirementStatus,
       getRecoveryArchiveStatus: mocks.getRecoveryArchiveStatus,
       readApplicationRevision: () => APPLICATION_REVISION,
     });
@@ -141,6 +145,7 @@ describe("Founder Operator route", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(body).toEqual({
       operator: OPERATOR,
+      infrastructureRetirement: { state: "unavailable" },
       ownerPreviewAdmitted: true,
       ownerPreviewWorkAllowed: true,
       recoveryArchive: expect.objectContaining({
@@ -160,6 +165,7 @@ describe("Founder Operator route", () => {
     mocks.getOperator.mockResolvedValueOnce(null);
 
     const response = await GET(new Request("http://localhost/api/operator"), undefined, {
+      getInfrastructureRetirementStatus: mocks.getInfrastructureRetirementStatus,
       getRecoveryArchiveStatus: mocks.getRecoveryArchiveStatus,
       readApplicationRevision: () => APPLICATION_REVISION,
     });
@@ -175,6 +181,7 @@ describe("Founder Operator route", () => {
 
     const response = await GET(new Request("http://localhost/api/operator"), undefined, {
       authMode: "operator",
+      getInfrastructureRetirementStatus: mocks.getInfrastructureRetirementStatus,
       getOwnerPreviewAccess: mocks.getOwnerPreviewAccess,
       getRecoveryArchiveStatus: mocks.getRecoveryArchiveStatus,
       readApplicationRevision: () => APPLICATION_REVISION,
@@ -192,6 +199,7 @@ describe("Founder Operator route", () => {
     const { GET } = await import("@/app/api/operator/route");
 
     const response = await GET(new Request("http://localhost/api/operator"), undefined, {
+      getInfrastructureRetirementStatus: mocks.getInfrastructureRetirementStatus,
       getRecoveryArchiveStatus: mocks.getRecoveryArchiveStatus,
       readApplicationRevision: () => null,
     });

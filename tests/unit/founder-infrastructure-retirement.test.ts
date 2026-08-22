@@ -23,6 +23,7 @@ import {
   type FounderCommerceEvent,
   type FounderLifecycleProviderBoundary,
 } from "@/src/server/founder-product-contract/lifecycle";
+import { getFounderInfrastructureRetirementStatusForUser } from "@/src/server/founder-product-contract/infrastructure-retirement";
 
 const USER_ID = "00000000-0000-4000-8000-000000003740";
 const OPERATOR_ID = "00000000-0000-4000-8000-000000003741";
@@ -116,9 +117,10 @@ describe("Founder Infrastructure Retirement deadline", () => {
       .set({ status: "needs_attention", transportState: "failed", safetyState: "failed" })
       .where(eq(operatorRuntimes.operatorId, OPERATOR_ID));
 
+    const providers = retirementProviders();
     await expect(
       executeFounderProductContractLifecycleAction(await retirementInput("unhealthy"), {
-        providers: retirementProviders(),
+        providers,
         commerceWebhookSecret: COMMERCE_SECRET,
         applicationRevision: "a".repeat(40),
         createConnection: () => connection,
@@ -130,6 +132,260 @@ describe("Founder Infrastructure Retirement deadline", () => {
         .from(founderInfrastructureRetirements)
         .where(eq(founderInfrastructureRetirements.runnerId, RUNNER_ID)),
     ).resolves.toEqual([expect.objectContaining({ status: "completed" })]);
+    expect(providers.calls()).toEqual([
+      "digitalOcean.observe_owned_resources",
+      "digitalOcean.delete_firewall",
+      "digitalOcean.delete_droplet",
+      "digitalOcean.observe_owned_resources",
+    ]);
+    const [receipt] = await connection.db
+      .select()
+      .from(founderInfrastructureRetirements)
+      .where(eq(founderInfrastructureRetirements.runnerId, RUNNER_ID));
+    expect(receipt).toMatchObject({
+      providerResourceId: "droplet-retirement-373",
+      providerFirewallId: "firewall-retirement-373",
+      providerOperationTag: `bruno-deploy-${RUNNER_ID.replaceAll("-", "")}`,
+      providerResourceName: "retirement-runner",
+      providerRegion: "sfo3",
+      providerSizeSlug: "s-1vcpu-1gb",
+      providerFirewallName: "bruno-runners-droplet-retirement-373",
+      providerDropletState: "absent",
+      providerFirewallState: "absent",
+      archiveOutcome: "failed",
+      billableRuntimeSeconds: 172_800,
+      resourcesBefore: 2,
+      resourcesAfter: 0,
+    });
+    await expect(
+      getFounderInfrastructureRetirementStatusForUser(USER_ID, {
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({
+      state: "completed",
+      archive: { outcome: "failed", criticalFailure: true },
+      provider: { droplet: "absent", firewall: "absent" },
+      billableRuntime: { seconds: 172_800 },
+      needsAttention: false,
+    });
+  });
+
+  it("records a critical archive failure without extending the destruction deadline", async () => {
+    const providers = retirementProviders({
+      async createRecoveryArchive() {
+        throw new Error("archive provider unavailable");
+      },
+    });
+
+    await expect(
+      executeFounderProductContractLifecycleAction(await retirementInput("archive-failure"), {
+        providers,
+        commerceWebhookSecret: COMMERCE_SECRET,
+        applicationRevision: "a".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({ cleanup: { resourcesAfter: 0, verified: true } });
+
+    await expect(
+      getFounderInfrastructureRetirementStatusForUser(USER_ID, {
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({
+      state: "completed",
+      archive: { outcome: "failed", criticalFailure: true },
+      provider: { droplet: "absent", firewall: "absent" },
+    });
+  });
+
+  it("returns the completed receipt idempotently for duplicate scheduling", async () => {
+    const providers = retirementProviders();
+    const input = await retirementInput("duplicate");
+    const dependencies = {
+      providers,
+      commerceWebhookSecret: COMMERCE_SECRET,
+      applicationRevision: "a".repeat(40),
+      createConnection: () => connection,
+    };
+
+    const first = await executeFounderProductContractLifecycleAction(input, dependencies);
+    const callCount = providers.calls().length;
+    const duplicate = await executeFounderProductContractLifecycleAction(input, dependencies);
+
+    expect(duplicate.cleanup).toEqual(first.cleanup);
+    expect(providers.calls()).toHaveLength(callCount);
+    await expect(
+      connection.db
+        .select({ attempts: founderInfrastructureRetirements.attemptCount })
+        .from(founderInfrastructureRetirements)
+        .where(eq(founderInfrastructureRetirements.runnerId, RUNNER_ID)),
+    ).resolves.toEqual([{ attempts: 1 }]);
+  });
+
+  it("records ambiguous ownership without issuing any delete request", async () => {
+    const calls: string[] = [];
+    const providers = retirementProviders();
+    providers.digitalOcean.observeOwnedSet = async () => ({
+      ok: false,
+      reason: "ownership_ambiguous",
+      retryable: true,
+      message: "ambiguous exact identity",
+    });
+    providers.digitalOcean.deleteFirewall = async () => {
+      calls.push("firewall");
+      return { ok: true, value: { state: "absent" } };
+    };
+    providers.digitalOcean.deleteDroplet = async () => {
+      calls.push("droplet");
+      return { ok: true, value: { state: "absent" } };
+    };
+
+    await expect(
+      executeFounderProductContractLifecycleAction(await retirementInput("ambiguous"), {
+        providers,
+        commerceWebhookSecret: COMMERCE_SECRET,
+        applicationRevision: "a".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).rejects.toThrow("ambiguous exact identity");
+    expect(calls).toEqual([]);
+    await expect(
+      connection.db
+        .select()
+        .from(founderInfrastructureRetirements)
+        .where(eq(founderInfrastructureRetirements.runnerId, RUNNER_ID)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        status: "in_progress",
+        providerResourceId: "droplet-retirement-373",
+        providerFirewallId: "firewall-retirement-373",
+        providerDropletState: "unknown",
+        providerFirewallState: "unknown",
+        failureCode: "digitalocean_ownership_ambiguous",
+      }),
+    ]);
+    await expect(
+      connection.db
+        .select({ status: runnerCredentials.status })
+        .from(runnerCredentials)
+        .where(eq(runnerCredentials.runnerId, RUNNER_ID)),
+    ).resolves.toEqual([{ status: "revoked" }]);
+  });
+
+  it("times out an uncertain provider read and leaves the exact receipt retryable", async () => {
+    const providers = retirementProviders();
+    providers.digitalOcean.observeOwnedSet = () => new Promise(() => undefined);
+
+    await expect(
+      executeFounderProductContractLifecycleAction(await retirementInput("timeout"), {
+        providers,
+        commerceWebhookSecret: COMMERCE_SECRET,
+        applicationRevision: "a".repeat(40),
+        providerRequestTimeoutMilliseconds: 5,
+        createConnection: () => connection,
+      }),
+    ).rejects.toThrow("timed out");
+    await expect(
+      connection.db
+        .select()
+        .from(founderInfrastructureRetirements)
+        .where(eq(founderInfrastructureRetirements.runnerId, RUNNER_ID)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        status: "in_progress",
+        failureCode: "provider_request_timeout",
+        attemptCount: 1,
+      }),
+    ]);
+  });
+
+  it("retries partial cleanup against the frozen receipt after mutable runner data changes", async () => {
+    const first = retirementProviders();
+    first.digitalOcean.deleteFirewall = async () => ({
+      ok: false,
+      reason: "delete_outcome_unknown",
+      retryable: true,
+      message: "firewall response unknown",
+    });
+    const originalInput = await retirementInput("partial-retry");
+    await expect(
+      executeFounderProductContractLifecycleAction(originalInput, {
+        providers: first,
+        commerceWebhookSecret: COMMERCE_SECRET,
+        applicationRevision: "a".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).rejects.toThrow("firewall response unknown");
+    await connection.db
+      .update(runners)
+      .set({ name: "mutated-runner-name", providerResourceId: "mutated-droplet" })
+      .where(eq(runners.id, RUNNER_ID));
+
+    const expectations: string[] = [];
+    let dropletPresent = true;
+    const second = retirementProviders();
+    second.digitalOcean = {
+      async observeOwnedSet(expectation) {
+        expectations.push(expectation.providerResourceId);
+        return {
+          ok: true,
+          value: {
+            state: dropletPresent ? "owned" : "absent",
+            droplet: dropletPresent ? "present" : "absent",
+            firewall: "absent",
+            dropletCreatedAt: dropletPresent
+              ? new Date(NOW.valueOf() - 48 * 60 * 60 * 1_000).toISOString()
+              : null,
+          },
+        };
+      },
+      async deleteFirewall() {
+        throw new Error("already absent firewall must not be deleted again");
+      },
+      async deleteDroplet(expectation) {
+        expectations.push(expectation.providerResourceId);
+        dropletPresent = false;
+        return { ok: true, value: { state: "absent" } };
+      },
+    };
+    await expect(
+      executeFounderProductContractLifecycleAction(originalInput, {
+        providers: second,
+        commerceWebhookSecret: COMMERCE_SECRET,
+        applicationRevision: "a".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({ cleanup: { verified: true, resourcesAfter: 0 } });
+    expect(expectations).toEqual([
+      "droplet-retirement-373",
+      "droplet-retirement-373",
+      "droplet-retirement-373",
+    ]);
+  });
+
+  it.each([
+    "active",
+    "online",
+    "offline",
+    "degraded",
+  ] as const)("counts a provider-present %s Droplet as billable until verified absence", async (status) => {
+    await connection.db.update(runners).set({ status }).where(eq(runners.id, RUNNER_ID));
+    await expect(
+      executeFounderProductContractLifecycleAction(await retirementInput(`cost-${status}`), {
+        providers: retirementProviders(),
+        commerceWebhookSecret: COMMERCE_SECRET,
+        applicationRevision: "a".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({ cleanup: { resourcesBefore: 2, resourcesAfter: 0 } });
+    const [receipt] = await connection.db
+      .select({
+        seconds: founderInfrastructureRetirements.billableRuntimeSeconds,
+        archiveOutcome: founderInfrastructureRetirements.archiveOutcome,
+      })
+      .from(founderInfrastructureRetirements)
+      .where(eq(founderInfrastructureRetirements.runnerId, RUNNER_ID));
+    expect(receipt?.seconds).toBe(172_800);
+    expect(receipt?.archiveOutcome).toBe("verified");
   });
 
   it("fences a retirement retry to the persisted archive runtime revision", async () => {
@@ -160,6 +416,7 @@ describe("Founder Infrastructure Retirement deadline", () => {
       idempotencyKey: `sha256:${"1".repeat(64)}`,
       providerResourceId: "droplet-retirement-373",
       providerFirewallId: "firewall-retirement-373",
+      ...persistedRetirementIdentity(),
       status: "in_progress",
       resourcesBefore: 2,
       resourcesAfter: null,
@@ -232,6 +489,7 @@ describe("Founder Infrastructure Retirement deadline", () => {
       idempotencyKey: `sha256:${"2".repeat(64)}`,
       providerResourceId: "droplet-retirement-373",
       providerFirewallId: "firewall-retirement-373",
+      ...persistedRetirementIdentity(),
       status: "in_progress",
       resourcesBefore: 2,
       resourcesAfter: null,
@@ -299,6 +557,9 @@ describe("Founder Infrastructure Retirement deadline", () => {
               state: dropletPresent || firewallPresent ? "owned" : "absent",
               droplet: dropletPresent ? "present" : "absent",
               firewall: firewallPresent ? "present" : "absent",
+              dropletCreatedAt: dropletPresent
+                ? new Date(NOW.valueOf() - 48 * 60 * 60 * 1_000).toISOString()
+                : null,
             },
           };
         },
@@ -381,6 +642,17 @@ describe("Founder Infrastructure Retirement deadline", () => {
       userId: USER_ID,
       now: NOW,
       commerceEvent,
+    };
+  }
+
+  function persistedRetirementIdentity() {
+    return {
+      providerOperationTag: `bruno-deploy-${RUNNER_ID.replaceAll("-", "")}`,
+      providerResourceName: "retirement-runner",
+      providerRegion: "sfo3",
+      providerSizeSlug: "s-1vcpu-1gb",
+      providerFirewallName: "bruno-runners-droplet-retirement-373",
+      hardDestructionDueAt: NOW,
     };
   }
 

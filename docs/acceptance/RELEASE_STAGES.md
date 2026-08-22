@@ -118,7 +118,11 @@ Infrastructure Retirement verifies the exact owned resource set, disables runtim
 deletes the firewall and Droplet, and rechecks authoritative provider absence. An Infrastructure
 Retirement Receipt remains in progress until no billable runtime resource remains. Ambiguous identity,
 unknown provider outcome, and failed cleanup retry idempotently against the same exact resource and
-never broaden deletion scope.
+never broaden deletion scope. The receipt freezes the complete provider identity before deletion,
+records work stoppage and the emergency archive outcome, and measures the billable interval from
+DigitalOcean's resource creation time through the final authoritative absence observation. Local
+assignment, idle, stopped, or powered-off state does not end that interval while the Droplet remains
+present at DigitalOcean.
 
 If no valid Recovery Archive can be produced by the hard deadline, Bruno.Ai still destroys the
 Droplet and records a critical preservation failure truthfully. During the 30-day retention window,

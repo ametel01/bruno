@@ -92,6 +92,7 @@ export const FOUNDER_PRODUCT_CONTRACT_UNIT_FILES = [
   "tests/unit/founder-recovery-archive-route.test.ts",
   "tests/unit/founder-product-entitlement-policy-db.test.ts",
   "tests/unit/founder-product-entitlement-policy.test.ts",
+  "tests/unit/founder-infrastructure-retirement.test.ts",
   "tests/unit/founder-recovery.test.ts",
   "tests/unit/founder-support.test.ts",
   "tests/unit/operator-access.test.ts",

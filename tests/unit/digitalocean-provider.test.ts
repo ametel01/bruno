@@ -190,7 +190,11 @@ describe("fake DigitalOcean provider", () => {
 
     await expect(provider.observeOwnedSet(ownedSet)).resolves.toMatchObject({
       ok: true,
-      value: { state: "owned", droplet: "present", firewall: "present" },
+      value: {
+        state: "owned",
+        droplet: "present",
+        firewall: "present",
+      },
     });
     await expect(provider.deleteFirewall(ownedSet)).resolves.toEqual({
       ok: true,
@@ -1051,7 +1055,12 @@ describe("DigitalOcean API provider", () => {
 
     await expect(provider.observeOwnedSet(ownedSet)).resolves.toEqual({
       ok: true,
-      value: { state: "owned", droplet: "present", firewall: "present" },
+      value: {
+        state: "owned",
+        droplet: "present",
+        firewall: "present",
+        dropletCreatedAt: null,
+      },
     });
     await expect(provider.deleteDroplet(ownedSet)).resolves.toMatchObject({
       ok: false,
@@ -1068,7 +1077,12 @@ describe("DigitalOcean API provider", () => {
     });
     await expect(provider.observeOwnedSet(ownedSet)).resolves.toEqual({
       ok: true,
-      value: { state: "absent", droplet: "absent", firewall: "absent" },
+      value: {
+        state: "absent",
+        droplet: "absent",
+        firewall: "absent",
+        dropletCreatedAt: null,
+      },
     });
 
     expect(calls.filter((call) => call.endsWith(".delete"))).toEqual([
@@ -1227,7 +1241,12 @@ describe("DigitalOcean API provider", () => {
     firewallName = ownedSet.expectedFirewallName;
     await expect(provider.observeOwnedSet(ownedSet)).resolves.toEqual({
       ok: true,
-      value: { state: "owned", droplet: "absent", firewall: "present" },
+      value: {
+        state: "owned",
+        droplet: "absent",
+        firewall: "present",
+        dropletCreatedAt: null,
+      },
     });
     await expect(provider.deleteFirewall(ownedSet)).resolves.toEqual({
       ok: true,
@@ -1235,7 +1254,12 @@ describe("DigitalOcean API provider", () => {
     });
     await expect(provider.observeOwnedSet(ownedSet)).resolves.toEqual({
       ok: true,
-      value: { state: "absent", droplet: "absent", firewall: "absent" },
+      value: {
+        state: "absent",
+        droplet: "absent",
+        firewall: "absent",
+        dropletCreatedAt: null,
+      },
     });
     expect(deleteCalls).toEqual(["firewall"]);
   });

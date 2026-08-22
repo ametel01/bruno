@@ -138,9 +138,16 @@ Delayed or
 reordered commerce events cannot replace newer authority or extend a retirement clock; reactivation
 requires a newly pending Owner-bound Checkout Correlation. DigitalOcean cleanup is derived from
 authoritative owned-set observations before and after firewall-first deletion. The in-progress
-retirement receipt and credential revocation commit before destructive provider effects, so
-failures remain retryable against the same resource identity. Archive creation or expiry failure is
-recorded but does not block infrastructure destruction; the bounded archive outcome is recorded
+retirement receipt freezes the complete Droplet, firewall, operation-tag, name, region, size, and
+expected firewall identity before destructive provider effects; later retries never rebuild
+deletion scope from mutable runner assignment. New work is paused and runtime credentials are
+revoked in that same transaction. Provider ambiguity, request timeout, lost deletion responses,
+duplicate execution, and partial cleanup leave the receipt in progress and retry the same frozen
+identity. A completed receipt requires authoritative absence for both resources. It records the
+provider-reported Droplet creation time and the final absence observation so billable runtime
+includes powered-off, stopped, idle, or locally unassigned provider-present Droplets. Archive
+creation or expiry failure is recorded as a critical preservation failure but does not block
+infrastructure destruction or extend the hard deadline; the bounded archive outcome is recorded
 before the Infrastructure Retirement Receipt completes. S3-compatible request and response-body
 operations use a 10-second abort deadline, including creation, restore verification, expiry, and
 deletion-safety checks. These deterministic provider results prove
