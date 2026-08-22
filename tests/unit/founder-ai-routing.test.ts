@@ -101,6 +101,43 @@ describe("Founder AI compatibility routing", () => {
     ).toMatchObject({ provider: "anthropic" });
   });
 
+  it("lets a General Release Founder authorize OpenAI only, Anthropic only, or both", () => {
+    expect(
+      selectFounderAiProvider([candidate("openai")], {
+        now: NOW,
+        policy: MULTI_PROVIDER_POLICY,
+      }),
+    ).toMatchObject({ provider: "openai", connectionId: "openai-connection" });
+    expect(
+      selectFounderAiProvider([candidate("anthropic")], {
+        now: NOW,
+        policy: MULTI_PROVIDER_POLICY,
+      }),
+    ).toMatchObject({ provider: "anthropic", connectionId: "anthropic-connection" });
+    expect(
+      selectFounderAiProvider([candidate("openai"), candidate("anthropic")], {
+        now: NOW,
+        policy: MULTI_PROVIDER_POLICY,
+      }),
+    ).toMatchObject({ provider: "openai" });
+    expect(selectFounderAiProvider([], { now: NOW, policy: MULTI_PROVIDER_POLICY })).toBeNull();
+  });
+
+  it("keeps General Release qualification loss capability-scoped at a checkpoint", () => {
+    const connections = [candidate("openai"), candidate("anthropic")];
+    const anthropicOnly = getActiveFounderAiCompatibilityPolicy(false, true);
+
+    expect(
+      selectFounderAiProviderAtCheckpoint(connections, "openai", {
+        now: NOW,
+        policy: anthropicOnly,
+      }),
+    ).toMatchObject({ provider: "anthropic", connectionId: "anthropic-connection" });
+    expect(selectFounderAiProvider(connections, { now: NOW, policy: anthropicOnly })).toMatchObject(
+      { provider: "anthropic" },
+    );
+  });
+
   it("fails over only when the checkpoint explicitly excludes the failed provider", () => {
     const connections = [candidate("openai"), candidate("anthropic")];
     expect(
