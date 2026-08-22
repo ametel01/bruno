@@ -1,12 +1,15 @@
-import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
+import {
+  founderOperatorAccessErrorResponse,
+  requireFounderOperatorWorkspaceAccess,
+} from "@/app/api/operator/_shared/owner-preview-access";
 import {
   confirmFounderRelationshipCandidateForUser,
+  type FounderRelationshipObservation,
   FounderRelationshipsError,
   founderRelationshipEvidenceRequirement,
   getFounderRelationshipsForUser,
   ingestFounderRelationshipEvidenceForUser,
   rejectFounderRelationshipCandidateForUser,
-  type FounderRelationshipObservation,
   updateFounderRelationshipRecordForUser,
 } from "@/src/server/operators/founder-relationships";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
@@ -247,6 +250,8 @@ function validationResponse(message: string): Response {
 }
 
 function errorResponse(error: unknown): Response {
+  const accessResponse = founderOperatorAccessErrorResponse(error);
+  if (accessResponse) return accessResponse;
   if (error instanceof FounderRelationshipsError) {
     return Response.json(
       { error: { code: error.code, message: error.message } },

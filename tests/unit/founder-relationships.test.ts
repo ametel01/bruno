@@ -1,24 +1,24 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   operatorCalendarConnections,
+  operatorMailConnections,
+  operatorPreparations,
   operatorRelationshipCorrections,
   operatorRelationshipEvidence,
   operatorRelationshipRecords,
   operatorRuntimes,
-  operatorPreparations,
-  operatorMailConnections,
   operators,
   users,
 } from "@/src/server/db/schema";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 import {
   confirmFounderRelationshipCandidateForUser,
   getFounderRelationshipsForUser,
   ingestFounderRelationshipEvidenceForUser,
   updateFounderRelationshipRecordForUser,
 } from "@/src/server/operators/founder-relationships";
-import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003451";
 const OTHER_OWNER_ID = "00000000-0000-4000-8000-000000003452";
@@ -269,7 +269,12 @@ describe("Founder Relationship Records", () => {
 
   it("checks source capability inside the write transaction and forbids Mail evidence", async () => {
     const owner = await ownerIds(connection, OWNER_ID);
+    const competingConnection = createDatabaseConnection();
     const requireReleaseStageAccess = vi.fn(async (_tx, input) => {
+      const rows = await competingConnection.db.execute<{ acquired: boolean }>(
+        sql`select pg_try_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${OWNER_ID}`}, 0)) as acquired`,
+      );
+      expect(rows[0]?.acquired).toBe(false);
       if (input.requiredCapabilities.length === 0) throw new FounderReleaseStageAccessError();
     });
 
@@ -294,6 +299,7 @@ describe("Founder Relationship Records", () => {
       }),
     );
     await expect(connection.db.select().from(operatorRelationshipEvidence)).resolves.toEqual([]);
+    await competingConnection.close();
   });
 });
 

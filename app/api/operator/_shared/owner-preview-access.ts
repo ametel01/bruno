@@ -1,9 +1,9 @@
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import {
-  FounderReleaseStageAccessError,
   type FounderOwnerPreviewAccessRequirement,
-  requiresFounderReleaseStageAuthority,
+  FounderReleaseStageAccessError,
   requireFounderOwnerPreviewAccessForUser,
+  requiresFounderReleaseStageAuthority,
 } from "@/src/server/founder-product-contract/release-stage-access";
 
 export async function requireFounderOperatorWorkspaceAccess(
@@ -26,16 +26,22 @@ export async function requireFounderOperatorWorkspaceAccess(
     );
     return null;
   } catch (error) {
-    if (!(error instanceof FounderReleaseStageAccessError)) throw error;
-    return Response.json(
-      {
-        error: {
-          code: error.code,
-          message:
-            "Owner Preview is unavailable until exact-revision admission and current Recovery Archive protection are verified.",
-        },
-      },
-      { status: error.status, headers: { "Cache-Control": "no-store" } },
-    );
+    const response = founderOperatorAccessErrorResponse(error);
+    if (response) return response;
+    throw error;
   }
+}
+
+export function founderOperatorAccessErrorResponse(error: unknown): Response | null {
+  if (!(error instanceof FounderReleaseStageAccessError)) return null;
+  return Response.json(
+    {
+      error: {
+        code: error.code,
+        message:
+          "Owner Preview is unavailable until exact-revision admission and current Recovery Archive protection are verified.",
+      },
+    },
+    { status: error.status, headers: { "Cache-Control": "no-store" } },
+  );
 }

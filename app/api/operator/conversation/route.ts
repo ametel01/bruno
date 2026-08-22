@@ -1,13 +1,18 @@
-import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
+import {
+  founderOperatorAccessErrorResponse,
+  requireFounderOperatorWorkspaceAccess,
+} from "@/app/api/operator/_shared/owner-preview-access";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import type {
+  getFounderConversationForUser as getConversation,
+  sendFounderConversationMessageForUser as sendMessage,
+} from "@/src/server/operators/founder-conversation";
 import {
   FounderConversationError,
   getFounderConversationForUser,
   resumeFounderConversationWorkForUser,
   sendFounderConversationMessageForUser,
 } from "@/src/server/operators/founder-conversation";
-import type { getFounderConversationForUser as getConversation } from "@/src/server/operators/founder-conversation";
-import type { sendFounderConversationMessageForUser as sendMessage } from "@/src/server/operators/founder-conversation";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 type ConversationRouteDependencies = {
@@ -73,6 +78,8 @@ export async function POST(
       );
       return Response.json({ conversation }, { headers: noStoreHeaders() });
     } catch (error) {
+      const accessResponse = founderOperatorAccessErrorResponse(error);
+      if (accessResponse) return accessResponse;
       if (error instanceof FounderConversationError) {
         return Response.json(
           { error: { code: error.code, message: error.message } },
@@ -93,6 +100,8 @@ export async function POST(
     );
     return Response.json({ conversation }, { headers: noStoreHeaders() });
   } catch (error) {
+    const accessResponse = founderOperatorAccessErrorResponse(error);
+    if (accessResponse) return accessResponse;
     if (error instanceof FounderConversationError) {
       return Response.json(
         { error: { code: error.code, message: error.message } },

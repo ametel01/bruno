@@ -12,11 +12,11 @@ import {
   operatorConversationWorks,
 } from "@/src/server/db/schema";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
-import {
-  FounderReleaseStageAccessError,
+import type {
   requireFounderOwnerPreviewAccessForUser,
   requireFounderOwnerPreviewAccessInTransaction,
 } from "@/src/server/founder-product-contract/release-stage-access";
+import { withFounderOwnerPreviewWorkAuthority } from "@/src/server/founder-product-contract/work-authority";
 import {
   type FounderActionPreviewDto,
   projectFounderActionPreview,
@@ -206,105 +206,85 @@ export async function sendFounderConversationMessageForUser(
   const requestId = normalizeRequestId(dependencies.requestId) ?? makeId();
 
   try {
-    const preflightAt = now();
-    if (dependencies.requireOwnerPreviewAccessForUser) {
-      await dependencies.requireOwnerPreviewAccessForUser(
+    const started = await withFounderOwnerPreviewWorkAuthority(
+      {
         userId,
-        preflightAt,
-        {
-          createConnection: () => connection,
-          ...(dependencies.applicationRevision
-            ? { applicationRevision: dependencies.applicationRevision }
-            : {}),
-        },
-        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
-      );
-    } else if (!dependencies.requireOwnerPreviewAccess) {
-      await requireFounderOwnerPreviewAccessForUser(
-        userId,
-        preflightAt,
-        {
-          createConnection: () => connection,
-          ...(dependencies.applicationRevision
-            ? { applicationRevision: dependencies.applicationRevision }
-            : {}),
-        },
-        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
-      );
-    }
-    const started = await connection.db.transaction(async (tx) => {
-      await lockOperator(tx, operator.id);
-      const checkedAt = now();
-      await requireConversationWorkAccess(tx, userId, checkedAt, dependencies);
-      const conversation = await ensureConversation(tx, operator.id, checkedAt);
-      const [existing] = await tx
-        .select()
-        .from(operatorConversationWorks)
-        .where(
-          and(
-            eq(operatorConversationWorks.conversationId, conversation.id),
-            eq(operatorConversationWorks.requestId, requestId),
-          ),
-        )
-        .limit(1);
-      if (existing) return { kind: "existing" as const, conversation };
+        now,
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+      },
+      conversationWorkAuthorityDependencies(connection, dependencies),
+      async (tx, checkedAt) => {
+        await lockOperator(tx, operator.id);
+        const conversation = await ensureConversation(tx, operator.id, checkedAt);
+        const [existing] = await tx
+          .select()
+          .from(operatorConversationWorks)
+          .where(
+            and(
+              eq(operatorConversationWorks.conversationId, conversation.id),
+              eq(operatorConversationWorks.requestId, requestId),
+            ),
+          )
+          .limit(1);
+        if (existing) return { kind: "existing" as const, conversation };
 
-      const founderMessageId = makeId();
-      const workId = makeId();
-      const checkpointId = buildFounderAiCheckpointIdentity(
-        conversation.id,
-        conversation.nextSequence,
-      );
-      const createdAt = now();
-      await tx.insert(operatorConversationWorks).values({
-        id: workId,
-        conversationId: conversation.id,
-        requestId,
-        checkpointId,
-        provider: FOUNDER_AI_WORK_PROVIDER,
-        policyVersion: FOUNDER_AI_COMPATIBILITY_POLICY_VERSION,
-        completionIdentity: buildFounderAiCompletionIdentity(workId),
-        responseSequence: conversation.nextSequence + 1,
-        state: "running",
-        founderMessageId,
-        recoveryChoices: [],
-        createdAt,
-        updatedAt: createdAt,
-      });
-      await tx.insert(operatorConversationMessages).values({
-        id: founderMessageId,
-        conversationId: conversation.id,
-        workId,
-        sequence: conversation.nextSequence,
-        role: "founder",
-        status: "complete",
-        body: message,
-        createdAt,
-      });
-      await tx
-        .update(operatorConversations)
-        .set({ nextSequence: conversation.nextSequence + 2, updatedAt: createdAt })
-        .where(eq(operatorConversations.id, conversation.id));
+        const founderMessageId = makeId();
+        const workId = makeId();
+        const checkpointId = buildFounderAiCheckpointIdentity(
+          conversation.id,
+          conversation.nextSequence,
+        );
+        const createdAt = checkedAt;
+        await tx.insert(operatorConversationWorks).values({
+          id: workId,
+          conversationId: conversation.id,
+          requestId,
+          checkpointId,
+          provider: FOUNDER_AI_WORK_PROVIDER,
+          policyVersion: FOUNDER_AI_COMPATIBILITY_POLICY_VERSION,
+          completionIdentity: buildFounderAiCompletionIdentity(workId),
+          responseSequence: conversation.nextSequence + 1,
+          state: "running",
+          founderMessageId,
+          recoveryChoices: [],
+          createdAt,
+          updatedAt: createdAt,
+        });
+        await tx.insert(operatorConversationMessages).values({
+          id: founderMessageId,
+          conversationId: conversation.id,
+          workId,
+          sequence: conversation.nextSequence,
+          role: "founder",
+          status: "complete",
+          body: message,
+          createdAt,
+        });
+        await tx
+          .update(operatorConversations)
+          .set({ nextSequence: conversation.nextSequence + 2, updatedAt: createdAt })
+          .where(eq(operatorConversations.id, conversation.id));
 
-      const history = await tx
-        .select({
-          role: operatorConversationMessages.role,
-          body: operatorConversationMessages.body,
-        })
-        .from(operatorConversationMessages)
-        .where(eq(operatorConversationMessages.conversationId, conversation.id))
-        .orderBy(asc(operatorConversationMessages.sequence));
-      return {
-        kind: "started" as const,
-        conversation,
-        workId,
-        checkpointId,
-        messages: history.map((item) => ({
-          role: item.role === "founder" ? ("user" as const) : ("assistant" as const),
-          content: item.body,
-        })),
-      };
-    });
+        const history = await tx
+          .select({
+            role: operatorConversationMessages.role,
+            body: operatorConversationMessages.body,
+          })
+          .from(operatorConversationMessages)
+          .where(eq(operatorConversationMessages.conversationId, conversation.id))
+          .orderBy(asc(operatorConversationMessages.sequence));
+        return {
+          kind: "started" as const,
+          conversation,
+          workId,
+          checkpointId,
+          messages: history.map((item) => ({
+            role: item.role === "founder" ? ("user" as const) : ("assistant" as const),
+            content: item.body,
+          })),
+        };
+      },
+    );
 
     if (started.kind === "existing") {
       return connection.db.transaction((tx) => projectConversation(tx, started.conversation));
@@ -425,169 +405,150 @@ export async function resumeFounderConversationWorkForUser(
   const now = dependencies.now ?? (() => new Date());
 
   try {
-    const preflightAt = now();
-    if (dependencies.requireOwnerPreviewAccessForUser) {
-      await dependencies.requireOwnerPreviewAccessForUser(
+    const started = await withFounderOwnerPreviewWorkAuthority(
+      {
         userId,
-        preflightAt,
-        {
-          createConnection: () => connection,
-          ...(dependencies.applicationRevision
-            ? { applicationRevision: dependencies.applicationRevision }
-            : {}),
-        },
-        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
-      );
-    } else if (!dependencies.requireOwnerPreviewAccess) {
-      await requireFounderOwnerPreviewAccessForUser(
-        userId,
-        preflightAt,
-        {
-          createConnection: () => connection,
-          ...(dependencies.applicationRevision
-            ? { applicationRevision: dependencies.applicationRevision }
-            : {}),
-        },
-        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
-      );
-    }
-    const started = await connection.db.transaction(async (tx) => {
-      await lockOperator(tx, operator.id);
-      await requireConversationWorkAccess(tx, userId, now(), dependencies);
-      const [work] = await tx
-        .select()
-        .from(operatorConversationWorks)
-        .where(eq(operatorConversationWorks.id, workId))
-        .limit(1);
-      if (!work)
-        throw new FounderConversationError(
-          "conversation_unavailable",
-          "Conversation work could not be reloaded.",
-          503,
-        );
-      const [conversation] = await tx
-        .select()
-        .from(operatorConversations)
-        .where(
-          and(
-            eq(operatorConversations.id, work.conversationId),
-            eq(operatorConversations.operatorId, operator.id),
-          ),
-        )
-        .limit(1)
-        .for("update");
-      if (!conversation)
-        throw new FounderConversationError(
-          "conversation_unavailable",
-          "Conversation could not be reloaded.",
-          503,
-        );
-      if (work.state !== "paused" || work.externalEffectStarted) {
-        return { kind: "unchanged" as const, conversation };
-      }
+        now,
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+      },
+      conversationWorkAuthorityDependencies(connection, dependencies),
+      async (tx, checkedAt) => {
+        await lockOperator(tx, operator.id);
+        const [work] = await tx
+          .select()
+          .from(operatorConversationWorks)
+          .where(eq(operatorConversationWorks.id, workId))
+          .limit(1);
+        if (!work)
+          throw new FounderConversationError(
+            "conversation_unavailable",
+            "Conversation work could not be reloaded.",
+            503,
+          );
+        const [conversation] = await tx
+          .select()
+          .from(operatorConversations)
+          .where(
+            and(
+              eq(operatorConversations.id, work.conversationId),
+              eq(operatorConversations.operatorId, operator.id),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (!conversation)
+          throw new FounderConversationError(
+            "conversation_unavailable",
+            "Conversation could not be reloaded.",
+            503,
+          );
+        if (work.state !== "paused" || work.externalEffectStarted) {
+          return { kind: "unchanged" as const, conversation };
+        }
 
-      const recovery = deriveFounderConversationRecovery({
-        now: now(),
-        state: work.state,
-        startedAt: work.createdAt,
-        attemptCount: work.providerAttempts.length,
-        externalEffectStarted: work.externalEffectStarted,
-        recoveryMessage: work.recoveryMessage,
-      });
-      if (recovery?.state === "recovery_exhausted") {
-        await tx
+        const recovery = deriveFounderConversationRecovery({
+          now: checkedAt,
+          state: work.state,
+          startedAt: work.createdAt,
+          attemptCount: work.providerAttempts.length,
+          externalEffectStarted: work.externalEffectStarted,
+          recoveryMessage: work.recoveryMessage,
+        });
+        if (recovery?.state === "recovery_exhausted") {
+          await tx
+            .update(operatorConversationWorks)
+            .set({
+              state: "failed",
+              recoveryMessage:
+                "Bruno stopped recovery after the safe conversation budget was reached. Your checkpoint is preserved.",
+              recoveryChoices: [],
+              updatedAt: checkedAt,
+            })
+            .where(eq(operatorConversationWorks.id, work.id));
+          const [pausedConversation] = await tx
+            .update(operatorConversations)
+            .set({ status: "paused", updatedAt: checkedAt })
+            .where(eq(operatorConversations.id, conversation.id))
+            .returning();
+          return {
+            kind: "unchanged" as const,
+            conversation: pausedConversation ?? conversation,
+          };
+        }
+
+        const attemptedProvider = work.providerAttempts.at(-1)?.provider as
+          | FounderAiProvider
+          | undefined;
+        const decision = await routeFounderAiProvider(tx, operator.id, {
+          now: checkedAt,
+          ...(attemptedProvider ? { excludedProviders: [attemptedProvider] } : {}),
+          ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
+        });
+        if (!decision) return { kind: "unchanged" as const, conversation };
+        const history = await tx
+          .select()
+          .from(operatorConversationMessages)
+          .where(eq(operatorConversationMessages.conversationId, conversation.id))
+          .orderBy(asc(operatorConversationMessages.sequence));
+        const [updatedWork] = await tx
           .update(operatorConversationWorks)
           .set({
-            state: "failed",
-            recoveryMessage:
-              "Bruno stopped recovery after the safe conversation budget was reached. Your checkpoint is preserved.",
+            state: "running",
+            provider: decision.provider,
+            policyVersion: decision.policyVersion,
+            providerConnectionId: decision.connectionId,
+            providerSubjectId: decision.providerSubjectId,
+            providerAccountLabel: decision.accountLabel,
+            approvedModelAssignment: decision.approvedModelAssignment,
+            providerAttempts: [
+              ...work.providerAttempts.map((attempt) =>
+                attempt.state === "running" ? { ...attempt, state: "paused" as const } : attempt,
+              ),
+              {
+                provider: decision.provider,
+                policyVersion: decision.policyVersion,
+                connectionId: decision.connectionId,
+                providerSubjectId: decision.providerSubjectId,
+                accountLabel: decision.accountLabel,
+                approvedModelAssignment: decision.approvedModelAssignment,
+                state: "running",
+              },
+            ],
+            recoveryMessage: null,
             recoveryChoices: [],
-            updatedAt: now(),
+            pausedAt: null,
+            updatedAt: checkedAt,
           })
-          .where(eq(operatorConversationWorks.id, work.id));
-        const [pausedConversation] = await tx
-          .update(operatorConversations)
-          .set({ status: "paused", updatedAt: now() })
-          .where(eq(operatorConversations.id, conversation.id))
+          .where(eq(operatorConversationWorks.id, work.id))
           .returning();
+        if (!updatedWork)
+          throw new FounderConversationError(
+            "conversation_unavailable",
+            "Conversation work could not be resumed.",
+            503,
+          );
+        await tx
+          .update(operatorConversations)
+          .set({ status: "active", updatedAt: checkedAt })
+          .where(eq(operatorConversations.id, conversation.id));
         return {
-          kind: "unchanged" as const,
-          conversation: pausedConversation ?? conversation,
-        };
-      }
-
-      const attemptedProvider = work.providerAttempts.at(-1)?.provider as
-        | FounderAiProvider
-        | undefined;
-      const decision = await routeFounderAiProvider(tx, operator.id, {
-        now: now(),
-        ...(attemptedProvider ? { excludedProviders: [attemptedProvider] } : {}),
-        ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
-      });
-      if (!decision) return { kind: "unchanged" as const, conversation };
-      const history = await tx
-        .select()
-        .from(operatorConversationMessages)
-        .where(eq(operatorConversationMessages.conversationId, conversation.id))
-        .orderBy(asc(operatorConversationMessages.sequence));
-      const [updatedWork] = await tx
-        .update(operatorConversationWorks)
-        .set({
-          state: "running",
+          kind: "started" as const,
+          conversation,
+          workId: work.id,
+          checkpointId: work.checkpointId,
           provider: decision.provider,
-          policyVersion: decision.policyVersion,
           providerConnectionId: decision.connectionId,
-          providerSubjectId: decision.providerSubjectId,
-          providerAccountLabel: decision.accountLabel,
           approvedModelAssignment: decision.approvedModelAssignment,
-          providerAttempts: [
-            ...work.providerAttempts.map((attempt) =>
-              attempt.state === "running" ? { ...attempt, state: "paused" as const } : attempt,
-            ),
-            {
-              provider: decision.provider,
-              policyVersion: decision.policyVersion,
-              connectionId: decision.connectionId,
-              providerSubjectId: decision.providerSubjectId,
-              accountLabel: decision.accountLabel,
-              approvedModelAssignment: decision.approvedModelAssignment,
-              state: "running",
-            },
-          ],
-          recoveryMessage: null,
-          recoveryChoices: [],
-          pausedAt: null,
-          updatedAt: now(),
-        })
-        .where(eq(operatorConversationWorks.id, work.id))
-        .returning();
-      if (!updatedWork)
-        throw new FounderConversationError(
-          "conversation_unavailable",
-          "Conversation work could not be resumed.",
-          503,
-        );
-      await tx
-        .update(operatorConversations)
-        .set({ status: "active", updatedAt: now() })
-        .where(eq(operatorConversations.id, conversation.id));
-      return {
-        kind: "started" as const,
-        conversation,
-        workId: work.id,
-        checkpointId: work.checkpointId,
-        provider: decision.provider,
-        providerConnectionId: decision.connectionId,
-        approvedModelAssignment: decision.approvedModelAssignment,
-        requestId: work.requestId,
-        messages: history
-          .filter((message) => message.id !== work.operatorMessageId)
-          .map((message) => ({
-            role: message.role === "founder" ? ("user" as const) : ("assistant" as const),
-            content: message.body,
-          })),
-      };
-    });
+          requestId: work.requestId,
+          messages: history
+            .filter((message) => message.id !== work.operatorMessageId)
+            .map((message) => ({
+              role: message.role === "founder" ? ("user" as const) : ("assistant" as const),
+              content: message.body,
+            })),
+        };
+      },
+    );
 
     if (started.kind === "unchanged") {
       return connection.db.transaction((tx) => projectConversation(tx, started.conversation));
@@ -633,31 +594,22 @@ export async function resumeFounderConversationWorkForUser(
   }
 }
 
-async function requireConversationWorkAccess(
-  tx: FounderConversationTransaction,
-  userId: string,
-  now: Date,
+function conversationWorkAuthorityDependencies(
+  connection: DatabaseConnection,
   dependencies: FounderConversationDependencies,
-): Promise<void> {
-  try {
-    await (dependencies.requireOwnerPreviewAccess ?? requireFounderOwnerPreviewAccessInTransaction)(
-      tx,
-      {
-        userId,
-        now,
-        applicationRevision:
-          dependencies.applicationRevision ?? process.env.VERCEL_GIT_COMMIT_SHA?.trim() ?? "",
-        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
-      },
-    );
-  } catch (error) {
-    if (!(error instanceof FounderReleaseStageAccessError)) throw error;
-    throw new FounderConversationError(
-      "conversation_unavailable",
-      "Conversation work is paused until OpenAI Owner Preview protection is current.",
-      403,
-    );
-  }
+): Parameters<typeof withFounderOwnerPreviewWorkAuthority>[1] {
+  return {
+    createConnection: () => connection,
+    ...(dependencies.applicationRevision
+      ? { applicationRevision: dependencies.applicationRevision }
+      : {}),
+    ...(dependencies.requireOwnerPreviewAccess
+      ? { requireReleaseStageAccess: dependencies.requireOwnerPreviewAccess }
+      : {}),
+    ...(dependencies.requireOwnerPreviewAccessForUser
+      ? { requireReleaseStageAccessForUser: dependencies.requireOwnerPreviewAccessForUser }
+      : {}),
+  };
 }
 
 function normalizeRequestId(value: string | undefined): string | null {

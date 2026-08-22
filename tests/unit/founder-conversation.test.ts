@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
@@ -225,7 +226,7 @@ describe("Founder Conversation application seam", () => {
           },
         },
       }),
-    ).rejects.toMatchObject({ status: 403, code: "conversation_unavailable" });
+    ).rejects.toMatchObject({ status: 403, code: "owner_preview_access_required" });
 
     expect(providerCalls).toBe(0);
     await expect(connection.db.select().from(operatorConversationWorks)).resolves.toEqual([]);
@@ -311,6 +312,13 @@ describe("Founder Conversation application seam", () => {
   });
 
   it("changes providers only when explicitly resuming the same paused checkpoint", async () => {
+    const competingConnection = createDatabaseConnection();
+    const requireSerializedOwnerPreviewAccess = async () => {
+      const rows = await competingConnection.db.execute<{ acquired: boolean }>(
+        sql`select pg_try_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${OWNER_ID}`}, 0)) as acquired`,
+      );
+      expect(rows[0]?.acquired).toBe(false);
+    };
     const operator = await ensureFounderOperatorForUser(OWNER_ID, {
       createConnection: () => connection,
       now: () => now,
@@ -361,7 +369,7 @@ describe("Founder Conversation application seam", () => {
       "Try the primary account",
       {
         createConnection: () => connection,
-        requireOwnerPreviewAccess: allowOwnerPreviewWork,
+        requireOwnerPreviewAccess: requireSerializedOwnerPreviewAccess,
         adapters: {
           openai: {
             async send(input) {
@@ -397,7 +405,7 @@ describe("Founder Conversation application seam", () => {
       paused.activeWork?.id ?? "",
       {
         createConnection: () => connection,
-        requireOwnerPreviewAccess: allowOwnerPreviewWork,
+        requireOwnerPreviewAccess: requireSerializedOwnerPreviewAccess,
         adapters: {
           anthropic: {
             async send(input) {
@@ -418,6 +426,7 @@ describe("Founder Conversation application seam", () => {
       { provider: "openai", accountLabel: "founder@openai.example", state: "paused" },
       { provider: "anthropic", accountLabel: "founder@anthropic.example", state: "completed" },
     ]);
+    await competingConnection.close();
   });
 
   it("pauses external effects durably while leaving Conversation available", async () => {

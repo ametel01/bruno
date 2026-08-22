@@ -1,4 +1,7 @@
-import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
+import {
+  founderOperatorAccessErrorResponse,
+  requireFounderOperatorWorkspaceAccess,
+} from "@/app/api/operator/_shared/owner-preview-access";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
   dismissFounderMailSendingOfferForUser,
@@ -68,6 +71,8 @@ export async function POST(
       )(applicationUser.userId);
       return Response.json({ preview }, { headers: noStoreHeaders() });
     } catch (error) {
+      const accessResponse = founderOperatorAccessErrorResponse(error);
+      if (accessResponse) return accessResponse;
       if (error instanceof FounderActionPreviewError) {
         return Response.json(
           { error: { code: error.code, message: error.message } },
@@ -89,6 +94,8 @@ export async function POST(
     );
     return Response.json({ preview }, { headers: noStoreHeaders() });
   } catch (error) {
+    const accessResponse = founderOperatorAccessErrorResponse(error);
+    if (accessResponse) return accessResponse;
     if (error instanceof FounderActionPreviewError) {
       return Response.json(
         { error: { code: error.code, message: error.message } },

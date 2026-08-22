@@ -1,4 +1,7 @@
-import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
+import {
+  founderOperatorAccessErrorResponse,
+  requireFounderOperatorWorkspaceAccess,
+} from "@/app/api/operator/_shared/owner-preview-access";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
   confirmFounderProcessingConsentForUser,
@@ -73,6 +76,8 @@ export async function POST(
       return Response.json({ operation }, { headers: noStoreHeaders() });
     }
   } catch (error) {
+    const accessResponse = founderOperatorAccessErrorResponse(error);
+    if (accessResponse) return accessResponse;
     if (error instanceof FounderLimitedOperationError) {
       return Response.json(
         { error: { code: error.code, message: error.message } },

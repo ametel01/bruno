@@ -3,7 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import { createDatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
 import {
   operatorCalendarConnections,
@@ -14,11 +14,11 @@ import {
   operatorRelationshipRecords,
 } from "@/src/server/db/schema";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import type { FounderOwnerPreviewAccessRequirement } from "@/src/server/founder-product-contract/release-stage-access";
 import {
-  type FounderOwnerPreviewAccessRequirement,
-  requireFounderOwnerPreviewAccessForUser,
-  requireFounderOwnerPreviewAccessInTransaction,
-} from "@/src/server/founder-product-contract/release-stage-access";
+  type FounderOwnerPreviewWorkAuthorityDependencies,
+  withFounderOwnerPreviewWorkAuthority,
+} from "@/src/server/founder-product-contract/work-authority";
 import {
   ensureFounderOperatorForUser,
   getFounderOperatorForUser,
@@ -119,13 +119,9 @@ export type FounderRelationshipObservation = {
   observedAt: Date;
 };
 
-export type FounderRelationshipsDependencies = {
-  createConnection?: () => DatabaseConnection;
-  env?: Record<string, string | undefined>;
+export type FounderRelationshipsDependencies = FounderOwnerPreviewWorkAuthorityDependencies & {
   now?: () => Date;
   randomUUID?: () => string;
-  requireReleaseStageAccess?: typeof requireFounderOwnerPreviewAccessInTransaction;
-  requireReleaseStageAccessForUser?: typeof requireFounderOwnerPreviewAccessForUser;
 };
 
 export class FounderRelationshipsError extends Error {
@@ -184,89 +180,73 @@ export async function ingestFounderRelationshipEvidenceForUser(
   const now = dependencies.now ?? (() => new Date());
   const makeId = dependencies.randomUUID ?? randomUUID;
   try {
-    const preflightAt = now();
-    if (dependencies.requireReleaseStageAccessForUser) {
-      await dependencies.requireReleaseStageAccessForUser(
+    await withFounderOwnerPreviewWorkAuthority(
+      {
         userId,
-        preflightAt,
-        {
-          createConnection: () => connection,
-          ...(dependencies.env ? { env: dependencies.env } : {}),
-        },
-        founderRelationshipEvidenceRequirement(observations),
-      );
-    } else if (!dependencies.requireReleaseStageAccess) {
-      await requireFounderOwnerPreviewAccessForUser(
-        userId,
-        preflightAt,
-        {
-          createConnection: () => connection,
-          ...(dependencies.env ? { env: dependencies.env } : {}),
-        },
-        founderRelationshipEvidenceRequirement(observations),
-      );
-    }
-    await connection.db.transaction(async (tx) => {
-      await (
-        dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction
-      )(tx, {
-        userId,
-        now: now(),
-        applicationRevision: resolveApplicationRevision(dependencies.env),
+        now,
         requiredCapabilities: founderRelationshipEvidenceRequirement(observations),
-      });
-      await lockOperator(tx, operator.id);
-      for (const rawObservation of observations) {
-        const observation = normalizeObservation(rawObservation);
-        const source = await verifySourceConnection(tx, operator.id, observation);
-        const sourceFingerprint = `${observation.sourceKind}:${observation.connectionId}:${observation.providerItemId}`;
-        const exact = await findExactRecord(tx, operator.id, observation);
-        const fuzzy = exact ? null : await findFuzzyCandidate(tx, operator.id, observation);
-        // Once the Founder confirms a fuzzy candidate, keep future observations on
-        // that confirmed record. Pending and rejected candidates remain candidates
-        // until the Founder makes an explicit decision.
-        const recordId =
-          exact?.id ?? (fuzzy?.status === "confirmed" ? fuzzy.proposedRecordId : null);
-        let candidateId = recordId ? null : (fuzzy?.id ?? null);
-        if (!recordId && !candidateId) {
-          const candidate = await createOrGetCandidate(tx, operator.id, observation, makeId, now());
-          candidateId = candidate.id;
-        }
+      },
+      { ...dependencies, createConnection: () => connection },
+      async (tx, checkedAt) => {
+        await lockOperator(tx, operator.id);
+        for (const rawObservation of observations) {
+          const observation = normalizeObservation(rawObservation);
+          const source = await verifySourceConnection(tx, operator.id, observation);
+          const sourceFingerprint = `${observation.sourceKind}:${observation.connectionId}:${observation.providerItemId}`;
+          const exact = await findExactRecord(tx, operator.id, observation);
+          const fuzzy = exact ? null : await findFuzzyCandidate(tx, operator.id, observation);
+          // Once the Founder confirms a fuzzy candidate, keep future observations on
+          // that confirmed record. Pending and rejected candidates remain candidates
+          // until the Founder makes an explicit decision.
+          const recordId =
+            exact?.id ?? (fuzzy?.status === "confirmed" ? fuzzy.proposedRecordId : null);
+          let candidateId = recordId ? null : (fuzzy?.id ?? null);
+          if (!recordId && !candidateId) {
+            const candidate = await createOrGetCandidate(
+              tx,
+              operator.id,
+              observation,
+              makeId,
+              checkedAt,
+            );
+            candidateId = candidate.id;
+          }
 
-        const values = {
-          operatorId: operator.id,
-          recordId,
-          candidateId,
-          sourceKind: observation.sourceKind,
-          calendarConnectionId:
-            observation.sourceKind === "calendar" ? observation.connectionId : null,
-          mailConnectionId: observation.sourceKind === "mail" ? observation.connectionId : null,
-          provider: observation.provider,
-          providerItemId: observation.providerItemId,
-          providerIdentity: observation.providerIdentity,
-          email: observation.email,
-          displayName: observation.displayName,
-          company: observation.company,
-          domain: observation.domain,
-          excerpt: observation.excerpt,
-          sourceMetadata: observation.sourceMetadata ?? {},
-          evidenceState: source.evidenceState,
-          observedAt: observation.observedAt,
-          sourceFingerprint,
-          updatedAt: now(),
-        };
-        await tx
-          .insert(operatorRelationshipEvidence)
-          .values({ ...values, id: makeId(), createdAt: now() })
-          .onConflictDoUpdate({
-            target: [
-              operatorRelationshipEvidence.operatorId,
-              operatorRelationshipEvidence.sourceFingerprint,
-            ],
-            set: values,
-          });
-      }
-    });
+          const values = {
+            operatorId: operator.id,
+            recordId,
+            candidateId,
+            sourceKind: observation.sourceKind,
+            calendarConnectionId:
+              observation.sourceKind === "calendar" ? observation.connectionId : null,
+            mailConnectionId: observation.sourceKind === "mail" ? observation.connectionId : null,
+            provider: observation.provider,
+            providerItemId: observation.providerItemId,
+            providerIdentity: observation.providerIdentity,
+            email: observation.email,
+            displayName: observation.displayName,
+            company: observation.company,
+            domain: observation.domain,
+            excerpt: observation.excerpt,
+            sourceMetadata: observation.sourceMetadata ?? {},
+            evidenceState: source.evidenceState,
+            observedAt: observation.observedAt,
+            sourceFingerprint,
+            updatedAt: checkedAt,
+          };
+          await tx
+            .insert(operatorRelationshipEvidence)
+            .values({ ...values, id: makeId(), createdAt: checkedAt })
+            .onConflictDoUpdate({
+              target: [
+                operatorRelationshipEvidence.operatorId,
+                operatorRelationshipEvidence.sourceFingerprint,
+              ],
+              set: values,
+            });
+        }
+      },
+    );
     return await getFounderRelationshipsForUser(userId, {
       createConnection: () => connection,
       now,
@@ -282,10 +262,6 @@ export function founderRelationshipEvidenceRequirement(
   return observations.some((observation) => observation.sourceKind === "mail")
     ? FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden
     : FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarRelationshipEvidence;
-}
-
-function resolveApplicationRevision(env?: Record<string, string | undefined>): string {
-  return env?.VERCEL_GIT_COMMIT_SHA?.trim() ?? process.env.VERCEL_GIT_COMMIT_SHA?.trim() ?? "";
 }
 
 export async function updateFounderRelationshipRecordForUser(

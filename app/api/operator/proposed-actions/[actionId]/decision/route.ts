@@ -1,5 +1,8 @@
+import {
+  founderOperatorAccessErrorResponse,
+  requireFounderOperatorWorkspaceAccess,
+} from "@/app/api/operator/_shared/owner-preview-access";
 import { readDraft } from "@/app/api/operator/proposed-actions/route";
-import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
 import { FounderExternalActionPauseError } from "@/src/server/operators/founder-ai-work";
 import {
   decideFounderProposedActionForUser,
@@ -64,6 +67,8 @@ export async function POST(
     );
     return Response.json(result, { headers: noStoreHeaders() });
   } catch (error) {
+    const accessResponse = founderOperatorAccessErrorResponse(error);
+    if (accessResponse) return accessResponse;
     if (error instanceof FounderProposedActionError) {
       return Response.json(
         { error: { code: error.code, message: error.message } },

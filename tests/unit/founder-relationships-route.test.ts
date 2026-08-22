@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 
 const mocks = vi.hoisted(() => ({
   requireApplicationUser: vi.fn(),
   requireWorkspaceAccess: vi.fn(),
   ingestEvidence: vi.fn(),
+  accessErrorResponse: vi.fn(),
 }));
 
 vi.mock("@/app/api/operator/_shared/owner-preview-access", () => ({
   requireFounderOperatorWorkspaceAccess: mocks.requireWorkspaceAccess,
+  founderOperatorAccessErrorResponse: mocks.accessErrorResponse,
 }));
 
 vi.mock("@/src/server/users/configured-application-user", () => ({
@@ -27,6 +30,7 @@ describe("Founder Relationships route", () => {
     mocks.requireApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
     mocks.requireWorkspaceAccess.mockResolvedValue(null);
     mocks.ingestEvidence.mockResolvedValue({ records: [], candidates: [], generatedAt: NOW });
+    mocks.accessErrorResponse.mockReturnValue(null);
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -57,6 +61,25 @@ describe("Founder Relationships route", () => {
     expect(response.status).toBe(200);
     expect(mocks.requireWorkspaceAccess).toHaveBeenNthCalledWith(2, USER_ID, ["calendar_reading"]);
     expect(mocks.ingestEvidence).toHaveBeenCalledOnce();
+  });
+
+  it("returns a sanitized denial when protection expires inside ingestion", async () => {
+    const accessError = new FounderReleaseStageAccessError();
+    mocks.ingestEvidence.mockRejectedValueOnce(accessError);
+    mocks.accessErrorResponse.mockImplementationOnce((error) =>
+      error === accessError
+        ? Response.json(
+            { error: { code: "owner_preview_access_required" } },
+            { status: 403, headers: { "Cache-Control": "no-store" } },
+          )
+        : null,
+    );
+    const { POST } = await import("@/app/api/operator/relationships/route");
+
+    const response = await POST(ingestRequest("calendar"));
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe("no-store");
   });
 });
 

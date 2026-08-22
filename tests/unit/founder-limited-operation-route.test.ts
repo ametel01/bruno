@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { GET, POST } from "@/app/api/operator/limited-operation/route";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 
 const USER_ID = "00000000-0000-4000-8000-000000003420";
 const OPERATION = {
@@ -75,5 +76,26 @@ describe("Founder Limited Operation route", () => {
     );
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: { code: "validation_failed" } });
+  });
+
+  it("returns a sanitized denial when protection expires inside the work transaction", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/operator/limited-operation", {
+        method: "POST",
+        body: JSON.stringify({ action: "confirm_consent" }),
+      }),
+      undefined,
+      {
+        requireApplicationUser: async () => ({ ok: true as const, userId: USER_ID }),
+        confirmConsent: async () => {
+          throw new FounderReleaseStageAccessError();
+        },
+      },
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "owner_preview_access_required" },
+    });
   });
 });

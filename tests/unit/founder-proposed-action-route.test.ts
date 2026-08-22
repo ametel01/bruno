@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 
 const mocks = vi.hoisted(() => ({
   requireApplicationUser: vi.fn(),
@@ -93,6 +94,33 @@ describe("Founder Proposed Action routes", () => {
     );
     expect(response.status).toBe(200);
     expect(mocks.decideAction).toHaveBeenCalledWith(USER_ID, ACTION_ID, "approve", 1, null);
+  });
+
+  it("returns a sanitized denial when Request changes loses current protection", async () => {
+    mocks.decideAction.mockRejectedValueOnce(new FounderReleaseStageAccessError());
+    const { POST } = await import("@/app/api/operator/proposed-actions/[actionId]/decision/route");
+    const response = await POST(
+      new Request(`http://localhost/api/operator/proposed-actions/${ACTION_ID}/decision`, {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "request_changes",
+          expectedVersion: 1,
+          changes: {
+            actionFamily: "external_communication",
+            businessOutcome: "Revise one follow-up",
+            destination: { recipient: "ada@example.com" },
+            materialContent: { body: "Hello Ada" },
+            validUntil: "2026-08-20T04:00:00.000Z",
+          },
+        }),
+      }),
+      { params: Promise.resolve({ actionId: ACTION_ID }) },
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "owner_preview_access_required" },
+    });
   });
 
   it("does not provide a generic approve or send action", async () => {

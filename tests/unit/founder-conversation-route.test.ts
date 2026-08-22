@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 
 const mocks = vi.hoisted(() => ({
   requireApplicationUser: vi.fn(),
@@ -6,10 +7,12 @@ const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   resumeWork: vi.fn(),
   requireWorkspaceAccess: vi.fn(),
+  accessErrorResponse: vi.fn(),
 }));
 
 vi.mock("@/app/api/operator/_shared/owner-preview-access", () => ({
   requireFounderOperatorWorkspaceAccess: mocks.requireWorkspaceAccess,
+  founderOperatorAccessErrorResponse: mocks.accessErrorResponse,
 }));
 
 vi.mock("@/src/server/users/configured-application-user", () => ({
@@ -53,6 +56,7 @@ describe("Founder Conversation route", () => {
     mocks.sendMessage.mockResolvedValue(CONVERSATION);
     mocks.resumeWork.mockResolvedValue(CONVERSATION);
     mocks.requireWorkspaceAccess.mockResolvedValue(null);
+    mocks.accessErrorResponse.mockReturnValue(null);
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -134,6 +138,36 @@ describe("Founder Conversation route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.resumeWork).toHaveBeenCalledWith(USER_ID, "work-1");
+  });
+
+  it.each([
+    "send",
+    "resume",
+  ])("returns a sanitized denial when protection expires inside the %s transaction", async (action) => {
+    const accessError = new FounderReleaseStageAccessError();
+    const denied = Response.json(
+      { error: { code: "owner_preview_access_required" } },
+      { status: 403, headers: { "Cache-Control": "no-store" } },
+    );
+    if (action === "send") mocks.sendMessage.mockRejectedValueOnce(accessError);
+    else mocks.resumeWork.mockRejectedValueOnce(accessError);
+    mocks.accessErrorResponse.mockImplementationOnce((error) =>
+      error === accessError ? denied : null,
+    );
+    const { POST } = await import("@/app/api/operator/conversation/route");
+    const response = await POST(
+      new Request("http://localhost/api/operator/conversation", {
+        method: "POST",
+        body: JSON.stringify(
+          action === "send"
+            ? { message: "Start protected work" }
+            : { action: "resume", workId: "work-1" },
+        ),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
   it.each([

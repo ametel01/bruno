@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
+import {
+  founderOperatorAccessErrorResponse,
+  requireFounderOperatorWorkspaceAccess,
+} from "@/app/api/operator/_shared/owner-preview-access";
 import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 
 const USER_ID = "00000000-0000-4000-8000-000000003381";
@@ -33,5 +36,20 @@ describe("Founder Owner Preview route access", () => {
       }),
     ).resolves.toBeNull();
     expect(requireAccess).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes a deep work-authority denial for route adapters", async () => {
+    const response = founderOperatorAccessErrorResponse(new FounderReleaseStageAccessError());
+
+    expect(response?.status).toBe(403);
+    expect(response?.headers.get("cache-control")).toBe("no-store");
+    await expect(response?.json()).resolves.toEqual({
+      error: {
+        code: "owner_preview_access_required",
+        message:
+          "Owner Preview is unavailable until exact-revision admission and current Recovery Archive protection are verified.",
+      },
+    });
+    expect(founderOperatorAccessErrorResponse(new Error("unexpected"))).toBeNull();
   });
 });
