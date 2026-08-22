@@ -955,6 +955,10 @@ export const founderTrustedPreviewInvitations = pgTable(
       "founder_trusted_preview_invitations_state_check",
       sql`(${table.status} = 'invited' AND ${table.participantUserId} IS NULL AND ${table.participantOperatorId} IS NULL AND ${table.admissionDecisionId} IS NULL AND ${table.admittedAt} IS NULL AND ${table.revokedAt} IS NULL) OR (${table.status} = 'admitted' AND ${table.participantUserId} IS NOT NULL AND ${table.participantOperatorId} IS NOT NULL AND ${table.admissionDecisionId} IS NOT NULL AND ${table.admittedAt} IS NOT NULL AND ${table.revokedAt} IS NULL) OR (${table.status} = 'revoked' AND ${table.participantUserId} IS NULL AND ${table.participantOperatorId} IS NULL AND ${table.admissionDecisionId} IS NULL AND ${table.admittedAt} IS NULL AND ${table.revokedAt} IS NOT NULL)`,
     ),
+    check(
+      "founder_trusted_preview_invitations_owner_participant_check",
+      sql`${table.participantUserId} IS NULL OR ${table.participantUserId} <> ${table.cohortOwnerUserId}`,
+    ),
     uniqueIndex("founder_trusted_preview_invitations_slot_idx").on(table.cohortSlot),
     uniqueIndex("founder_trusted_preview_invitations_digest_idx").on(table.invitationDigest),
     uniqueIndex("founder_trusted_preview_invitations_clerk_subject_idx").on(

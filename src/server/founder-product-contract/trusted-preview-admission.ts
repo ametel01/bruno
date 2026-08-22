@@ -24,15 +24,15 @@ import { createDurableRecoveryArchive } from "./recovery-archive";
 import type { FounderRecoveryArchiveProvider } from "./recovery-archive-provider";
 import { getFounderOwnerPreviewAccessInTransaction } from "./release-stage-access";
 import {
+  FOUNDER_TRUSTED_PREVIEW_CAPABILITIES,
+  requireFounderTrustedPreviewQualifications,
+} from "./trusted-preview-qualification";
+import {
   getLatestFounderTrustedPreviewStageDecisionInTransaction,
   lockFounderTrustedPreviewCohortInTransaction,
   persistQualifiedFounderTrustedPreviewStageDecisionInTransaction,
   requireFounderTrustedPreviewCohortOwnerInTransaction,
 } from "./trusted-preview-release-decision";
-import {
-  FOUNDER_TRUSTED_PREVIEW_CAPABILITIES,
-  requireFounderTrustedPreviewQualifications,
-} from "./trusted-preview-qualification";
 
 const TRUSTED_PREVIEW_ARCHIVE_WINDOW_MS = 24 * 60 * 60 * 1_000;
 const TRUSTED_PREVIEW_INVITATION_TOKEN_BYTES = 32;
@@ -182,7 +182,11 @@ export async function issueFounderTrustedPreviewInvitation(
     createInvitationToken?: () => string;
   } = {},
 ): Promise<{ invitationToken: string; cohortSlot: 1 | 2 | 3 }> {
-  if (!input.invitedClerkSubject.trim() || !isEvidenceDigest(input.serviceBusinessEvidenceDigest)) {
+  if (
+    !input.invitedClerkSubject.trim() ||
+    input.invitedClerkSubject.trim() !== input.invitedClerkSubject ||
+    !isEvidenceDigest(input.serviceBusinessEvidenceDigest)
+  ) {
     throw new Error("Trusted Preview invitation evidence is invalid.");
   }
   const environment = dependencies.env ?? process.env;
@@ -204,6 +208,14 @@ export async function issueFounderTrustedPreviewInvitation(
         tx,
         input.cohortOwnerUserId,
       );
+      const [cohortOwnerIdentity] = await tx
+        .select({ subject: users.clerkUserId })
+        .from(users)
+        .where(eq(users.id, input.cohortOwnerUserId))
+        .limit(1);
+      if (!cohortOwnerIdentity?.subject) {
+        throw new Error("Trusted Preview requires a Clerk release authority.");
+      }
       const stageDecision = await requireActiveTrustedPreviewStageDecision(
         tx,
         input.cohortOwnerUserId,
@@ -219,6 +231,12 @@ export async function issueFounderTrustedPreviewInvitation(
       const invitedClerkSubjectDigest = founderProductContractDigest(
         `clerk:${input.invitedClerkSubject}`,
       );
+      if (
+        invitedClerkSubjectDigest ===
+        founderProductContractDigest(`clerk:${cohortOwnerIdentity.subject}`)
+      ) {
+        throw new Error("The Bruno.Ai Owner cannot occupy a trusted-contact cohort slot.");
+      }
       const existingInvitations = await tx
         .select({
           slot: founderTrustedPreviewInvitations.cohortSlot,
@@ -309,6 +327,9 @@ export async function admitFounderToTrustedPreview(
       if (!invitation) {
         throw new Error("Trusted Preview requires a valid invitation for this Clerk identity.");
       }
+      if (userId === invitation.cohortOwnerUserId) {
+        throw new Error("The Bruno.Ai Owner cannot be admitted as a trusted contact.");
+      }
       const stageDecision = await requireActiveTrustedPreviewStageDecision(
         tx,
         invitation.cohortOwnerUserId,
@@ -359,6 +380,9 @@ export async function admitFounderToTrustedPreview(
         .for("update");
       if (!invitation) {
         throw new Error("Trusted Preview requires a valid invitation for this Clerk identity.");
+      }
+      if (userId === invitation.cohortOwnerUserId) {
+        throw new Error("The Bruno.Ai Owner cannot be admitted as a trusted contact.");
       }
       const stageDecision = await requireActiveTrustedPreviewStageDecision(
         tx,

@@ -117,7 +117,8 @@ never count as Founder Acceptance.
 Trusted Preview is a separate exact-revision cohort decision owned by the mapped Bruno.Ai Owner.
 It accepts at most three fixed cohort slots. Each invitation is bound to a sanitized Clerk-subject
 digest, an explicit Founder-led Service Business evidence digest, and the active cohort decision;
-the token is returned only for direct delivery and is never stored in recoverable form. A participant
+the mapped Owner is ineligible for those contact slots, and the token is returned only for direct
+delivery and is never stored in recoverable form. A participant
 receives access only after Clerk authentication, invitation acceptance, a participant-specific
 Release Decision bound to that participant's Owner, Operator, workspace and runtime, plus a current
 verified-restorable Recovery Archive. The Founder projection names Trusted Preview, OpenAI and
@@ -125,8 +126,9 @@ Calendar reading as its only capabilities, attended onboarding and observation a
 boundary, and Learning Round as its immutable evidence classification. A cohort-wide Critical or
 release-blocking finding records a Hold, revokes pending invitations, preserves admitted participant
 state and Safe Work Checkpoints, and requires a fresh exact-revision resume decision. Promotion
-assessment requires two distinct admitted contacts to complete activation, recurring use, authority,
-recovery, and privacy journeys under attended observation. It remains ineligible for Founder
+assessment derives its roster under the cohort lock from admitted invitation, exact participant
+decision, Operator, and ready-runtime rows; two distinct admitted contacts must complete activation,
+recurring use, authority, recovery, and privacy journeys under attended observation. It remains ineligible for Founder
 Acceptance Evidence and cannot promote automatically. These focused persisted and classification
 tests are registered in the Founder Product Contract invariant pack.
 
