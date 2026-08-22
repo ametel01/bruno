@@ -149,6 +149,12 @@ Bruno.Ai's verified decision that an authenticated Owner may continue paid produ
 derived from reconciled Commerce Provider evidence and never from a checkout redirect alone.
 _Avoid_: Clerk session, payment success page, subscription webhook
 
+**Commerce Lifecycle Receipt**:
+An immutable Founder-commerce record proving that Bruno.Ai issued a short-lived signed Customer
+Portal link or reconciled a cancellation or full refund. It never substitutes for an Infrastructure
+Retirement Receipt or Account Closure receipt and never stores the signed portal URL itself.
+_Avoid_: Subscription webhook, Infrastructure Retirement Receipt, Account Closure receipt
+
 **Recovery Archive**:
 An encrypted, verified-restorable copy of the minimum durable Operator state held outside its
 Droplet for bounded recovery. It excludes raw provider credentials and expires after 30 days.

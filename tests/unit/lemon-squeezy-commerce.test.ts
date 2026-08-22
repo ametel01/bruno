@@ -151,6 +151,58 @@ describe("Lemon Squeezy commerce boundary", () => {
     });
   });
 
+  it("retrieves and validates a fresh signed hosted Customer Portal URL", async () => {
+    const now = new Date("2026-08-23T00:00:00.000Z");
+    const expires = Math.floor((now.valueOf() + 24 * 60 * 60 * 1_000) / 1_000);
+    const portalUrl = `https://bruno.lemonsqueezy.com/billing?expires=${expires}&user=380&signature=${"a".repeat(64)}`;
+    const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+      expect(url).toBe("https://api.lemonsqueezy.com/v1/subscriptions/789");
+      expect(init?.method).toBe("GET");
+      return Response.json({
+        data: {
+          type: "subscriptions",
+          id: "789",
+          attributes: {
+            test_mode: true,
+            store_id: 123,
+            variant_id: 456,
+            urls: { customer_portal: portalUrl },
+          },
+          relationships: {},
+        },
+      });
+    });
+    const provider = new LemonSqueezyApiProvider({ config: CONFIG, fetch: fetchMock });
+
+    await expect(provider.createCustomerPortal({ subscriptionId: "789", now })).resolves.toEqual({
+      portalUrl,
+      expiresAt: "2026-08-24T00:00:00.000Z",
+    });
+
+    const invalidProvider = new LemonSqueezyApiProvider({
+      config: CONFIG,
+      fetch: async () =>
+        Response.json({
+          data: {
+            type: "subscriptions",
+            id: "789",
+            attributes: {
+              test_mode: true,
+              store_id: 123,
+              variant_id: 456,
+              urls: {
+                customer_portal: `https://attacker.example/billing?expires=${expires}&user=380&signature=${"a".repeat(64)}`,
+              },
+            },
+            relationships: {},
+          },
+        }),
+    });
+    await expect(
+      invalidProvider.createCustomerPortal({ subscriptionId: "789", now }),
+    ).rejects.toThrow("invalid Customer Portal URL");
+  });
+
   it("is default-off and fails closed on partial provider configuration", () => {
     expect(readLemonSqueezyConfig({})).toBeNull();
     expect(() => readLemonSqueezyConfig({ BRUNO_LEMON_SQUEEZY_MODE: "live" })).toThrow(

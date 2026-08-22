@@ -1,17 +1,11 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import {
-  founderCheckoutCorrelations,
-  founderCommerceEvents,
-  founderProductEntitlements,
-  operators,
-  users,
-} from "@/src/server/db/schema";
 import {
   createFounderCheckout,
-  recordFounderCommerceWebhook,
+  getFounderCommerceStatusForUser,
+  issueFounderCustomerPortal,
   reconcileFounderCommerceReceipt,
+  recordFounderCommerceWebhook,
 } from "@/src/server/commerce/founder-commerce";
 import { reconcileNextFounderCommerce } from "@/src/server/commerce/founder-commerce-reconciler";
 import type {
@@ -20,6 +14,15 @@ import type {
   ReconciledLemonSqueezySubscription,
 } from "@/src/server/commerce/lemon-squeezy-provider";
 import type { VerifiedLemonSqueezyWebhook } from "@/src/server/commerce/lemon-squeezy-webhook";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import {
+  founderCheckoutCorrelations,
+  founderCommerceEvents,
+  founderCommerceLifecycleReceipts,
+  founderProductEntitlements,
+  operators,
+  users,
+} from "@/src/server/db/schema";
 import type { FounderInfrastructureRetirementProvider } from "@/src/server/founder-product-contract/infrastructure-retirement";
 
 const USER_ID = "00000000-0000-4000-8000-000000000380";
@@ -62,6 +65,10 @@ describe("persisted Founder commerce authority", () => {
     };
     provider = {
       createCheckout: vi.fn(),
+      createCustomerPortal: vi.fn(async ({ now }) => ({
+        portalUrl: signedPortalUrl(now),
+        expiresAt: new Date(now.valueOf() + 24 * 60 * 60 * 1_000).toISOString(),
+      })),
       readSubscription: vi.fn(async () => subscription),
       readOrder: vi.fn(async () => order),
       cancelSubscription: vi.fn(async () => undefined),
@@ -130,6 +137,212 @@ describe("persisted Founder commerce authority", () => {
     expect(await connection.db.select().from(founderProductEntitlements)).toEqual([]);
   });
 
+  it("issues a short-lived signed Customer Portal only from current eligible authority", async () => {
+    const payment = await record(webhook("portal-payment", "2026-08-23T00:01:00.000Z"));
+    expect(await reconcile(payment.receiptId)).toBe("applied");
+    const now = new Date("2026-08-23T00:02:00.000Z");
+
+    await expect(
+      issueFounderCustomerPortal({
+        userId: USER_ID,
+        now,
+        provider,
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ portalUrl: signedPortalUrl(now) });
+    const [receipt] = await connection.db.select().from(founderCommerceLifecycleReceipts);
+    expect(receipt).toMatchObject({
+      userId: USER_ID,
+      providerSubscriptionId: SUBSCRIPTION_ID,
+      kind: "portal_issued",
+      effectiveAt: null,
+      portalExpiresAt: new Date("2026-08-24T00:02:00.000Z"),
+    });
+    expect(receipt?.evidenceDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(JSON.stringify(receipt)).not.toContain("signature=");
+
+    subscription = {
+      ...subscription,
+      status: "unpaid",
+      updatedAt: "2026-08-23T00:03:00.000Z",
+    };
+    const unpaid = await record(webhook("portal-unpaid", subscription.updatedAt, null));
+    expect(await reconcile(unpaid.receiptId)).toBe("applied");
+    await expect(
+      issueFounderCustomerPortal({
+        userId: USER_ID,
+        now: new Date("2026-08-23T00:04:00.000Z"),
+        provider,
+        createConnection: () => connection,
+      }),
+    ).rejects.toThrow("unavailable for this commerce state");
+    expect(provider.createCustomerPortal).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps cancellation and refund receipts distinct from other lifecycle receipts", async () => {
+    const payment = await record(webhook("receipt-payment", "2026-08-23T00:01:00.000Z"));
+    expect(await reconcile(payment.receiptId)).toBe("applied");
+    subscription = {
+      ...subscription,
+      status: "cancelled",
+      updatedAt: "2026-08-23T00:02:00.000Z",
+      endsAt: "2026-08-30T00:00:00.000Z",
+    };
+    const cancellation = await record(
+      webhook("receipt-cancellation", subscription.updatedAt, null),
+    );
+    expect(await reconcile(cancellation.receiptId)).toBe("applied");
+    expect(await reconcile(cancellation.receiptId)).toBe("ignored");
+
+    order = {
+      ...order,
+      status: "refunded",
+      refundedAmount: order.total,
+      updatedAt: "2026-08-23T00:03:00.000Z",
+    };
+    const refund = await record(webhook("receipt-refund", order.updatedAt, null));
+    expect(await reconcile(refund.receiptId)).toBe("applied");
+
+    expect(
+      (await connection.db.select().from(founderCommerceLifecycleReceipts)).map((receipt) => ({
+        kind: receipt.kind,
+        effectiveAt: receipt.effectiveAt,
+      })),
+    ).toEqual([
+      { kind: "cancellation", effectiveAt: new Date("2026-08-30T00:00:00.000Z") },
+      { kind: "refund", effectiveAt: new Date("2026-08-23T00:03:00.000Z") },
+    ]);
+    await expect(
+      connection.client.unsafe(
+        "update founder_commerce_lifecycle_receipts set evidence_digest = $1 where kind = 'refund'",
+        [digest("mutated")],
+      ),
+    ).rejects.toThrow("Founder commerce lifecycle receipts are immutable");
+  });
+
+  it("allows cancellation resumption but never restarts a terminal retirement clock", async () => {
+    const payment = await record(webhook("resume-payment", "2026-08-23T00:01:00.000Z"));
+    expect(await reconcile(payment.receiptId)).toBe("applied");
+    subscription = {
+      ...subscription,
+      status: "cancelled",
+      updatedAt: "2026-08-23T00:02:00.000Z",
+      endsAt: "2026-08-24T00:00:00.000Z",
+    };
+    const cancellation = await record(webhook("resume-cancel", subscription.updatedAt, null));
+    expect(await reconcile(cancellation.receiptId)).toBe("applied");
+
+    subscription = {
+      ...subscription,
+      status: "active",
+      updatedAt: "2026-08-23T12:00:00.000Z",
+      endsAt: null,
+    };
+    order = { ...order, updatedAt: subscription.updatedAt };
+    const resumed = await record(webhook("resume-active", subscription.updatedAt, null));
+    expect(await reconcile(resumed.receiptId)).toBe("applied");
+    expect((await connection.db.select().from(founderProductEntitlements))[0]).toMatchObject({
+      status: "verified",
+      retirementDueAt: null,
+    });
+
+    subscription = {
+      ...subscription,
+      status: "unpaid",
+      updatedAt: "2026-08-23T12:01:00.000Z",
+    };
+    order = { ...order, updatedAt: subscription.updatedAt };
+    const unpaid = await record(webhook("resume-unpaid", subscription.updatedAt, null));
+    expect(await reconcile(unpaid.receiptId)).toBe("applied");
+    const retirementDueAt = new Date("2026-08-24T12:01:00.000Z");
+
+    subscription = {
+      ...subscription,
+      status: "active",
+      updatedAt: "2026-08-23T12:02:00.000Z",
+    };
+    order = { ...order, updatedAt: subscription.updatedAt };
+    const reordered = await record(webhook("resume-after-terminal", subscription.updatedAt, null));
+    expect(
+      await reconcileFounderCommerceReceipt({
+        receiptId: reordered.receiptId,
+        now: new Date(subscription.updatedAt),
+        provider,
+        createConnection: () => connection,
+      }),
+    ).toBe("ignored");
+    expect((await connection.db.select().from(founderProductEntitlements))[0]).toMatchObject({
+      status: "unpaid",
+      retirementDueAt,
+    });
+  });
+
+  it("claims ordinary terminal entitlement retirement exactly when its deadline is due", async () => {
+    const payment = await record(webhook("scheduled-payment", "2026-08-23T00:01:00.000Z"));
+    expect(await reconcile(payment.receiptId)).toBe("applied");
+    subscription = {
+      ...subscription,
+      status: "unpaid",
+      updatedAt: "2026-08-23T00:02:00.000Z",
+    };
+    const unpaid = await record(webhook("scheduled-unpaid", subscription.updatedAt, null));
+    expect(await reconcile(unpaid.receiptId)).toBe("applied");
+    const retirementProvider = unavailableRetirementProvider();
+
+    await expect(
+      reconcileNextFounderCommerce({
+        now: new Date("2026-08-24T00:01:59.999Z"),
+        applicationRevision: "a".repeat(40),
+        commerceProvider: provider,
+        retirementProvider,
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ processed: 0, outcome: "idle" });
+    await expect(
+      reconcileNextFounderCommerce({
+        now: new Date("2026-08-24T00:02:00.000Z"),
+        applicationRevision: "a".repeat(40),
+        commerceProvider: provider,
+        retirementProvider,
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ processed: 1, outcome: "retirement_retrying" });
+  });
+
+  it("projects payment recovery and stopped-work truth after payment was established", async () => {
+    const payment = await record(webhook("status-payment", "2026-08-23T00:01:00.000Z"));
+    expect(await reconcile(payment.receiptId)).toBe("applied");
+    subscription = {
+      ...subscription,
+      status: "past_due",
+      updatedAt: "2026-08-23T00:02:00.000Z",
+    };
+    const pastDue = await record(webhook("status-past-due", subscription.updatedAt, null));
+    expect(await reconcile(pastDue.receiptId)).toBe("applied");
+
+    await expect(
+      getFounderCommerceStatusForUser(USER_ID, {
+        now: new Date("2026-08-29T23:59:59.999Z"),
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({
+      state: "payment_recovery",
+      recoveryEndsAt: "2026-08-30T00:02:00.000Z",
+      customerPortalAvailable: true,
+    });
+    await expect(
+      getFounderCommerceStatusForUser(USER_ID, {
+        now: new Date("2026-08-30T00:02:00.000Z"),
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({
+      state: "work_stopped",
+      reason: "past_due",
+      retirementDueAt: "2026-08-30T00:02:00.000Z",
+      retirement: "required",
+    });
+  });
+
   it("retains a verified receipt when the provider read fails", async () => {
     provider.readSubscription = vi.fn(async () => {
       throw new Error("provider unavailable");
@@ -169,6 +382,7 @@ describe("persisted Founder commerce authority", () => {
     expect((await connection.db.select().from(founderProductEntitlements))[0]).toMatchObject({
       status: "refunded",
       providerStateUpdatedAt: new Date(order.updatedAt),
+      retirementDueAt: new Date("2026-08-24T00:04:00.000Z"),
     });
   });
 
@@ -449,4 +663,22 @@ function webhook(
 
 function digest(value: string): `sha256:${string}` {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+function signedPortalUrl(now: Date): string {
+  const expires = Math.floor((now.valueOf() + 24 * 60 * 60 * 1_000) / 1_000);
+  return `https://bruno.lemonsqueezy.com/billing?expires=${expires}&user=380&signature=${"a".repeat(64)}`;
+}
+
+function unavailableRetirementProvider(): FounderInfrastructureRetirementProvider {
+  return {
+    createRecoveryArchive: vi.fn(),
+    deleteRecoveryArchive: vi.fn(),
+    digitalOcean: {
+      observeOwnedSet: vi.fn(),
+      deleteFirewall: vi.fn(),
+      deleteDroplet: vi.fn(),
+    },
+    calls: () => [],
+  } as unknown as FounderInfrastructureRetirementProvider;
 }

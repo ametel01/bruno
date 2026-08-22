@@ -50,3 +50,22 @@
   outline: 3px solid #c99544;
   outline-offset: 3px;
 }
+
+.secondary {
+  display: inline-flex;
+  justify-content: center;
+  margin-top: 0.75rem;
+  padding: 0.8rem 1.1rem;
+  border: 1px solid #6b665e;
+  border-radius: 999px;
+  background: #fff;
+  color: #21201d;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.secondary:focus-visible {
+  outline: 3px solid #c99544;
+  outline-offset: 3px;
+}

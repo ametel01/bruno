@@ -664,6 +664,18 @@ describe("Founder Infrastructure Retirement deadline", () => {
         gmailSending: true,
       }),
       readSubscription: async () => ({ status: "unpaid" }),
+      createCustomerPortal: async ({ now }) => ({
+        url: `https://app.lemonsqueezy.com/billing?expires=${Math.floor(now.valueOf() / 1_000) + 3600}&user=test&signature=${"a".repeat(64)}`,
+        expiresAt: new Date(now.valueOf() + 60 * 60 * 1_000),
+        actions: {
+          paymentMethods: true,
+          billingHistory: true,
+          cancellation: true,
+          eligibleResumption: true,
+          planSwitching: false,
+          customerPause: false,
+        },
+      }),
       createRecoveryArchive:
         input.createRecoveryArchive ??
         ((archiveInput) => archiveProvider.createRecoveryArchive(archiveInput)),

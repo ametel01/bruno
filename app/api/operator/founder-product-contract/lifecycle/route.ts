@@ -22,6 +22,7 @@ const ACTIONS = new Set<FounderProductContractLifecycleAction>([
   "release_stage_admission",
   "external_beta_cohort_lifecycle",
   "product_entitlement_lifecycle",
+  "subscription_lifecycle",
   "recovery_archive_lifecycle",
   "infrastructure_retirement",
 ]);

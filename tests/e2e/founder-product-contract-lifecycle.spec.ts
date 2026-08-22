@@ -55,6 +55,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
           "release_stage_admission",
           "external_beta_cohort_lifecycle",
           "product_entitlement_lifecycle",
+          "subscription_lifecycle",
           "recovery_archive_lifecycle",
           "infrastructure_retirement",
         ] as const) {
@@ -139,6 +140,14 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                   resourcesAfter: number;
                   verified: boolean;
                   observedAt: string;
+                };
+                commerceLifecycle?: {
+                  portal: string;
+                  paymentRecoveryHours: number;
+                  unpaidRetirementHours: number;
+                  expiredRetirementHours: number;
+                  refundRetirementHours: number;
+                  reorderedActiveCanRestartTerminalClock: boolean;
                 };
               };
             };
@@ -255,6 +264,17 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                 founderAcceptanceEligible: false,
                 newCohortRequired: true,
                 retirementCompleted: true,
+              });
+            }
+            if (id === "subscription_lifecycle") {
+              expect(body.outcome.providerCalls).toContain("lemonSqueezy.create_customer_portal");
+              expect(body.outcome.commerceLifecycle).toEqual({
+                portal: "signed_hosted",
+                paymentRecoveryHours: 168,
+                unpaidRetirementHours: 24,
+                expiredRetirementHours: 1,
+                refundRetirementHours: 24,
+                reorderedActiveCanRestartTerminalClock: false,
               });
             }
             clock.advance(id === "release_stage_admission" ? 3 : 1);

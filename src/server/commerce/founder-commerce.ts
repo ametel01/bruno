@@ -6,16 +6,20 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import {
   founderCheckoutCorrelations,
   founderCommerceEvents,
+  founderCommerceLifecycleReceipts,
   founderInfrastructureRetirements,
   founderProductEntitlements,
   operators,
 } from "@/src/server/db/schema";
-import { founderEntitlementPolicy } from "@/src/server/founder-product-contract/entitlement";
+import { founderProductContractDigest } from "@/src/server/founder-product-contract/digest";
+import {
+  founderCommerceTransitionAllows,
+  founderEntitlementPolicy,
+} from "@/src/server/founder-product-contract/entitlement";
 import {
   lockFounderProductContractLifecycleInTransaction,
   requireActiveFounderOperatorAuthorityInTransaction,
 } from "@/src/server/founder-product-contract/operator-authority";
-import { founderProductContractDigest } from "@/src/server/founder-product-contract/digest";
 import type {
   LemonSqueezyCommerceProvider,
   LemonSqueezyCommerceStatus,
@@ -34,15 +38,27 @@ export type FounderCommerceStatusDto =
   | { state: "confirming_payment"; reconciliationDueAt: string | null }
   | {
       state: "entitled";
-      status: "verified" | "past_due" | "cancelled";
-      retirementDueAt: string | null;
+      status: "verified";
+      customerPortalAvailable: true;
     }
+  | { state: "payment_recovery"; recoveryEndsAt: string; customerPortalAvailable: true }
+  | { state: "cancelled_through"; endsAt: string; customerPortalAvailable: true }
   | {
       state: "payment_refunded";
       refundConfirmedAt: string;
       cleanup: "required" | "in_progress" | "completed";
     }
-  | { state: "payment_failed"; reason: "unpaid" | "expired" | "refunded" };
+  | {
+      state: "work_stopped";
+      reason: "unpaid" | "expired" | "refunded" | "cancelled" | "past_due";
+      retirementDueAt: string;
+      retirement: "required" | "in_progress";
+    }
+  | {
+      state: "retirement_completed";
+      reason: "unpaid" | "expired" | "refunded" | "cancelled" | "past_due";
+      completedAt: string;
+    };
 
 export async function createFounderCheckout(input: {
   userId: string;
@@ -103,12 +119,12 @@ export async function createFounderCheckout(input: {
 
 export async function getFounderCommerceStatusForUser(
   userId: string,
-  dependencies: { createConnection?: () => DatabaseConnection } = {},
+  dependencies: { createConnection?: () => DatabaseConnection; now?: Date } = {},
 ): Promise<FounderCommerceStatusDto> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
-    const [[attempt], [entitlement], [retirement]] = await Promise.all([
+    const [[attempt], [entitlement], [retirement], [entitlementAuthority]] = await Promise.all([
       connection.db
         .select()
         .from(founderCheckoutCorrelations)
@@ -121,16 +137,33 @@ export async function getFounderCommerceStatusForUser(
         .where(eq(founderProductEntitlements.userId, userId))
         .limit(1),
       connection.db
-        .select({ status: founderInfrastructureRetirements.status })
+        .select({
+          status: founderInfrastructureRetirements.status,
+          absenceVerifiedAt: founderInfrastructureRetirements.absenceVerifiedAt,
+        })
         .from(founderInfrastructureRetirements)
         .where(eq(founderInfrastructureRetirements.userId, userId))
         .orderBy(desc(founderInfrastructureRetirements.updatedAt))
         .limit(1),
+      connection.db
+        .select({ generation: founderCheckoutCorrelations.generation })
+        .from(founderProductEntitlements)
+        .innerJoin(
+          founderCommerceEvents,
+          eq(founderCommerceEvents.id, founderProductEntitlements.sourceEventId),
+        )
+        .innerJoin(
+          founderCheckoutCorrelations,
+          eq(founderCheckoutCorrelations.id, founderCommerceEvents.checkoutCorrelationId),
+        )
+        .where(eq(founderProductEntitlements.userId, userId))
+        .limit(1),
     ]);
     if (
-      attempt?.status === "pending" ||
-      attempt?.status === "consumed" ||
-      attempt?.status === "refund_pending"
+      (attempt?.status === "pending" ||
+        attempt?.status === "consumed" ||
+        attempt?.status === "refund_pending") &&
+      (!entitlementAuthority || attempt.generation > entitlementAuthority.generation)
     ) {
       return {
         state: "confirming_payment",
@@ -149,18 +182,87 @@ export async function getFounderCommerceStatusForUser(
       };
     }
     if (!entitlement) return { state: "not_started" };
-    if (
-      entitlement.status === "verified" ||
-      entitlement.status === "past_due" ||
-      entitlement.status === "cancelled"
-    ) {
+    if (entitlement.status === "verified") {
       return {
         state: "entitled",
-        status: entitlement.status,
-        retirementDueAt: entitlement.retirementDueAt?.toISOString() ?? null,
+        status: "verified",
+        customerPortalAvailable: true,
       };
     }
-    return { state: "payment_failed", reason: entitlement.status };
+    if (!entitlement.retirementDueAt) {
+      throw new Error("Commerce lifecycle deadline is unavailable.");
+    }
+    const now = dependencies.now ?? new Date();
+    if (entitlement.retirementDueAt > now && entitlement.status === "past_due") {
+      return {
+        state: "payment_recovery",
+        recoveryEndsAt: entitlement.retirementDueAt.toISOString(),
+        customerPortalAvailable: true,
+      };
+    }
+    if (entitlement.retirementDueAt > now && entitlement.status === "cancelled") {
+      return {
+        state: "cancelled_through",
+        endsAt: entitlement.retirementDueAt.toISOString(),
+        customerPortalAvailable: true,
+      };
+    }
+    if (retirement?.status === "completed" && retirement.absenceVerifiedAt) {
+      return {
+        state: "retirement_completed",
+        reason: entitlement.status,
+        completedAt: retirement.absenceVerifiedAt.toISOString(),
+      };
+    }
+    return {
+      state: "work_stopped",
+      reason: entitlement.status,
+      retirementDueAt: entitlement.retirementDueAt.toISOString(),
+      retirement: retirement ? "in_progress" : "required",
+    };
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
+export async function issueFounderCustomerPortal(input: {
+  userId: string;
+  now: Date;
+  provider: LemonSqueezyCommerceProvider;
+  createConnection?: () => DatabaseConnection;
+}): Promise<{ portalUrl: string }> {
+  const connection = input.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !input.createConnection;
+  try {
+    const subscriptionId = await connection.db.transaction(async (tx) => {
+      await lockFounderProductContractLifecycleInTransaction(tx, input.userId);
+      return requirePortalEligibleSubscription(tx, input.userId, input.now);
+    });
+    const portal = await input.provider.createCustomerPortal({
+      subscriptionId,
+      now: input.now,
+    });
+    await connection.db.transaction(async (tx) => {
+      await lockFounderProductContractLifecycleInTransaction(tx, input.userId);
+      const currentSubscriptionId = await requirePortalEligibleSubscription(
+        tx,
+        input.userId,
+        input.now,
+      );
+      if (currentSubscriptionId !== subscriptionId) {
+        throw new Error("Customer Portal authority changed while the link was issued.");
+      }
+      await tx.insert(founderCommerceLifecycleReceipts).values({
+        userId: input.userId,
+        providerSubscriptionId: subscriptionId,
+        kind: "portal_issued",
+        portalExpiresAt: new Date(portal.expiresAt),
+        evidenceDigest: founderProductContractDigest(portal.portalUrl),
+        occurredAt: input.now,
+        createdAt: input.now,
+      });
+    });
+    return { portalUrl: portal.portalUrl };
   } finally {
     if (ownsConnection) await connection.close();
   }
@@ -313,13 +415,6 @@ export async function reconcileFounderCommerceReceipt(input: {
         await markReceipt(tx, lockedReceipt.id, "ignored", input.now);
         return "ignored";
       }
-      if (correlation.reconciliationDueAt && correlation.reconciliationDueAt <= input.now) {
-        await tx
-          .update(founderCommerceEvents)
-          .set({ lastAttemptAt: input.now, lastErrorCode: "payment_reconciliation_timeout" })
-          .where(eq(founderCommerceEvents.id, lockedReceipt.id));
-        return "confirming_payment";
-      }
       const [current] = await tx
         .select()
         .from(founderProductEntitlements)
@@ -349,6 +444,46 @@ export async function reconcileFounderCommerceReceipt(input: {
         await markReceipt(tx, lockedReceipt.id, "ignored", input.now);
         return "ignored";
       }
+      if (
+        correlation.reconciliationDueAt &&
+        correlation.reconciliationDueAt <= input.now &&
+        currentAuthority?.checkoutCorrelationId !== correlation.id
+      ) {
+        await tx
+          .update(founderCommerceEvents)
+          .set({ lastAttemptAt: input.now, lastErrorCode: "payment_reconciliation_timeout" })
+          .where(eq(founderCommerceEvents.id, lockedReceipt.id));
+        return "confirming_payment";
+      }
+      if (
+        providerStatus === "active" &&
+        currentAuthority?.checkoutCorrelationId === correlation.id &&
+        current &&
+        !founderCommerceTransitionAllows({
+          incomingStatus: providerStatus,
+          currentStatus: current.reconciledProviderStatus as LemonSqueezyCommerceStatus,
+          currentRetirementDueAt: current.retirementDueAt,
+          now: input.now,
+          retirementStarted: false,
+        })
+      ) {
+        await markReceipt(tx, lockedReceipt.id, "ignored", input.now);
+        return "ignored";
+      }
+      if (
+        providerStatus === "active" &&
+        currentAuthority?.checkoutCorrelationId === correlation.id
+      ) {
+        const [retirement] = await tx
+          .select({ id: founderInfrastructureRetirements.id })
+          .from(founderInfrastructureRetirements)
+          .where(eq(founderInfrastructureRetirements.userId, receipt.userId))
+          .limit(1);
+        if (retirement) {
+          await markReceipt(tx, lockedReceipt.id, "ignored", input.now);
+          return "ignored";
+        }
+      }
       const providerStateUpdatedAt = new Date(
         Math.max(new Date(subscription.updatedAt).valueOf(), new Date(order.updatedAt).valueOf()),
       );
@@ -362,7 +497,7 @@ export async function reconcileFounderCommerceReceipt(input: {
       const entitlementStatus = providerStatus === "active" ? "verified" : providerStatus;
       const policy = founderEntitlementPolicy({
         status: providerStatus,
-        occurredAt: subscription.updatedAt,
+        occurredAt: providerStateUpdatedAt.toISOString(),
         endsAt: subscription.endsAt,
         currentRetirementDueAt: current?.retirementDueAt ?? null,
       });
@@ -392,6 +527,18 @@ export async function reconcileFounderCommerceReceipt(input: {
             updatedAt: input.now,
           },
         });
+      await recordFounderCommerceLifecycleDecisionReceiptInTransaction(tx, {
+        userId: receipt.userId,
+        sourceEventId: receipt.id,
+        providerSubscriptionId: subscription.subscriptionId,
+        providerStatus,
+        effectiveAt:
+          providerStatus === "cancelled" && subscription.endsAt
+            ? new Date(subscription.endsAt)
+            : providerStateUpdatedAt,
+        occurredAt: providerStateUpdatedAt,
+        createdAt: input.now,
+      });
       await applyWorkPause(tx, receipt.userId, policy.stopNewWork, providerStatus, input.now);
       await markReceipt(tx, lockedReceipt.id, "applied", input.now);
       return "applied";
@@ -524,4 +671,86 @@ async function applyWorkPause(
         ),
       );
   }
+}
+
+async function requirePortalEligibleSubscription(
+  tx: Transaction,
+  userId: string,
+  now: Date,
+): Promise<string> {
+  const [[entitlement], [retirement]] = await Promise.all([
+    tx
+      .select({
+        providerSubscriptionId: founderProductEntitlements.providerSubscriptionId,
+        status: founderProductEntitlements.status,
+        retirementDueAt: founderProductEntitlements.retirementDueAt,
+      })
+      .from(founderProductEntitlements)
+      .where(eq(founderProductEntitlements.userId, userId))
+      .limit(1),
+    tx
+      .select({ id: founderInfrastructureRetirements.id })
+      .from(founderInfrastructureRetirements)
+      .where(eq(founderInfrastructureRetirements.userId, userId))
+      .limit(1),
+  ]);
+  if (retirement) throw new Error("Customer Portal is unavailable after retirement begins.");
+  if (!entitlement) throw new Error("Customer Portal requires a Product Entitlement.");
+  if (entitlement.status === "verified") return entitlement.providerSubscriptionId;
+  if (
+    (entitlement.status === "past_due" || entitlement.status === "cancelled") &&
+    entitlement.retirementDueAt &&
+    entitlement.retirementDueAt > now
+  ) {
+    return entitlement.providerSubscriptionId;
+  }
+  throw new Error("Customer Portal is unavailable for this commerce state.");
+}
+
+export async function recordFounderCommerceLifecycleDecisionReceiptInTransaction(
+  tx: Transaction,
+  input: {
+    userId: string;
+    sourceEventId: string;
+    providerSubscriptionId: string;
+    providerStatus: LemonSqueezyCommerceStatus;
+    effectiveAt: Date;
+    occurredAt: Date;
+    createdAt: Date;
+    orderId?: string;
+  },
+): Promise<void> {
+  const kind =
+    input.providerStatus === "cancelled"
+      ? "cancellation"
+      : input.providerStatus === "refunded"
+        ? "refund"
+        : null;
+  if (!kind) return;
+  await tx
+    .insert(founderCommerceLifecycleReceipts)
+    .values({
+      userId: input.userId,
+      sourceEventId: input.sourceEventId,
+      providerSubscriptionId: input.providerSubscriptionId,
+      kind,
+      effectiveAt: input.effectiveAt,
+      evidenceDigest: founderProductContractDigest(
+        JSON.stringify({
+          kind,
+          providerSubscriptionId: input.providerSubscriptionId,
+          orderId: input.orderId ?? null,
+          effectiveAt: input.effectiveAt.toISOString(),
+          occurredAt: input.occurredAt.toISOString(),
+        }),
+      ),
+      occurredAt: input.occurredAt,
+      createdAt: input.createdAt,
+    })
+    .onConflictDoNothing({
+      target: [
+        founderCommerceLifecycleReceipts.sourceEventId,
+        founderCommerceLifecycleReceipts.kind,
+      ],
+    });
 }
