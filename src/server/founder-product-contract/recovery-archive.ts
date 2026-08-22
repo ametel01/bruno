@@ -227,6 +227,7 @@ export async function fulfillRecoveryArchiveIntent(
         archive,
         providers,
         connection,
+        input.now,
       );
       throw new Error("Recovery Archive intent is no longer pending.");
     }
@@ -259,6 +260,7 @@ async function cleanupRejectedRecoveryArchivePublication(
   archive: Awaited<ReturnType<FounderRecoveryArchiveProvider["createRecoveryArchive"]>>,
   providers: FounderRecoveryArchiveProvider,
   connection: DatabaseConnection,
+  publicationObservedAt: Date,
 ): Promise<void> {
   try {
     const deleted = await providers.deleteRecoveryArchive({
@@ -270,7 +272,12 @@ async function cleanupRejectedRecoveryArchivePublication(
     if (!deleted.archiveAbsent || !deleted.recoveryCredentialsAbsent) {
       throw new Error("Rejected Recovery Archive publication absence was not verified.");
     }
-    await recordRejectedRecoveryArchivePublicationCleanup(userId, archiveId, connection);
+    await recordRejectedRecoveryArchivePublicationCleanup(
+      userId,
+      archiveId,
+      publicationObservedAt,
+      connection,
+    );
   } catch {
     await connection.db.transaction(async (tx) => {
       await tx.execute(
@@ -316,6 +323,7 @@ async function cleanupRejectedRecoveryArchivePublication(
 async function recordRejectedRecoveryArchivePublicationCleanup(
   userId: string,
   archiveId: string,
+  publicationObservedAt: Date,
   connection: DatabaseConnection,
 ): Promise<void> {
   await connection.db.transaction(async (tx) => {
@@ -338,7 +346,9 @@ async function recordRejectedRecoveryArchivePublicationCleanup(
     if (!receipt?.completedAt) {
       throw new Error("Recovery Archive late-cleanup receipt is unavailable.");
     }
-    const observedAt = new Date(Math.max(Date.now(), receipt.completedAt.valueOf() + 1));
+    const observedAt = new Date(
+      Math.max(publicationObservedAt.valueOf(), receipt.completedAt.valueOf() + 1),
+    );
     const [updated] = await tx
       .update(founderRecoveryArchiveDeletionReceipts)
       .set({

@@ -110,19 +110,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   it("admits a production Operator only after persisting its initial verified archive", async () => {
     const applicationRevision = "9".repeat(40);
+    const environment = ownerPreviewEnvironment(applicationRevision);
     const result = await admitFounderOperatorToOwnerPreview(USER_ID, {
       applicationRevision,
       createConnection: () => connection,
       createProvider: () => provider,
-      env: {
-        VERCEL_GIT_COMMIT_SHA: applicationRevision,
-        BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
-          START,
-          applicationRevision,
-        ),
-        BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE:
-          buildTestGoogleConnectedAcceptanceRelease("calendar_reading", START, applicationRevision),
-      },
+      env: environment,
       now: () => START,
     });
 
@@ -147,19 +140,48 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         evidenceDigests: expect.arrayContaining([expect.stringMatching(/^sha256:[a-f0-9]{64}$/)]),
       }),
     ]);
+
+    const holdAt = new Date(START.valueOf() + 60_000);
+    await connection.db.insert(founderReleaseDecisions).values({
+      userId: USER_ID,
+      operatorId: OPERATOR_ID,
+      stage: "owner_preview",
+      outcome: "hold",
+      applicationRevision,
+      runtimeRevision: "runtime-v1",
+      capabilityManifest: ["openai", "calendar_reading"],
+      evidenceDigests: [`sha256:${"e".repeat(64)}`],
+      decidedAt: holdAt,
+      createdAt: holdAt,
+    });
+    await admitFounderOperatorToOwnerPreview(USER_ID, {
+      applicationRevision,
+      createConnection: () => connection,
+      createProvider: () => provider,
+      env: environment,
+      now: () => new Date(holdAt.valueOf() + 1_000),
+    });
+    const decisions = await connection.db
+      .select()
+      .from(founderReleaseDecisions)
+      .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision))
+      .orderBy(founderReleaseDecisions.decidedAt);
+    expect(decisions.map((decision) => decision.outcome)).toEqual(["enter", "hold", "resume"]);
   });
 
   it("does not replace missing Preview Qualification with Recovery Archive proof", async () => {
     const applicationRevision = "8".repeat(40);
+    const environment = ownerPreviewEnvironment(applicationRevision);
+    delete environment.BRUNO_OWNER_PREVIEW_QUALIFICATION;
     await expect(
       admitFounderOperatorToOwnerPreview(USER_ID, {
         applicationRevision,
         createConnection: () => connection,
         createProvider: () => provider,
-        env: { VERCEL_GIT_COMMIT_SHA: applicationRevision },
+        env: environment,
         now: () => START,
       }),
-    ).rejects.toThrow("Owner Preview OpenAI qualification is unavailable.");
+    ).rejects.toThrow("Owner Preview Qualification is unavailable.");
     await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([]);
     await expect(
       connection.db
@@ -167,6 +189,25 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         .from(founderReleaseDecisions)
         .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision)),
     ).resolves.toEqual([]);
+  });
+
+  it("rejects Preview Qualification scoped to a different runtime", async () => {
+    const applicationRevision = "6".repeat(40);
+    const environment = ownerPreviewEnvironment(applicationRevision);
+    const qualification = JSON.parse(environment.BRUNO_OWNER_PREVIEW_QUALIFICATION ?? "null");
+    qualification.runtimeRevision = "different-runtime";
+    environment.BRUNO_OWNER_PREVIEW_QUALIFICATION = JSON.stringify(qualification);
+
+    await expect(
+      admitFounderOperatorToOwnerPreview(USER_ID, {
+        applicationRevision,
+        createConnection: () => connection,
+        createProvider: () => provider,
+        env: environment,
+        now: () => START,
+      }),
+    ).rejects.toThrow("Owner Preview Qualification does not match this Owner and candidate.");
+    await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([]);
   });
 
   it("creates at most one verified archive per 24-hour window", async () => {
@@ -542,7 +583,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       .from(founderRecoveryArchiveDeletionReceipts)
       .where(eq(founderRecoveryArchiveDeletionReceipts.archiveId, pending.id));
     expect(lateCleanupReceipt).toMatchObject({ status: "completed" });
-    expect(lateCleanupReceipt?.completedAt?.valueOf()).toBeGreaterThan(expiresAt.valueOf());
+    expect(lateCleanupReceipt?.completedAt).toEqual(new Date(expiresAt.valueOf() + 1));
   });
 
   it("does not certify stale absence after an in-flight publication becomes verified", async () => {
@@ -772,6 +813,45 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       decidedAt: START,
       createdAt: START,
     });
+  }
+
+  function ownerPreviewEnvironment(
+    applicationRevision: string,
+  ): Record<string, string | undefined> {
+    return {
+      VERCEL_GIT_COMMIT_SHA: applicationRevision,
+      BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
+        START,
+        applicationRevision,
+      ),
+      BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
+        "calendar_reading",
+        START,
+        applicationRevision,
+      ),
+      BRUNO_OWNER_PREVIEW_QUALIFICATION: JSON.stringify({
+        schemaVersion: "bruno.owner-preview-qualification.v1",
+        outcome: "passed",
+        audience: "owner",
+        ownerUserId: USER_ID,
+        operatorId: OPERATOR_ID,
+        stage: "owner_preview",
+        applicationRevision,
+        runtimeRevision: "runtime-v1",
+        capabilityManifest: ["openai", "calendar_reading"],
+        qualifiedAt: new Date(START.valueOf() - 60 * 60 * 1_000).toISOString(),
+        expiresAt: new Date(START.valueOf() + 7 * 24 * 60 * 60 * 1_000).toISOString(),
+        evidenceDigest: `sha256:${"d".repeat(64)}`,
+        gates: {
+          safeAuthorization: true,
+          realUse: true,
+          recovery: true,
+          revocation: true,
+          providerDisclosure: true,
+          cleanup: true,
+        },
+      }),
+    };
   }
 
   async function reset(): Promise<void> {

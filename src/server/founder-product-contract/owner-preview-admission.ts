@@ -11,6 +11,7 @@ import {
   type FounderProductContractTransaction,
   requireReadyFounderOperatorAuthorityInTransaction,
 } from "./operator-authority";
+import { requireFounderOwnerPreviewQualification } from "./preview-qualification";
 import { createDurableRecoveryArchive } from "./recovery-archive";
 import type { FounderRecoveryArchiveProvider } from "./recovery-archive-provider";
 
@@ -69,6 +70,19 @@ export async function admitFounderOperatorToOwnerPreview(
       throw new Error("Owner Preview requires an authenticated Clerk identity.");
     }
     const identitySubject = identity.subject;
+    const authority = await connection.db.transaction((tx) =>
+      requireReadyFounderOperatorAuthorityInTransaction(tx, userId),
+    );
+    const previewQualification = requireFounderOwnerPreviewQualification(
+      {
+        userId,
+        operatorId: authority.operatorId,
+        applicationRevision,
+        runtimeRevision: authority.runtimeRevision,
+        now,
+      },
+      environment,
+    );
     const archiveId = await createDurableRecoveryArchive(
       { action: "release_stage_admission", userId, now },
       provider,
@@ -77,6 +91,9 @@ export async function admitFounderOperatorToOwnerPreview(
     await connection.db.transaction(async (tx) => {
       const { operatorId, runtimeRevision } =
         await requireReadyFounderOperatorAuthorityInTransaction(tx, userId);
+      if (operatorId !== authority.operatorId || runtimeRevision !== authority.runtimeRevision) {
+        throw new Error("Owner Preview authority changed during admission.");
+      }
       const [archive] = await tx
         .select({ id: founderRecoveryArchives.id })
         .from(founderRecoveryArchives)
@@ -98,6 +115,7 @@ export async function admitFounderOperatorToOwnerPreview(
         runtimeRevision,
         identitySubject,
         qualificationEvidenceDigests: [
+          previewQualification.evidenceDigest,
           openAIQualification.evidence.evidenceDigest,
           calendarQualification.evidence.evidenceDigest,
         ],
@@ -127,8 +145,11 @@ export async function persistQualifiedFounderOwnerPreviewAdmissionInTransaction(
     ...input.qualificationEvidenceDigests,
     archiveEvidenceDigest,
   ];
-  const existingCandidates = await tx
+  const [latestDecision] = await tx
     .select({
+      outcome: founderReleaseDecisions.outcome,
+      applicationRevision: founderReleaseDecisions.applicationRevision,
+      runtimeRevision: founderReleaseDecisions.runtimeRevision,
       capabilityManifest: founderReleaseDecisions.capabilityManifest,
       evidenceDigests: founderReleaseDecisions.evidenceDigests,
     })
@@ -138,24 +159,26 @@ export async function persistQualifiedFounderOwnerPreviewAdmissionInTransaction(
         eq(founderReleaseDecisions.userId, input.userId),
         eq(founderReleaseDecisions.operatorId, input.operatorId),
         eq(founderReleaseDecisions.stage, "owner_preview"),
-        eq(founderReleaseDecisions.outcome, "enter"),
-        eq(founderReleaseDecisions.applicationRevision, input.applicationRevision),
-        eq(founderReleaseDecisions.runtimeRevision, input.runtimeRevision),
       ),
     )
-    .orderBy(desc(founderReleaseDecisions.decidedAt));
-  const alreadyQualified = existingCandidates.some(
-    (decision) =>
-      decision.capabilityManifest.length === capabilityManifest.length &&
-      capabilityManifest.every((capability) => decision.capabilityManifest.includes(capability)) &&
-      evidenceDigests.every((digest) => decision.evidenceDigests.includes(digest)),
-  );
+    .orderBy(desc(founderReleaseDecisions.decidedAt))
+    .limit(1)
+    .for("update");
+  const alreadyQualified =
+    (latestDecision?.outcome === "enter" || latestDecision?.outcome === "resume") &&
+    latestDecision.applicationRevision === input.applicationRevision &&
+    latestDecision.runtimeRevision === input.runtimeRevision &&
+    latestDecision.capabilityManifest.length === capabilityManifest.length &&
+    capabilityManifest.every((capability) =>
+      latestDecision.capabilityManifest.includes(capability),
+    ) &&
+    evidenceDigests.every((digest) => latestDecision.evidenceDigests.includes(digest));
   if (alreadyQualified) return;
   await tx.insert(founderReleaseDecisions).values({
     userId: input.userId,
     operatorId: input.operatorId,
     stage: "owner_preview",
-    outcome: "enter",
+    outcome: latestDecision?.outcome === "hold" ? "resume" : "enter",
     applicationRevision: input.applicationRevision,
     runtimeRevision: input.runtimeRevision,
     capabilityManifest,

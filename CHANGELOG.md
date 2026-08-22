@@ -22,9 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Owner Preview admission now requires a current encrypted, isolated-rebuild-verified Recovery
-  Archive outside the Droplet. Hourly reconciliation refreshes eligible archives every 24 hours,
-  expires both archive objects after 30 days with an absence-backed Deletion Receipt, bounds
-  S3-compatible operations, and keeps Infrastructure Retirement independent from archive health.
+  Archive outside the Droplet plus exact Owner, stage, application, runtime, and capability Preview
+  Qualification. Hourly reconciliation refreshes eligible archives every 24 hours, expires both
+  archive objects after 30 days with an absence-backed Deletion Receipt, bounds S3-compatible
+  operations, and keeps Infrastructure Retirement independent from archive health.
 - A protected production rollout now advances versioned defaults through QStash, an Approved
   Snapshot, release-attested readiness, and the measured runner size while new cold provisioning is
   halted. It exercises dispatch, snapshot, validation, and compatible stock/full runner-size

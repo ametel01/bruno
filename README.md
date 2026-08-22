@@ -241,6 +241,10 @@ from starting. Owner Preview and later Release Stages additionally require:
 
 - `BRUNO_RECOVERY_ARCHIVE_MASTER_KEY` — a dedicated, base64-encoded 32-byte key used only to wrap
   per-archive recovery credentials.
+- `BRUNO_OWNER_PREVIEW_QUALIFICATION` — the current
+  `bruno.owner-preview-qualification.v1` JSON record, scoped to the exact Owner, Operator,
+  `owner_preview` stage, application revision, runtime revision, OpenAI and Calendar capability
+  manifest, qualification window, evidence digest, and required safety gates.
 
 Configure the storage variables and master key together before admitting Owner Preview. Partial
 configuration fails closed. Do not reuse an Agent Secret, Connection Secret, cron secret, runner
@@ -336,8 +340,8 @@ vercel env add BRUNO_AGENT_SECRET_KEYS_JSON production
 vercel env add CRON_SECRET production
 ```
 
-Before any Owner Preview admission, add all five object-storage variables plus the dedicated
-Recovery Archive master key through encrypted prompts:
+Before any Owner Preview admission, add all five object-storage variables, the dedicated Recovery
+Archive master key, and the exact current Preview Qualification through encrypted prompts:
 
 ```sh
 vercel env add BRUNO_BACKUP_STORAGE_ENDPOINT_URL production
@@ -346,6 +350,7 @@ vercel env add BRUNO_BACKUP_STORAGE_REGION production
 vercel env add BRUNO_BACKUP_STORAGE_ACCESS_KEY_ID production
 vercel env add BRUNO_BACKUP_STORAGE_SECRET_ACCESS_KEY production
 vercel env add BRUNO_RECOVERY_ARCHIVE_MASTER_KEY production
+vercel env add BRUNO_OWNER_PREVIEW_QUALIFICATION production
 ```
 
 `vercel.json` schedules deployment and runtime reconciliation every minute and Recovery Archive
