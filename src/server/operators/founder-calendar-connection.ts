@@ -11,8 +11,13 @@ import {
   operatorCalendarResources,
   operators,
 } from "@/src/server/db/schema";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 import { reconcileFounderLimitedOperationForUser } from "@/src/server/operators/founder-limited-operation";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  deriveFounderConnectionRecovery,
+  type FounderRecoveryDto,
+} from "@/src/server/operators/founder-recovery";
 import {
   type FounderRelationshipObservation,
   ingestFounderRelationshipEvidenceForUser,
@@ -24,10 +29,6 @@ import {
   type OperatorSecretKeyring,
   parseOperatorSecretKeyring,
 } from "@/src/server/secrets/operator-secret-keyring";
-import {
-  deriveFounderConnectionRecovery,
-  type FounderRecoveryDto,
-} from "@/src/server/operators/founder-recovery";
 
 type FounderCalendarTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -756,10 +757,16 @@ export async function verifyFounderGoogleCalendarForUser(
         // relationship projection could not be refreshed in this attempt.
       }
     }
-    await reconcileFounderLimitedOperationForUser(userId, {
-      createConnection: () => connection,
-      now,
-    });
+    try {
+      await reconcileFounderLimitedOperationForUser(userId, {
+        createConnection: () => connection,
+        now,
+      });
+    } catch (error) {
+      if (!(error instanceof FounderReleaseStageAccessError)) throw error;
+      // Calendar readiness is an admission prerequisite. Before admission, there
+      // is no authorized Limited Operation to reconcile yet.
+    }
     return updated;
   } catch (error) {
     if (error instanceof FounderCalendarConnectionError) throw error;

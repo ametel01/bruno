@@ -251,6 +251,11 @@ Configure the storage variables and master key together before admitting Owner P
 configuration fails closed. Do not reuse an Agent Secret, Connection Secret, cron secret, runner
 credential, or provider credential as this key.
 
+Recovery Archive storage additionally fails closed unless the HTTPS endpoint identifies supported
+managed object storage independent from the Operator Droplet: Amazon S3, DigitalOcean Spaces,
+Cloudflare R2, or Backblaze B2. Arbitrary S3-compatible and self-hosted MinIO endpoints remain
+usable for ordinary backups but cannot satisfy Recovery Archive placement.
+
 Recovery Archive buckets must have object versioning disabled. Bruno checks the live bucket
 versioning response before both creation and deletion and fails closed when permanent deletion
 cannot be proved; a delete marker over retained object versions does not satisfy the contract.
@@ -268,7 +273,10 @@ or partially failed creation remains discoverable for bounded cleanup. A complet
 Retirement stops new daily copies while the final retained archive continues to its 30-day expiry;
 a later `resume` Release Decision can start protection again for a restored Operator. Production
 Operator preparation grants Owner Preview admission only after current OpenAI and Calendar Preview
-Qualification and the initial archive's isolated rebuild check all pass. Founder workspace reads
+Qualification and the initial archive's isolated rebuild check all pass. That check inserts a
+synthetic Operator, preparation, and safe reconnect-required runtime through Bruno's actual
+PostgreSQL schema inside an always-rolled-back transaction, proving the archived mapping satisfies
+the current enums, foreign keys, uniqueness rules, and check constraints. Founder workspace reads
 require a prior exact-revision Owner Preview admission. New work and effect-starting transactions
 additionally require a verified archive observed within the last 24 hours and every capability named
 by that boundary to remain available. A Release Hold keeps the complete admitted manifest while

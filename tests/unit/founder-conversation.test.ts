@@ -1,15 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  operatorActionPreviews,
   operatorAiConnections,
   operatorConversationMessages,
+  operatorConversations,
   operatorConversationWorks,
   operatorPreparations,
   operatorRuntimes,
   users,
 } from "@/src/server/db/schema";
-import { ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY } from "@/src/server/operators/founder-ai-routing";
 import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
+import { ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY } from "@/src/server/operators/founder-ai-routing";
 import {
   assertFounderExternalActionsNotPaused,
   getFounderExternalActionPauseForUser,
@@ -67,6 +69,14 @@ describe("Founder Conversation application seam", () => {
   afterEach(async () => {
     await reset(connection);
     await connection.close();
+  });
+
+  it("projects an absent Conversation without creating workspace state", async () => {
+    await expect(
+      getFounderConversationForUser(OWNER_ID, { createConnection: () => connection }),
+    ).resolves.toBeNull();
+    await expect(connection.db.select().from(operatorConversations)).resolves.toHaveLength(0);
+    await expect(connection.db.select().from(operatorActionPreviews)).resolves.toHaveLength(0);
   });
 
   it("persists one canonical conversation and returns the Operator response", async () => {
@@ -553,7 +563,7 @@ describe("Founder Conversation application seam", () => {
     const persisted = await getFounderConversationForUser(OWNER_ID, {
       createConnection: () => connection,
     });
-    expect(persisted.messages.map(({ sequence, body }) => [sequence, body])).toEqual([
+    expect(persisted?.messages.map(({ sequence, body }) => [sequence, body])).toEqual([
       [1, "First message"],
       [2, "Response for request-first"],
       [3, "Second message"],

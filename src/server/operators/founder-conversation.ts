@@ -11,6 +11,12 @@ import {
   operatorConversations,
   operatorConversationWorks,
 } from "@/src/server/db/schema";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import {
+  FounderReleaseStageAccessError,
+  requireFounderOwnerPreviewAccessForUser,
+  requireFounderOwnerPreviewAccessInTransaction,
+} from "@/src/server/founder-product-contract/release-stage-access";
 import {
   type FounderActionPreviewDto,
   projectFounderActionPreview,
@@ -20,9 +26,9 @@ import {
   requireReadyFounderAiConnectionForUser,
 } from "@/src/server/operators/founder-ai-connection";
 import {
-  routeFounderAiProvider,
   type FounderAiCompatibilityPolicy,
   type FounderAiProvider,
+  routeFounderAiProvider,
 } from "@/src/server/operators/founder-ai-routing";
 import {
   buildFounderAiCheckpointIdentity,
@@ -34,18 +40,13 @@ import {
 } from "@/src/server/operators/founder-ai-work";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
-  deriveFounderConversationRecovery,
-  type FounderRecoveryDto,
-} from "@/src/server/operators/founder-recovery";
-import {
   type FounderProposedActionDto,
   projectFounderProposedAction,
 } from "@/src/server/operators/founder-proposed-actions";
 import {
-  FounderReleaseStageAccessError,
-  requireFounderOwnerPreviewAccessInTransaction,
-} from "@/src/server/founder-product-contract/release-stage-access";
-import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+  deriveFounderConversationRecovery,
+  type FounderRecoveryDto,
+} from "@/src/server/operators/founder-recovery";
 
 type FounderConversationTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -83,7 +84,7 @@ export type FounderConversationDto = {
   status: "active" | "paused";
   messages: FounderConversationMessageDto[];
   activeWork: FounderConversationWorkDto | null;
-  actionPreview: FounderActionPreviewDto;
+  actionPreview: FounderActionPreviewDto | null;
   proposedAction?: FounderProposedActionDto | null;
   createdAt: string;
   updatedAt: string;
@@ -127,6 +128,7 @@ export type FounderConversationDependencies = {
   ) => Promise<FounderAiConnectionDto>;
   applicationRevision?: string;
   requireOwnerPreviewAccess?: typeof requireFounderOwnerPreviewAccessInTransaction;
+  requireOwnerPreviewAccessForUser?: typeof requireFounderOwnerPreviewAccessForUser;
   maxMessageLength?: number;
 };
 
@@ -153,14 +155,18 @@ export class FounderConversationError extends Error {
 export async function getFounderConversationForUser(
   userId: string,
   dependencies: Pick<FounderConversationDependencies, "createConnection"> = {},
-): Promise<FounderConversationDto> {
+): Promise<FounderConversationDto | null> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
     return await connection.db.transaction(async (tx) => {
-      const conversation = await ensureConversation(tx, operator.id, new Date());
-      return projectConversation(tx, conversation);
+      const [conversation] = await tx
+        .select()
+        .from(operatorConversations)
+        .where(eq(operatorConversations.operatorId, operator.id))
+        .limit(1);
+      return conversation ? projectConversation(tx, conversation) : null;
     });
   } finally {
     if (ownsConnection) await connection.close();
@@ -196,6 +202,32 @@ export async function sendFounderConversationMessageForUser(
   const requestId = normalizeRequestId(dependencies.requestId) ?? makeId();
 
   try {
+    const preflightAt = now();
+    if (dependencies.requireOwnerPreviewAccessForUser) {
+      await dependencies.requireOwnerPreviewAccessForUser(
+        userId,
+        preflightAt,
+        {
+          createConnection: () => connection,
+          ...(dependencies.applicationRevision
+            ? { applicationRevision: dependencies.applicationRevision }
+            : {}),
+        },
+        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+      );
+    } else if (!dependencies.requireOwnerPreviewAccess) {
+      await requireFounderOwnerPreviewAccessForUser(
+        userId,
+        preflightAt,
+        {
+          createConnection: () => connection,
+          ...(dependencies.applicationRevision
+            ? { applicationRevision: dependencies.applicationRevision }
+            : {}),
+        },
+        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+      );
+    }
     const started = await connection.db.transaction(async (tx) => {
       await lockOperator(tx, operator.id);
       const checkedAt = now();
@@ -389,6 +421,32 @@ export async function resumeFounderConversationWorkForUser(
   const now = dependencies.now ?? (() => new Date());
 
   try {
+    const preflightAt = now();
+    if (dependencies.requireOwnerPreviewAccessForUser) {
+      await dependencies.requireOwnerPreviewAccessForUser(
+        userId,
+        preflightAt,
+        {
+          createConnection: () => connection,
+          ...(dependencies.applicationRevision
+            ? { applicationRevision: dependencies.applicationRevision }
+            : {}),
+        },
+        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+      );
+    } else if (!dependencies.requireOwnerPreviewAccess) {
+      await requireFounderOwnerPreviewAccessForUser(
+        userId,
+        preflightAt,
+        {
+          createConnection: () => connection,
+          ...(dependencies.applicationRevision
+            ? { applicationRevision: dependencies.applicationRevision }
+            : {}),
+        },
+        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+      );
+    }
     const started = await connection.db.transaction(async (tx) => {
       await lockOperator(tx, operator.id);
       await requireConversationWorkAccess(tx, userId, now(), dependencies);

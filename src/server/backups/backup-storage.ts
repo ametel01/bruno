@@ -104,6 +104,28 @@ export function createBackupObjectStorage(
   return config ? new S3CompatibleBackupObjectStorage(config) : null;
 }
 
+/**
+ * Recovery Archives must live on managed object storage whose TLS hostname proves
+ * that it is independent from the Founder Operator Droplet. Arbitrary S3-compatible
+ * endpoints remain valid for ordinary backups, but cannot satisfy this boundary.
+ */
+export function assertIndependentRecoveryArchiveStorage(
+  config: S3CompatibleBackupStorageConfig,
+): void {
+  const hostname = new URL(config.endpointUrl).hostname.toLowerCase();
+  const managedProviderHost = [
+    /(^|\.)digitaloceanspaces\.com$/,
+    /(^|\.)s3([.-][a-z0-9-]+)*\.amazonaws\.com$/,
+    /(^|\.)r2\.cloudflarestorage\.com$/,
+    /(^|\.)backblazeb2\.com$/,
+  ].some((pattern) => pattern.test(hostname));
+  if (!managedProviderHost) {
+    throw new EnvValidationError([
+      "BRUNO_BACKUP_STORAGE_ENDPOINT_URL must identify supported managed object storage independent from the Operator Droplet for Recovery Archives.",
+    ]);
+  }
+}
+
 export function backupStorageFailure(
   operation: "upload" | "download" | "delete" | "exists" | "deletion_safety",
 ): BackupStorageFailure {

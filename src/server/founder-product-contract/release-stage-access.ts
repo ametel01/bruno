@@ -109,11 +109,6 @@ export async function requireFounderOwnerPreviewAccessInTransaction(
     requiredCapabilities: readonly FounderOwnerPreviewCapability[];
   },
 ): Promise<void> {
-  await reconcileFounderOwnerPreviewQualificationExpiryInTransaction(tx, {
-    userId: input.userId,
-    now: input.now,
-    applicationRevision: input.applicationRevision,
-  });
   const access = await getFounderOwnerPreviewAccessInTransaction(tx, input);
   if (!requirementsAvailable(access.availableCapabilities, input.requiredCapabilities)) {
     throw new FounderReleaseStageAccessError();

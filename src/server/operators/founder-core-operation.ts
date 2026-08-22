@@ -4,8 +4,6 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { requireFounderOwnerPreviewAccessInTransaction } from "@/src/server/founder-product-contract/release-stage-access";
-import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import type * as schema from "@/src/server/db/schema";
 import {
   operatorAiConnections,
@@ -20,10 +18,16 @@ import {
   operatorProcessingConsents,
   operatorProductGuardrails,
 } from "@/src/server/db/schema";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import {
+  requireFounderOwnerPreviewAccessForUser,
+  requireFounderOwnerPreviewAccessInTransaction,
+} from "@/src/server/founder-product-contract/release-stage-access";
 import {
   type FounderActionPreviewDto,
   projectFounderActionPreview,
 } from "@/src/server/operators/founder-action-previews";
+import { selectFounderAiProvider } from "@/src/server/operators/founder-ai-routing";
 import {
   type FounderMorningBriefProjection,
   prepareFounderMorningBrief,
@@ -38,7 +42,6 @@ import {
   type FounderProposedActionDto,
   projectFounderProposedAction,
 } from "@/src/server/operators/founder-proposed-actions";
-import { selectFounderAiProvider } from "@/src/server/operators/founder-ai-routing";
 import type { FounderRecoveryDto } from "@/src/server/operators/founder-recovery";
 
 type CoreTransaction = Parameters<
@@ -96,7 +99,7 @@ export type FounderCoreOperationDto = {
     items?: FounderMorningBriefProjection["items"];
     delivery?: FounderMorningBriefProjection["delivery"];
   } | null;
-  actionPreview?: FounderActionPreviewDto;
+  actionPreview?: FounderActionPreviewDto | null;
   proposedAction?: FounderProposedActionDto | null;
   activatedAt: string | null;
 };
@@ -106,6 +109,7 @@ export type FounderCoreOperationDependencies = {
   now?: () => Date;
   env?: Record<string, string | undefined>;
   requireReleaseStageAccess?: typeof requireFounderOwnerPreviewAccessInTransaction;
+  requireReleaseStageAccessForUser?: typeof requireFounderOwnerPreviewAccessForUser;
 };
 
 export class FounderCoreOperationError extends Error {
@@ -142,8 +146,9 @@ export async function confirmFounderCoreProcessingConsentForUser(
   dependencies: FounderCoreOperationDependencies = {},
 ): Promise<FounderCoreOperationDto> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const at = dependencies.now?.() ?? new Date();
+  await requireCoreOperationReleaseStagePreflight(userId, at, dependencies);
   return withConnection(dependencies, async (connection) => {
-    const at = dependencies.now?.() ?? new Date();
     return connection.db.transaction(async (tx) => {
       await requireCoreOperationReleaseStageAccess(tx, userId, at, dependencies);
       await lockOperator(tx, operator.id);
@@ -243,9 +248,10 @@ export async function reconcileFounderCoreOperationForUser(
   dependencies: FounderCoreOperationDependencies = {},
 ): Promise<FounderCoreOperationDto | null> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const at = dependencies.now?.() ?? new Date();
+  await requireCoreOperationReleaseStagePreflight(userId, at, dependencies);
   return withConnection(dependencies, async (connection) =>
     connection.db.transaction(async (tx) => {
-      const at = dependencies.now?.() ?? new Date();
       await requireCoreOperationReleaseStageAccess(tx, userId, at, dependencies);
       await lockOperator(tx, operator.id);
       const operation = await ensureCoreOperation(tx, operator.id, at);
@@ -282,8 +288,9 @@ export async function openFounderCoreBriefForUser(
   dependencies: FounderCoreOperationDependencies = {},
 ): Promise<FounderCoreOperationDto> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const at = dependencies.now?.() ?? new Date();
+  await requireCoreOperationReleaseStagePreflight(userId, at, dependencies);
   return withConnection(dependencies, async (connection) => {
-    const at = dependencies.now?.() ?? new Date();
     return connection.db.transaction(async (tx) => {
       await requireCoreOperationReleaseStageAccess(tx, userId, at, dependencies);
       await lockOperator(tx, operator.id);
@@ -758,6 +765,32 @@ async function requireCoreOperationReleaseStageAccess(
       requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
     },
   );
+}
+
+async function requireCoreOperationReleaseStagePreflight(
+  userId: string,
+  now: Date,
+  dependencies: FounderCoreOperationDependencies,
+): Promise<void> {
+  const accessDependencies = {
+    ...(dependencies.createConnection ? { createConnection: dependencies.createConnection } : {}),
+    ...(dependencies.env ? { env: dependencies.env } : {}),
+  };
+  if (dependencies.requireReleaseStageAccessForUser) {
+    await dependencies.requireReleaseStageAccessForUser(
+      userId,
+      now,
+      accessDependencies,
+      FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+    );
+  } else if (!dependencies.requireReleaseStageAccess) {
+    await requireFounderOwnerPreviewAccessForUser(
+      userId,
+      now,
+      accessDependencies,
+      FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+    );
+  }
 }
 
 function digest(value: unknown): string {

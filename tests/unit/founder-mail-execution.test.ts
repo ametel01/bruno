@@ -240,6 +240,12 @@ describe("Founder approved Gmail execution", () => {
     ).rejects.toMatchObject({ code: "owner_preview_access_required" });
     expect(sendCount).toBe(0);
     expect(await connection.db.select().from(operatorActionExecutionAttempts)).toHaveLength(0);
+    expect(
+      (await connection.db.select().from(operatorActionAuthorizations))[0]?.claimedAt,
+    ).toBeNull();
+    expect((await connection.db.select().from(operatorProposedActions))[0]?.state).toBe(
+      "authorized",
+    );
   });
 
   it("uses the controlled send time when Product Entitlement reaches its deadline", async () => {
@@ -277,6 +283,7 @@ describe("Founder approved Gmail execution", () => {
         keyring: KEYRING,
         env: ENV,
         now: () => CONTROLLED_DEADLINE,
+        requireReleaseStageAccess: async () => undefined,
       }),
     ).rejects.toThrow("Product Entitlement no longer authorizes external work");
     expect(sendCount).toBe(0);

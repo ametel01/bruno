@@ -3,8 +3,8 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { desc, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type * as schema from "@/src/server/db/schema";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import { operatorActionPreviewRevisions, operatorActionPreviews } from "@/src/server/db/schema";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 
@@ -78,17 +78,10 @@ export class FounderActionPreviewError extends Error {
 export async function getFounderActionPreviewForUser(
   userId: string,
   dependencies: FounderActionPreviewDependencies = {},
-): Promise<FounderActionPreviewDto> {
+): Promise<FounderActionPreviewDto | null> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   return withConnection(dependencies, (connection) =>
-    connection.db.transaction((tx) =>
-      projectOrCreateFounderActionPreview(
-        tx,
-        operator.id,
-        dependencies.now?.() ?? new Date(),
-        dependencies.randomUUID ? { randomUUID: dependencies.randomUUID } : undefined,
-      ),
-    ),
+    connection.db.transaction((tx) => projectFounderActionPreview(tx, operator.id)),
   );
 }
 
@@ -185,31 +178,20 @@ export async function dismissFounderMailSendingOfferForUser(
 export async function projectFounderActionPreview(
   tx: ActionPreviewTransaction,
   operatorId: string,
-  now = new Date(),
-): Promise<FounderActionPreviewDto> {
-  return projectOrCreateFounderActionPreview(tx, operatorId, now);
-}
-
-async function projectOrCreateFounderActionPreview(
-  tx: ActionPreviewTransaction,
-  operatorId: string,
-  now: Date,
-  options: { randomUUID?: () => string } = {},
-): Promise<FounderActionPreviewDto> {
-  const preview = await ensurePreview(tx, operatorId, now, options);
+): Promise<FounderActionPreviewDto | null> {
+  const [preview] = await tx
+    .select()
+    .from(operatorActionPreviews)
+    .where(eq(operatorActionPreviews.operatorId, operatorId))
+    .limit(1);
+  if (!preview) return null;
   const [latest] = await tx
     .select()
     .from(operatorActionPreviewRevisions)
     .where(eq(operatorActionPreviewRevisions.previewId, preview.id))
     .orderBy(desc(operatorActionPreviewRevisions.revision))
     .limit(1);
-  if (!latest) {
-    throw new FounderActionPreviewError(
-      "preview_unavailable",
-      "The Action Preview has no current draft.",
-      503,
-    );
-  }
+  if (!latest) return null;
   return projectPreview(tx, preview, latest);
 }
 

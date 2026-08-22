@@ -2,6 +2,7 @@ import "server-only";
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import {
+  assertIndependentRecoveryArchiveStorage,
   createBackupObjectStorage,
   type DeletableBackupObjectStorage,
   readBackupStorageConfig,
@@ -9,13 +10,13 @@ import {
 import { founderProductContractDigest } from "./digest";
 import {
   assertFounderRecoveryArchiveDeletionIdentity,
+  FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON,
   type FounderRecoveryArchiveCreationInput,
   type FounderRecoveryArchiveCreationOutcome,
   type FounderRecoveryArchiveDeletionIdentity,
   type FounderRecoveryArchiveDeletionOutcome,
   type FounderRecoveryArchiveDurableState,
   type FounderRecoveryArchiveProvider,
-  FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON,
   founderRecoveryArchiveObjectIdentity,
 } from "./recovery-archive-provider";
 import {
@@ -264,7 +265,9 @@ export function readFounderRecoveryArchiveMasterKey(
 export function createEncryptedFounderRecoveryArchiveProvider(
   input: Record<string, string | undefined> = process.env,
 ): EncryptedFounderRecoveryArchiveProvider | null {
-  const storage = createBackupObjectStorage(readBackupStorageConfig(input));
+  const storageConfig = readBackupStorageConfig(input);
+  if (storageConfig) assertIndependentRecoveryArchiveStorage(storageConfig);
+  const storage = createBackupObjectStorage(storageConfig);
   const masterKey = readFounderRecoveryArchiveMasterKey(input);
   if (!storage && !masterKey) return null;
   if (!storage || !masterKey) {

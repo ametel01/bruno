@@ -3,8 +3,8 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type * as schema from "@/src/server/db/schema";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import {
   operatorCalendarConnections,
   operatorMailConnections,
@@ -13,11 +13,12 @@ import {
   operatorRelationshipEvidence,
   operatorRelationshipRecords,
 } from "@/src/server/db/schema";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
   type FounderOwnerPreviewAccessRequirement,
+  requireFounderOwnerPreviewAccessForUser,
   requireFounderOwnerPreviewAccessInTransaction,
 } from "@/src/server/founder-product-contract/release-stage-access";
-import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 
 type FounderRelationshipTransaction = Parameters<
@@ -121,6 +122,7 @@ export type FounderRelationshipsDependencies = {
   now?: () => Date;
   randomUUID?: () => string;
   requireReleaseStageAccess?: typeof requireFounderOwnerPreviewAccessInTransaction;
+  requireReleaseStageAccessForUser?: typeof requireFounderOwnerPreviewAccessForUser;
 };
 
 export class FounderRelationshipsError extends Error {
@@ -178,6 +180,28 @@ export async function ingestFounderRelationshipEvidenceForUser(
   const now = dependencies.now ?? (() => new Date());
   const makeId = dependencies.randomUUID ?? randomUUID;
   try {
+    const preflightAt = now();
+    if (dependencies.requireReleaseStageAccessForUser) {
+      await dependencies.requireReleaseStageAccessForUser(
+        userId,
+        preflightAt,
+        {
+          createConnection: () => connection,
+          ...(dependencies.env ? { env: dependencies.env } : {}),
+        },
+        founderRelationshipEvidenceRequirement(observations),
+      );
+    } else if (!dependencies.requireReleaseStageAccess) {
+      await requireFounderOwnerPreviewAccessForUser(
+        userId,
+        preflightAt,
+        {
+          createConnection: () => connection,
+          ...(dependencies.env ? { env: dependencies.env } : {}),
+        },
+        founderRelationshipEvidenceRequirement(observations),
+      );
+    }
     await connection.db.transaction(async (tx) => {
       await (
         dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction

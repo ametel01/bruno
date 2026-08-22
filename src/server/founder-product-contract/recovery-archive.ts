@@ -24,10 +24,10 @@ import {
 } from "./operator-authority";
 import {
   assertFounderRecoveryArchiveDeletionIdentity,
+  FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON,
   type FounderRecoveryArchiveCreationProvider,
   type FounderRecoveryArchiveDurableState,
   type FounderRecoveryArchiveProvider,
-  FOUNDER_RECOVERY_ARCHIVE_PAUSE_REASON,
   founderRecoveryArchiveObjectIdentity,
 } from "./recovery-archive-provider";
 
@@ -239,6 +239,9 @@ export async function fulfillRecoveryArchiveIntent(
         and(
           eq(founderRecoveryArchives.id, archiveId),
           eq(founderRecoveryArchives.status, "pending"),
+          expectedRuntimeRevision === undefined
+            ? undefined
+            : eq(founderRecoveryArchives.runtimeRevision, expectedRuntimeRevision),
         ),
       )
       .returning({ id: founderRecoveryArchives.id });
@@ -270,6 +273,9 @@ export async function fulfillRecoveryArchiveIntent(
         and(
           eq(founderRecoveryArchives.id, archiveId),
           eq(founderRecoveryArchives.status, "pending"),
+          expectedRuntimeRevision === undefined
+            ? undefined
+            : eq(founderRecoveryArchives.runtimeRevision, expectedRuntimeRevision),
         ),
       );
     if (failClosed) throw error;

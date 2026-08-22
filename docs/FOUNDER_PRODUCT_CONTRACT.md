@@ -115,7 +115,12 @@ and its recovery-only credential. The production adapter uses the configured S3-
 store under the reserved `founder-recovery/` namespace, while the hourly protected reconciler
 refreshes two schedule intervals before the 24-hour access boundary and processes expiry for retained
 archives even when the Owner is no longer eligible for new archives. Neither the manual backup
-manifest nor a DigitalOcean snapshot can enter the v1 archive state. Archive and recovery-credential
+manifest nor a DigitalOcean snapshot can enter the v1 archive state. Recovery Archive storage must
+resolve to a supported managed-provider hostname (Amazon S3, DigitalOcean Spaces, Cloudflare R2, or
+Backblaze B2); self-hosted or arbitrary S3-compatible endpoints fail closed because they do not
+prove off-Droplet placement. Restore verification writes the archive projection through the actual
+Operator, preparation, and runtime PostgreSQL tables in an always-rolled-back synthetic transaction,
+so Bruno's current persistence constraints—not a field-copy model—decide eligibility. Archive and recovery-credential
 deletion requires a live proof that bucket versioning is disabled, so a delete marker that leaves
 recoverable object versions cannot produce a completed receipt. Archive and recovery-credential
 object identities are persisted before provider upload, so interrupted, partial, and failed

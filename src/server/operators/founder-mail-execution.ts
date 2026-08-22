@@ -15,8 +15,11 @@ import {
   operatorPrimaryCommunicationsSuites,
   operatorProposedActions,
 } from "@/src/server/db/schema";
-import { requireFounderOwnerPreviewAccessInTransaction } from "@/src/server/founder-product-contract/release-stage-access";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import {
+  requireFounderOwnerPreviewAccessForUser,
+  requireFounderOwnerPreviewAccessInTransaction,
+} from "@/src/server/founder-product-contract/release-stage-access";
 import {
   assertFounderExternalActionsNotPausedInTransaction,
   type FounderAiWorkTransaction,
@@ -48,6 +51,7 @@ export type FounderMailExecutionDependencies = FounderProposedActionDependencies
   Pick<FounderMailSendingConnectionDependencies, "keyring" | "env"> & {
     adapter?: FounderGoogleMailSendingAdapter;
     requireReleaseStageAccess?: typeof requireFounderOwnerPreviewAccessInTransaction;
+    requireReleaseStageAccessForUser?: typeof requireFounderOwnerPreviewAccessForUser;
   };
 
 export type FounderActionReceiptDto = {
@@ -108,7 +112,37 @@ export async function executeFounderApprovedGmailActionForUser(
     );
 
   try {
+    const preflightAt = now();
+    if (dependencies.requireReleaseStageAccessForUser) {
+      await dependencies.requireReleaseStageAccessForUser(
+        userId,
+        preflightAt,
+        {
+          createConnection: () => connection,
+          ...(dependencies.env ? { env: dependencies.env } : {}),
+        },
+        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+      );
+    } else if (!dependencies.requireReleaseStageAccess) {
+      await requireFounderOwnerPreviewAccessForUser(
+        userId,
+        preflightAt,
+        {
+          createConnection: () => connection,
+          ...(dependencies.env ? { env: dependencies.env } : {}),
+        },
+        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+      );
+    }
     const prepared = await connection.db.transaction(async (tx) => {
+      await (
+        dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction
+      )(tx, {
+        userId,
+        now: preflightAt,
+        applicationRevision: resolveApplicationRevision(dependencies.env),
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+      });
       const [action] = await tx
         .select()
         .from(operatorProposedActions)

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { EnvValidationError } from "@/src/env/validation";
 import {
+  assertIndependentRecoveryArchiveStorage,
   backupStorageFailure,
   buildBackupStorageUri,
   createBackupObjectStorage,
@@ -148,6 +149,28 @@ describe("backup object storage boundary", () => {
     ).toMatchObject({
       endpointUrl: "http://127.0.0.1:9000",
     });
+  });
+
+  it("rejects Recovery Archive storage that is not independently managed", () => {
+    const minio = readBackupStorageConfig({
+      ...COMPLETE_ENV,
+      BRUNO_BACKUP_STORAGE_ENDPOINT_URL: "https://operator-droplet.example.com",
+    });
+    if (!minio) throw new Error("Expected storage configuration.");
+    expect(() => assertIndependentRecoveryArchiveStorage(minio)).toThrow(
+      "managed object storage independent from the Operator Droplet",
+    );
+    const ec2 = readBackupStorageConfig({
+      ...COMPLETE_ENV,
+      BRUNO_BACKUP_STORAGE_ENDPOINT_URL: "https://ec2-203-0-113-10.compute-1.amazonaws.com",
+    });
+    if (!ec2) throw new Error("Expected storage configuration.");
+    expect(() => assertIndependentRecoveryArchiveStorage(ec2)).toThrow(
+      "managed object storage independent from the Operator Droplet",
+    );
+    const spaces = readBackupStorageConfig(COMPLETE_ENV);
+    if (!spaces) throw new Error("Expected storage configuration.");
+    expect(() => assertIndependentRecoveryArchiveStorage(spaces)).not.toThrow();
   });
 
   it("uploads and downloads through the S3-compatible adapter without leaking credentials", async () => {

@@ -365,23 +365,6 @@ export async function getFounderMorningBriefPreferencesForUser(
         preparation?.timezone ?? "UTC",
         deliveryLocalTime,
       );
-      if (preference && preference.nextDeliveryAt?.getTime() !== nextDeliveryAt.getTime()) {
-        await tx
-          .update(operatorMorningBriefPreferences)
-          .set({ nextDeliveryAt, updatedAt: now })
-          .where(eq(operatorMorningBriefPreferences.id, preference.id));
-      } else if (!preference) {
-        await tx
-          .insert(operatorMorningBriefPreferences)
-          .values({
-            operatorId: operator.id,
-            deliveryLocalTime,
-            nextDeliveryAt,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .onConflictDoNothing({ target: operatorMorningBriefPreferences.operatorId });
-      }
       return {
         operatorId: operator.id,
         localTime: deliveryLocalTime,

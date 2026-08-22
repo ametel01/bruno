@@ -407,18 +407,30 @@ async function prepareInfrastructureRetirement(
     const leaseExpiresAt = new Date(input.now.valueOf() + 5 * 60 * 1_000);
     let recoveryArchiveId = existing?.recoveryArchiveId ?? null;
     let archiveNeedsExecution = false;
+    let archiveRuntimeRevision = runtime.configRevision;
 
     if (existing) {
       if (!recoveryArchiveId) {
         throw new Error("Infrastructure Retirement is missing its Recovery Archive intent.");
       }
       const [archive] = await tx
-        .select({ status: founderRecoveryArchives.status })
+        .select({
+          status: founderRecoveryArchives.status,
+          runtimeRevision: founderRecoveryArchives.runtimeRevision,
+        })
         .from(founderRecoveryArchives)
         .where(eq(founderRecoveryArchives.id, recoveryArchiveId))
         .limit(1);
       if (!archive) throw new Error("Infrastructure Retirement Recovery Archive is missing.");
-      archiveNeedsExecution = archive.status === "pending";
+      if (archive.status === "pending" && !archive.runtimeRevision) {
+        await tx
+          .update(founderRecoveryArchives)
+          .set({ status: "failed", failureCode: "archive_runtime_revision_unavailable" })
+          .where(eq(founderRecoveryArchives.id, recoveryArchiveId));
+      } else {
+        archiveNeedsExecution = archive.status === "pending";
+        archiveRuntimeRevision = archive.runtimeRevision ?? runtime.configRevision;
+      }
       await tx
         .update(founderInfrastructureRetirements)
         .set({
@@ -486,7 +498,7 @@ async function prepareInfrastructureRetirement(
       leaseToken,
       runnerId: runner.id,
       operatorId,
-      runtimeRevision: runtime.configRevision,
+      runtimeRevision: archiveRuntimeRevision,
       recoveryArchiveId,
       archiveNeedsExecution,
       expectation,
