@@ -144,6 +144,22 @@ the runtime cannot remain Ready after its Droplet and firewall are absent. Archi
 includes the complete external-action pause state—boolean, a closed non-secret recovery reason, and
 timestamp—rather than a flag that cannot be persisted safely after restoration. Raw
 Founder-controlled pause text is excluded from the archive allowlist.
+
+The same exact-candidate lifecycle seam records the External Beta Preview Qualifications as five
+independent, immutable capability records: OpenAI, Anthropic, Calendar reading, Gmail reading, and
+one-to-one Gmail sending. Every record binds the named cohort, application revision, runtime
+revision, sanitized evidence digest, observation time, and expiry. The complete manifest remains
+unavailable when any record or its matching Connected Acceptance evidence is missing, malformed,
+stale, mismatched, or expired; no AI provider or Gmail capability can borrow a sibling's evidence.
+This qualification does not admit an External Beta participant by itself. Later admission must bind
+the complete manifest in an explicit Release Decision. After admission, the persisted per-capability
+state supports scoped degradation: an unavailable provider or Company Connection pauses only its
+dependent work while unrelated capabilities and Safe Work Checkpoints remain available. AI routing
+continues to select only Ready provider accounts the Founder explicitly connected, permits OpenAI,
+Anthropic, or both, and has no Bruno-funded fallback. The Founder API and reusable capability view
+publish only ordinary labels and Available or Paused state; cohort IDs, revisions, evidence digests,
+models, credentials, Hermes details, runners, and raw provider evidence remain server-only.
+
 Delayed or
 reordered commerce events cannot replace newer authority or extend a retirement clock; reactivation
 requires a newly pending Owner-bound Checkout Correlation. DigitalOcean cleanup is derived from

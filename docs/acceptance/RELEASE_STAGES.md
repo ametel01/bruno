@@ -200,6 +200,13 @@ or Founder Acceptance Evidence. Gmail reading and Gmail sending qualify independ
 hidden during Owner Preview and Trusted Preview, but both Anthropic and OpenAI must qualify for
 External Beta and pass Connected Acceptance before Initial General Release.
 
+The External Beta boundary persists one record per capability with the named cohort, exact
+application and runtime revisions, sanitized evidence digest, observation time, and expiry. The
+admission manifest is all-or-nothing, while post-admission capability status remains independent so
+one lost qualification can pause only its affected work. Founder-facing status uses Available and
+Paused labels and does not expose candidate revisions, evidence digests, provider internals, or
+runtime configuration.
+
 ## Promotion authority
 
 Elapsed time, participant count, telemetry, and prior-stage completion never promote Bruno.Ai

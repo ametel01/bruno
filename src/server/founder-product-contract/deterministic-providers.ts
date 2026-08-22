@@ -24,6 +24,9 @@ export type FounderLifecycleFailureOperation =
   | "openAI.verify_connection"
   | "anthropic.verify_connection"
   | "google.verify_connection"
+  | "google.verify_calendar_reading"
+  | "google.verify_gmail_reading"
+  | "google.verify_gmail_sending"
   | "lemonSqueezy.read_subscription"
   | "archive.create"
   | "archive.corrupt"
@@ -87,12 +90,23 @@ export function deterministicFounderLifecycleProviders(input: {
       for (const operation of [
         "openAI.verify_connection",
         "anthropic.verify_connection",
-        "google.verify_connection",
+        "google.verify_calendar_reading",
+        "google.verify_gmail_reading",
+        "google.verify_gmail_sending",
       ] as const) {
         calls.push(operation);
+        if (operation.startsWith("google.") && failures.has("google.verify_connection")) {
+          throw new Error("google.verify_connection failed deterministically.");
+        }
         failIfConfigured(failures, operation);
       }
-      return { openAI: true, anthropic: true, google: true };
+      return {
+        openAI: true,
+        anthropic: true,
+        calendarReading: true,
+        gmailReading: true,
+        gmailSending: true,
+      };
     },
     async readSubscription({ subscriptionId }) {
       calls.push("lemonSqueezy.read_subscription");

@@ -18,6 +18,7 @@ export const FOUNDER_PRODUCT_CONTRACT_INVARIANTS = [
     id: "independent_capability_degradation",
     kind: "automated",
     evidence: [
+      "tests/unit/founder-external-beta-qualification.test.ts",
       "tests/unit/founder-ai-routing.test.ts",
       "tests/unit/founder-calendar-connection.test.ts",
       "tests/unit/founder-mail-connection.test.ts",
@@ -80,6 +81,9 @@ export const FOUNDER_PRODUCT_CONTRACT_UNIT_FILES = [
   "tests/unit/founder-limited-operation.test.ts",
   "tests/unit/founder-core-operation.test.ts",
   "tests/unit/founder-ai-routing.test.ts",
+  "tests/unit/founder-external-beta-qualification.test.ts",
+  "tests/unit/founder-external-beta-manifest-route.test.ts",
+  "tests/unit/founder-external-beta-manifest-ui.test.tsx",
   "tests/unit/founder-calendar-connection.test.ts",
   "tests/unit/founder-mail-connection.test.ts",
   "tests/unit/founder-proposed-actions.test.ts",

@@ -72,6 +72,10 @@ export async function deleteFounderProductContractFixture(
   options: { retainScenarioExecutions?: boolean } = {},
 ): Promise<void> {
   await withFounderProductContractDatabase(async (sql) => {
+    const contractRunId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID;
+    if (contractRunId) {
+      await sql`delete from founder_preview_qualifications where cohort = ${`external-beta-contract:${contractRunId}`}`;
+    }
     if (!options.retainScenarioExecutions) {
       await sql`delete from founder_product_contract_scenario_executions where user_id = ${fixture.userId}`;
     }
@@ -106,6 +110,7 @@ export async function assertPersistedFounderLifecycleAuthority(
         terminal_entitlements: number;
         consumed_correlations: number;
         safe_release_decisions: number;
+        external_beta_qualifications: number;
         archives: number;
         failed_archives: number;
         deleted_archives: number;
@@ -124,6 +129,7 @@ export async function assertPersistedFounderLifecycleAuthority(
       (select count(*)::int from founder_product_entitlements where user_id = ${fixture.userId} and status = 'cancelled' and retirement_due_at is not null) as terminal_entitlements,
       (select count(*)::int from founder_checkout_correlations where user_id = ${fixture.userId} and status = 'consumed') as consumed_correlations,
       (select count(*)::int from founder_release_decisions where user_id = ${fixture.userId} and application_revision = ${process.env.BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION ?? "a".repeat(40)} and runtime_revision = 'founder-contract-v1' and capability_manifest = '["openai", "calendar_reading"]'::jsonb) as safe_release_decisions,
+      (select count(*)::int from founder_preview_qualifications where cohort = ${`external-beta-contract:${process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID ?? "missing"}`} and application_revision = ${process.env.BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION ?? "a".repeat(40)} and runtime_revision = 'founder-contract-v1') as external_beta_qualifications,
       (select count(*)::int from founder_recovery_archives where user_id = ${fixture.userId} and status = 'verified' and format_version = 1 and restorable_verified = true and restore_verified_at is not null and state_digest is not null) as archives,
       (select count(*)::int from founder_recovery_archives where user_id = ${fixture.userId} and status = 'failed') as failed_archives,
       (select count(*)::int from founder_recovery_archives where user_id = ${fixture.userId} and status = 'deleted' and deleted_at is not null) as deleted_archives,
@@ -141,6 +147,7 @@ export async function assertPersistedFounderLifecycleAuthority(
       terminal_entitlements: 1,
       consumed_correlations: 1,
       safe_release_decisions: 3,
+      external_beta_qualifications: 5,
       archives: 2,
       failed_archives: 1,
       deleted_archives: 1,
@@ -174,6 +181,15 @@ export async function readFounderReleaseDecisions(userId: string) {
       sql<
         { outcome: string; application_revision: string; runtime_revision: string }[]
       >`select outcome, application_revision, runtime_revision from founder_release_decisions where user_id = ${userId} order by decided_at`,
+  );
+}
+
+export async function readFounderExternalBetaQualifications(runId: string) {
+  return withFounderProductContractDatabase(
+    (sql) =>
+      sql<
+        { capability: string }[]
+      >`select capability from founder_preview_qualifications where cohort = ${`external-beta-contract:${runId}`} order by capability`,
   );
 }
 

@@ -656,7 +656,13 @@ describe("Founder Infrastructure Retirement deadline", () => {
     const calls: string[] = [];
     return {
       authenticateIdentity: async () => ({ subject: "unused" }),
-      verifyCapabilityProviders: async () => ({ openAI: true, anthropic: true, google: true }),
+      verifyCapabilityProviders: async () => ({
+        openAI: true,
+        anthropic: true,
+        calendarReading: true,
+        gmailReading: true,
+        gmailSending: true,
+      }),
       readSubscription: async () => ({ status: "unpaid" }),
       createRecoveryArchive:
         input.createRecoveryArchive ??
