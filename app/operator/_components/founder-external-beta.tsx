@@ -181,8 +181,24 @@ function formatRemaining(seconds: number): string {
 }
 
 function formatInstant(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  const instant = new Date(value);
+  const hour = instant.getUTCHours();
+  const hour12 = hour % 12 || 12;
+  const minute = instant.getUTCMinutes().toString().padStart(2, "0");
+  const period = hour < 12 ? "AM" : "PM";
+  const month = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ][instant.getUTCMonth()];
+  return `${month} ${instant.getUTCDate()}, ${instant.getUTCFullYear()}, ${hour12}:${minute} ${period} UTC`;
 }

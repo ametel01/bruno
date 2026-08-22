@@ -51,6 +51,7 @@ describe("External Beta Founder surface", () => {
     for (const copy of [
       "External Beta",
       "13d 0h remaining",
+      "Sep 6, 2026, 12:00 AM UTC",
       "OpenAI",
       "Anthropic",
       "Gmail reading",
