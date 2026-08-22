@@ -973,7 +973,7 @@ export const founderCheckoutCorrelations = pgTable(
     ),
     check(
       "founder_checkout_correlations_closed_check",
-      sql`${table.status} <> 'closed' OR (${table.closureReason} = 'payment_without_access_refunded' AND ${table.refundedAt} IS NOT NULL)`,
+      sql`${table.status} <> 'closed' OR (${table.closureReason} IN ('payment_without_access_refunded', 'payment_without_access_refunded_superseded') AND ${table.refundedAt} IS NOT NULL)`,
     ),
     check(
       "founder_checkout_correlations_expiry_check",

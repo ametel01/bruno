@@ -113,7 +113,7 @@ export async function getFounderCommerceStatusForUser(
         .select()
         .from(founderCheckoutCorrelations)
         .where(eq(founderCheckoutCorrelations.userId, userId))
-        .orderBy(desc(founderCheckoutCorrelations.createdAt))
+        .orderBy(desc(founderCheckoutCorrelations.generation))
         .limit(1),
       connection.db
         .select()
