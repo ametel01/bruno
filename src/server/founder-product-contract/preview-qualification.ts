@@ -6,12 +6,15 @@ export const FOUNDER_PREVIEW_QUALIFICATION_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1_000
 export const FOUNDER_OWNER_PREVIEW_CAPABILITIES = ["openai", "calendar_reading"] as const;
 
 export type FounderOwnerPreviewCapability = (typeof FOUNDER_OWNER_PREVIEW_CAPABILITIES)[number];
+export type FounderOwnerPreviewCapabilityRequirement =
+  | readonly FounderOwnerPreviewCapability[]
+  | "forbidden";
 export const FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS = {
   conversation: ["openai"],
   calendarLimitedOperation: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
   calendarRelationshipEvidence: ["calendar_reading"],
-  forbidden: [],
-} as const satisfies Record<string, readonly FounderOwnerPreviewCapability[]>;
+  forbidden: "forbidden",
+} as const satisfies Record<string, FounderOwnerPreviewCapabilityRequirement>;
 type PreviewQualificationEnvironment = Record<string, string | undefined>;
 
 export type FounderPreviewQualification = {

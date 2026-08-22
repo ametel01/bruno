@@ -14,6 +14,7 @@ import type { FounderProductContractTransaction } from "./operator-authority";
 import {
   FOUNDER_OWNER_PREVIEW_CAPABILITIES,
   type FounderOwnerPreviewCapability,
+  type FounderOwnerPreviewCapabilityRequirement,
 } from "./preview-qualification";
 import { reconcileFounderOwnerPreviewQualificationExpiryInTransaction } from "./release-stage-hold";
 
@@ -26,7 +27,7 @@ export type FounderOwnerPreviewAccess = {
 
 export type FounderOwnerPreviewAccessRequirement =
   | "workspace"
-  | readonly FounderOwnerPreviewCapability[];
+  | FounderOwnerPreviewCapabilityRequirement;
 
 export function requiresFounderReleaseStageAuthority(mode: AuthModeDecision["mode"]): boolean {
   return mode !== "development";
@@ -107,7 +108,7 @@ export async function requireFounderOwnerPreviewAccessInTransaction(
     userId: string;
     now: Date;
     applicationRevision: string;
-    requiredCapabilities: readonly FounderOwnerPreviewCapability[];
+    requiredCapabilities: FounderOwnerPreviewCapabilityRequirement;
   },
 ): Promise<void> {
   const access = await getFounderOwnerPreviewAccessInTransaction(tx, input);
@@ -262,8 +263,9 @@ function qualificationIsCurrent(
 
 function requirementsAvailable(
   availableCapabilities: readonly FounderOwnerPreviewCapability[],
-  requiredCapabilities: readonly FounderOwnerPreviewCapability[],
+  requiredCapabilities: FounderOwnerPreviewCapabilityRequirement,
 ): boolean {
+  if (requiredCapabilities === "forbidden") return false;
   return (
     requiredCapabilities.length > 0 &&
     requiredCapabilities.every((capability) => availableCapabilities.includes(capability))
@@ -272,7 +274,7 @@ function requirementsAvailable(
 
 export function hasFounderOwnerPreviewCapabilities(
   access: FounderOwnerPreviewAccess,
-  requiredCapabilities: readonly FounderOwnerPreviewCapability[],
+  requiredCapabilities: FounderOwnerPreviewCapabilityRequirement,
 ): boolean {
   return requirementsAvailable(access.availableCapabilities, requiredCapabilities);
 }
