@@ -45,6 +45,7 @@ import {
   FounderReleaseStageAccessError,
   requireFounderOwnerPreviewAccessInTransaction,
 } from "@/src/server/founder-product-contract/release-stage-access";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 
 type FounderConversationTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -584,7 +585,7 @@ async function requireConversationWorkAccess(
         now,
         applicationRevision:
           dependencies.applicationRevision ?? process.env.VERCEL_GIT_COMMIT_SHA?.trim() ?? "",
-        requiredCapabilities: ["openai"],
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
       },
     );
   } catch (error) {

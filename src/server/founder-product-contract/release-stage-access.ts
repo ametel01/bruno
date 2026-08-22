@@ -9,16 +9,21 @@ import {
   operators,
 } from "@/src/server/db/schema";
 import type { FounderProductContractTransaction } from "./operator-authority";
-import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "./preview-qualification";
+import {
+  FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+  type FounderOwnerPreviewCapability,
+} from "./preview-qualification";
 
 const OWNER_PREVIEW_ARCHIVE_WINDOW_MS = 24 * 60 * 60 * 1_000;
 
 export type FounderOwnerPreviewAccess = {
   admitted: boolean;
-  availableCapabilities: readonly string[];
+  availableCapabilities: readonly FounderOwnerPreviewCapability[];
 };
 
-export type FounderOwnerPreviewAccessRequirement = "workspace" | readonly string[];
+export type FounderOwnerPreviewAccessRequirement =
+  | "workspace"
+  | readonly FounderOwnerPreviewCapability[];
 
 export class FounderReleaseStageAccessError extends Error {
   readonly code = "owner_preview_access_required" as const;
@@ -84,7 +89,7 @@ export async function requireFounderOwnerPreviewAccessInTransaction(
     userId: string;
     now: Date;
     applicationRevision: string;
-    requiredCapabilities: readonly string[];
+    requiredCapabilities: readonly FounderOwnerPreviewCapability[];
   },
 ): Promise<void> {
   const access = await getFounderOwnerPreviewAccessInTransaction(tx, input);
@@ -144,12 +149,16 @@ export async function getFounderOwnerPreviewAccessInTransaction(
     )
     .orderBy(desc(founderReleaseDecisions.decidedAt))
     .limit(1);
-  const exactDecisionIdentity = (decision: typeof latestDecision) => {
+  const exactDecision = (decision: typeof latestDecision) => {
     if (!decision) return false;
     return (
       decision.operatorId === authority.operatorId &&
       decision.applicationRevision === input.applicationRevision &&
-      decision.runtimeRevision === authority.runtimeRevision
+      decision.runtimeRevision === authority.runtimeRevision &&
+      decision.capabilityManifest.length === FOUNDER_OWNER_PREVIEW_CAPABILITIES.length &&
+      FOUNDER_OWNER_PREVIEW_CAPABILITIES.every((capability) =>
+        decision.capabilityManifest.includes(capability),
+      )
     );
   };
   if (
@@ -185,15 +194,17 @@ export async function getFounderOwnerPreviewAccessInTransaction(
     authority.runtimeStatus !== "ready" ||
     !archive ||
     !latestDecision ||
-    !exactDecisionIdentity(latestDecision)
+    !exactDecision(latestDecision)
   ) {
     return { admitted: true, availableCapabilities: [] };
   }
   if (latestDecision.outcome === "enter" || latestDecision.outcome === "resume") {
     return {
       admitted: true,
-      availableCapabilities: latestDecision.capabilityManifest.filter((capability) =>
-        priorAdmission.capabilityManifest.includes(capability),
+      availableCapabilities: latestDecision.capabilityManifest.filter(
+        (capability): capability is FounderOwnerPreviewCapability =>
+          isFounderOwnerPreviewCapability(capability) &&
+          priorAdmission.capabilityManifest.includes(capability),
       ),
     };
   }
@@ -201,7 +212,9 @@ export async function getFounderOwnerPreviewAccessInTransaction(
     return {
       admitted: true,
       availableCapabilities: priorAdmission.capabilityManifest.filter(
-        (capability) => !latestDecision.affectedCapabilities.includes(capability),
+        (capability): capability is FounderOwnerPreviewCapability =>
+          isFounderOwnerPreviewCapability(capability) &&
+          !latestDecision.affectedCapabilities.includes(capability),
       ),
     };
   }
@@ -209,8 +222,8 @@ export async function getFounderOwnerPreviewAccessInTransaction(
 }
 
 function requirementsAvailable(
-  availableCapabilities: readonly string[],
-  requiredCapabilities: readonly string[],
+  availableCapabilities: readonly FounderOwnerPreviewCapability[],
+  requiredCapabilities: readonly FounderOwnerPreviewCapability[],
 ): boolean {
   return (
     requiredCapabilities.length > 0 &&
@@ -220,7 +233,13 @@ function requirementsAvailable(
 
 export function hasFounderOwnerPreviewCapabilities(
   access: FounderOwnerPreviewAccess,
-  requiredCapabilities: readonly string[],
+  requiredCapabilities: readonly FounderOwnerPreviewCapability[],
 ): boolean {
   return requirementsAvailable(access.availableCapabilities, requiredCapabilities);
+}
+
+function isFounderOwnerPreviewCapability(
+  capability: string,
+): capability is FounderOwnerPreviewCapability {
+  return FOUNDER_OWNER_PREVIEW_CAPABILITIES.some((candidate) => candidate === capability);
 }

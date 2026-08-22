@@ -15,7 +15,6 @@ import {
   operatorPrimaryCommunicationsSuites,
   operatorProposedActions,
   operatorRuntimes,
-  operators,
   users,
 } from "@/src/server/db/schema";
 import {
@@ -223,36 +222,21 @@ describe("Founder approved Gmail execution", () => {
     );
   });
 
-  it("blocks an external effect after the active Release Stage enters Hold", async () => {
+  it("blocks Gmail effects throughout Calendar-only Owner Preview", async () => {
     const action = await approveAction();
-    const heldAt = new Date(NOW.valueOf() + 1_000);
-    const [operator] = await connection.db
-      .select({ id: operators.id })
-      .from(operators)
-      .where(eq(operators.userId, OWNER_ID));
-    if (!operator) throw new Error("operator setup failed");
-    await connection.db.insert(founderReleaseDecisions).values({
-      userId: OWNER_ID,
-      operatorId: operator.id,
-      stage: "owner_preview",
-      outcome: "hold",
-      applicationRevision: REVISION,
-      runtimeRevision: "runtime-mail-v1",
-      capabilityManifest: ["openai", "calendar_reading"],
-      affectedCapabilities: ["openai", "calendar_reading"],
-      evidenceDigests: [`sha256:${"7".repeat(64)}`],
-      decidedAt: heldAt,
-      createdAt: heldAt,
-    });
     let sendCount = 0;
 
     await expect(
-      execute(action.id, {
-        sendMessage: async () => {
-          sendCount += 1;
-          return { ok: true, providerMessageId: "must-not-send", providerThreadId: null };
+      execute(
+        action.id,
+        {
+          sendMessage: async () => {
+            sendCount += 1;
+            return { ok: true, providerMessageId: "must-not-send", providerThreadId: null };
+          },
         },
-      }),
+        true,
+      ),
     ).rejects.toMatchObject({ code: "owner_preview_access_required" });
     expect(sendCount).toBe(0);
     expect(await connection.db.select().from(operatorActionExecutionAttempts)).toHaveLength(0);
@@ -367,6 +351,7 @@ describe("Founder approved Gmail execution", () => {
   async function execute(
     actionId: string,
     transport: Pick<NonNullable<FounderMailExecutionDependencies["adapter"]>, "sendMessage">,
+    enforceOwnerPreview = false,
   ) {
     return executeFounderApprovedGmailActionForUser(OWNER_ID, actionId, 1, {
       createConnection: () => connection,
@@ -385,6 +370,7 @@ describe("Founder approved Gmail execution", () => {
       keyring: KEYRING,
       env: ENV,
       now: () => NOW,
+      ...(enforceOwnerPreview ? {} : { requireReleaseStageAccess: async () => undefined }),
     });
   }
 

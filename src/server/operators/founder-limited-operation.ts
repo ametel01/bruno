@@ -114,9 +114,12 @@ export async function getFounderLimitedOperationForUser(
 ): Promise<FounderLimitedOperationDto | null> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   return withConnection(dependencies, async (connection) => {
-    const now = dependencies.now ?? (() => new Date());
     return connection.db.transaction(async (tx) => {
-      const operation = await ensureOperation(tx, operator.id, now());
+      const [operation] = await tx
+        .select()
+        .from(operatorLimitedOperations)
+        .where(eq(operatorLimitedOperations.operatorId, operator.id))
+        .limit(1);
       return operation && !operation.mailConnectionId
         ? projectOperation(tx, operation, operator.id)
         : null;

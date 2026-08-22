@@ -889,6 +889,10 @@ export const founderReleaseDecisions = pgTable(
       "founder_release_decisions_affected_capabilities_manifest_check",
       sql`${table.affectedCapabilities} <@ ${table.capabilityManifest}`,
     ),
+    check(
+      "founder_release_decisions_owner_preview_manifest_check",
+      sql`${table.stage} <> 'owner_preview' OR (jsonb_array_length(${table.capabilityManifest}) = 2 AND ${table.capabilityManifest} @> '["openai", "calendar_reading"]'::jsonb)`,
+    ),
     index("founder_release_decisions_user_stage_idx").on(
       table.userId,
       table.stage,

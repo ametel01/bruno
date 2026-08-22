@@ -380,6 +380,8 @@ export async function reconcileFounderRecoveryArchives(input: {
         userId: founderReleaseDecisions.userId,
         stage: founderReleaseDecisions.stage,
         outcome: founderReleaseDecisions.outcome,
+        capabilityManifest: founderReleaseDecisions.capabilityManifest,
+        affectedCapabilities: founderReleaseDecisions.affectedCapabilities,
         decidedAt: founderReleaseDecisions.decidedAt,
       })
       .from(founderReleaseDecisions)
@@ -407,15 +409,33 @@ export async function reconcileFounderRecoveryArchives(input: {
         latestRetirementByUser.set(retirement.userId, retirement.retiredAt);
       }
     }
-    const latestActiveDecisionByUser = new Map<string, (typeof decisions)[number]>();
-    for (const decision of latestByUserAndStage.values()) {
+    const latestAdmissionByUserAndStage = new Map<string, (typeof decisions)[number]>();
+    for (const decision of decisions) {
       if (decision.outcome !== "enter" && decision.outcome !== "resume") continue;
-      const current = latestActiveDecisionByUser.get(decision.userId);
-      if (!current || current.decidedAt < decision.decidedAt) {
-        latestActiveDecisionByUser.set(decision.userId, decision);
+      const key = `${decision.userId}:${decision.stage}`;
+      if (!latestAdmissionByUserAndStage.has(key)) {
+        latestAdmissionByUserAndStage.set(key, decision);
       }
     }
-    const eligibleUsers = [...latestActiveDecisionByUser.values()]
+    const latestAdmittedDecisionByUser = new Map<string, (typeof decisions)[number]>();
+    for (const [key, latestDecision] of latestByUserAndStage) {
+      if (latestDecision.outcome === "deny") continue;
+      if (
+        latestDecision.outcome === "hold" &&
+        latestDecision.capabilityManifest.every((capability) =>
+          latestDecision.affectedCapabilities.includes(capability),
+        )
+      ) {
+        continue;
+      }
+      const admission = latestAdmissionByUserAndStage.get(key);
+      if (!admission) continue;
+      const current = latestAdmittedDecisionByUser.get(admission.userId);
+      if (!current || current.decidedAt < admission.decidedAt) {
+        latestAdmittedDecisionByUser.set(admission.userId, admission);
+      }
+    }
+    const eligibleUsers = [...latestAdmittedDecisionByUser.values()]
       .filter(
         (decision) =>
           (latestRetirementByUser.get(decision.userId) ?? new Date(0)) < decision.decidedAt,

@@ -1,4 +1,5 @@
 import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
   dismissFounderMailSendingOfferForUser,
   editFounderActionPreviewForUser,
@@ -46,9 +47,10 @@ export async function POST(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
-  const accessFailure = await requireFounderOperatorWorkspaceAccess(applicationUser.userId, [
-    "openai",
-  ]);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+  );
   if (accessFailure) return accessFailure;
   let payload: unknown;
   try {

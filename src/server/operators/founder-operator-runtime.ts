@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { chmod, lstat, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { and, eq, sql } from "drizzle-orm";
@@ -24,6 +24,8 @@ import {
   AGENT_LAUNCH_SPEC_VERSION,
   type NativeAgentLaunchSpec,
 } from "@/src/server/agents/agent-launch-spec";
+import { persistFounderOwnerPreviewHoldInTransaction } from "@/src/server/founder-product-contract/release-stage-hold";
+import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
 
 type OperatorRuntimeTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -72,6 +74,7 @@ export type FounderOperatorRuntimeDependencies = {
   randomUUID?: () => string;
   adapter?: FounderOperatorRuntimeAdapter;
   stateRoot?: string;
+  env?: Record<string, string | undefined>;
 };
 
 export type FounderOperatorRuntimePreparationResult = {
@@ -254,6 +257,33 @@ export async function prepareFounderOperatorRuntimeForUser(
         })
         .where(eq(operatorPreparations.operatorId, operator.id));
 
+      if (!result.ok && updated.configRevision) {
+        const applicationRevision =
+          dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
+          process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
+          "";
+        if (/^[a-f0-9]{40}$/.test(applicationRevision)) {
+          await persistFounderOwnerPreviewHoldInTransaction(tx, {
+            userId,
+            operatorId: operator.id,
+            applicationRevision,
+            runtimeRevision: updated.configRevision,
+            affectedCapabilities: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+            evidenceDigests: [
+              runtimeFailureEvidenceDigest({
+                userId,
+                operatorId: operator.id,
+                applicationRevision,
+                runtimeRevision: updated.configRevision,
+                failureCode: result.code,
+                observedAt: completedAt,
+              }),
+            ],
+            decidedAt: completedAt,
+          });
+        }
+      }
+
       const [row] = await tx
         .select({
           operator: operators,
@@ -285,6 +315,30 @@ export async function prepareFounderOperatorRuntimeForUser(
       await connection.close();
     }
   }
+}
+
+function runtimeFailureEvidenceDigest(input: {
+  userId: string;
+  operatorId: string;
+  applicationRevision: string;
+  runtimeRevision: string;
+  failureCode: FounderOperatorRuntimeFailureCode;
+  observedAt: Date;
+}): `sha256:${string}` {
+  const digest = createHash("sha256")
+    .update(
+      JSON.stringify({
+        schemaVersion: "bruno.owner-preview-runtime-failure.v1",
+        userId: input.userId,
+        operatorId: input.operatorId,
+        applicationRevision: input.applicationRevision,
+        runtimeRevision: input.runtimeRevision,
+        failureCode: input.failureCode,
+        observedAt: input.observedAt.toISOString(),
+      }),
+    )
+    .digest("hex");
+  return `sha256:${digest}`;
 }
 
 export async function getFounderOperatorRuntimeForUser(

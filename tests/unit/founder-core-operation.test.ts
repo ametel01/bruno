@@ -18,6 +18,7 @@ import {
   confirmFounderCoreProcessingConsentForUser,
   getFounderCoreOperationForUser,
   openFounderCoreBriefForUser,
+  reconcileFounderCoreOperationForUser,
 } from "@/src/server/operators/founder-core-operation";
 import { getFounderOnboardingForUser } from "@/src/server/operators/founder-onboarding";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
@@ -153,6 +154,11 @@ describe("Founder Core Operation", () => {
     });
     await expect(
       getFounderCoreOperationForUser(OWNER_ID, {
+        createConnection: () => connection,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      reconcileFounderCoreOperationForUser(OWNER_ID, {
         createConnection: () => connection,
         now: () => NOW,
       }),

@@ -1,0 +1,1 @@
+ALTER TABLE "founder_release_decisions" ADD CONSTRAINT "founder_release_decisions_owner_preview_manifest_check" CHECK ("founder_release_decisions"."stage" <> 'owner_preview' OR (jsonb_array_length("founder_release_decisions"."capability_manifest") = 2 AND "founder_release_decisions"."capability_manifest" @> '["openai", "calendar_reading"]'::jsonb));

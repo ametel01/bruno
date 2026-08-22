@@ -19,7 +19,11 @@ import {
 import { expireFounderRecoveryArchivesForUser } from "@/src/server/founder-product-contract/archive-expiry";
 import { EncryptedFounderRecoveryArchiveProvider } from "@/src/server/founder-product-contract/encrypted-recovery-archive-provider";
 import { admitFounderOperatorToOwnerPreview } from "@/src/server/founder-product-contract/owner-preview-admission";
-import { getFounderOwnerPreviewAccessForUser } from "@/src/server/founder-product-contract/release-stage-access";
+import {
+  getFounderOwnerPreviewAccessForUser,
+  requireFounderOwnerPreviewAccessForUser,
+} from "@/src/server/founder-product-contract/release-stage-access";
+import { persistFounderOwnerPreviewHoldInTransaction } from "@/src/server/founder-product-contract/release-stage-hold";
 import {
   createDurableRecoveryArchive,
   getFounderRecoveryArchiveStatusForUser,
@@ -128,6 +132,33 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       admitted: true,
       availableCapabilities: ["openai", "calendar_reading"],
     });
+    await expect(
+      requireFounderOwnerPreviewAccessForUser(
+        USER_ID,
+        START,
+        {
+          applicationRevision: "a".repeat(40),
+          createConnection: () => connection,
+        },
+        [],
+      ),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+
+    await expect(
+      connection.db.insert(founderReleaseDecisions).values({
+        userId: USER_ID,
+        operatorId: OPERATOR_ID,
+        stage: "owner_preview",
+        outcome: "hold",
+        applicationRevision: "a".repeat(40),
+        runtimeRevision: "runtime-v1",
+        capabilityManifest: ["openai"],
+        affectedCapabilities: ["openai"],
+        evidenceDigests: [`sha256:${"b".repeat(64)}`],
+        decidedAt: new Date(START.valueOf() + 30_000),
+        createdAt: new Date(START.valueOf() + 30_000),
+      }),
+    ).rejects.toThrow();
 
     await expect(
       getFounderOwnerPreviewAccessForUser(USER_ID, START, {
@@ -137,19 +168,17 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     ).resolves.toEqual({ admitted: false, availableCapabilities: [] });
 
     const heldAt = new Date(START.valueOf() + 60_000);
-    await connection.db.insert(founderReleaseDecisions).values({
-      userId: USER_ID,
-      operatorId: OPERATOR_ID,
-      stage: "owner_preview",
-      outcome: "hold",
-      applicationRevision: "a".repeat(40),
-      runtimeRevision: "runtime-v1",
-      capabilityManifest: ["openai", "calendar_reading"],
-      affectedCapabilities: ["openai"],
-      evidenceDigests: [`sha256:${"c".repeat(64)}`],
-      decidedAt: heldAt,
-      createdAt: heldAt,
-    });
+    await connection.db.transaction((tx) =>
+      persistFounderOwnerPreviewHoldInTransaction(tx, {
+        userId: USER_ID,
+        operatorId: OPERATOR_ID,
+        applicationRevision: "a".repeat(40),
+        runtimeRevision: "runtime-v1",
+        affectedCapabilities: ["openai"],
+        evidenceDigests: [`sha256:${"c".repeat(64)}`],
+        decidedAt: heldAt,
+      }),
+    );
 
     await expect(
       getFounderOwnerPreviewAccessForUser(USER_ID, heldAt, {
@@ -406,7 +435,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     expect(await connection.db.select().from(founderRecoveryArchives)).toHaveLength(2);
   });
 
-  it("resumes daily protection after an explicit Release Hold", async () => {
+  it("continues daily protection through a capability-scoped Release Hold", async () => {
     const holdAt = new Date(START.valueOf() + 1_000);
     await connection.db.insert(founderReleaseDecisions).values({
       userId: USER_ID,
@@ -416,7 +445,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision: "7".repeat(40),
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
-      affectedCapabilities: ["openai", "calendar_reading"],
+      affectedCapabilities: ["openai"],
       evidenceDigests: [`sha256:${"6".repeat(64)}`],
       decidedAt: holdAt,
       createdAt: holdAt,
@@ -427,7 +456,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         provider,
         createConnection: () => connection,
       }),
-    ).resolves.toEqual({ eligible: 0, created: 0, failed: 0, deleted: 0 });
+    ).resolves.toEqual({ eligible: 1, created: 1, failed: 0, deleted: 0 });
 
     const resumeAt = new Date(holdAt.valueOf() + 1_000);
     await connection.db.insert(founderReleaseDecisions).values({
@@ -448,7 +477,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         provider,
         createConnection: () => connection,
       }),
-    ).resolves.toEqual({ eligible: 1, created: 1, failed: 0, deleted: 0 });
+    ).resolves.toEqual({ eligible: 1, created: 0, failed: 0, deleted: 0 });
   });
 
   it("reserves one archive intent while its provider upload is still pending", async () => {

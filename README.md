@@ -272,6 +272,9 @@ additionally require a verified archive observed within the last 24 hours and ev
 by that boundary to remain available. A Release Hold keeps the complete admitted manifest while
 persisting the affected capability subset, so unrelated qualified work and all safe reads remain
 available. A stale archive or non-Ready runtime pauses new work without hiding saved checkpoints.
+Runtime failure records that Hold through the canonical exact-revision writer. Owner Preview remains
+Calendar-only Limited Operation: Core Operation and Gmail effects stay unavailable even if retained
+Mail state exists. Read endpoints project existing operation state without reconciling new rows.
 Infrastructure Retirement marks the destroyed runtime as needing attention before
 its receipt completes, so only newly provisioned and verified infrastructure can become Ready
 again. The encrypted durable state preserves an external-action pause as the complete boolean,

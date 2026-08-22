@@ -115,6 +115,11 @@ describe("Founder Calendar-only Limited Operation", () => {
     await expect(
       getFounderLimitedOperationForUser(OWNER_ID, {
         createConnection: () => connection,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      reconcileFounderLimitedOperationForUser(OWNER_ID, {
+        createConnection: () => connection,
         now: () => NOW,
       }),
     ).resolves.toMatchObject({
@@ -290,7 +295,7 @@ describe("Founder Calendar-only Limited Operation", () => {
       .set({ calendarConnectionId: replacementCalendar.id })
       .where(eq(operatorLimitedOperations.id, operationRow.id));
 
-    const needsAttention = await getFounderLimitedOperationForUser(OWNER_ID, {
+    const needsAttention = await reconcileFounderLimitedOperationForUser(OWNER_ID, {
       createConnection: () => connection,
       now: () => NOW,
     });

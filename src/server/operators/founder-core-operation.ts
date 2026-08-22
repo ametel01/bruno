@@ -123,12 +123,12 @@ export async function getFounderCoreOperationForUser(
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   return withConnection(dependencies, async (connection) =>
     connection.db.transaction(async (tx) => {
-      const operation = await ensureCoreOperation(
-        tx,
-        operator.id,
-        dependencies.now?.() ?? new Date(),
-      );
-      return operation ? projectCoreOperation(tx, operation, operator.id) : null;
+      const [operation] = await tx
+        .select()
+        .from(operatorLimitedOperations)
+        .where(eq(operatorLimitedOperations.operatorId, operator.id))
+        .limit(1);
+      return operation?.mailConnectionId ? projectCoreOperation(tx, operation, operator.id) : null;
     }),
   );
 }

@@ -5,7 +5,12 @@ const PREVIEW_QUALIFICATION_SCHEMA = "bruno.preview-qualification.v1";
 const PREVIEW_QUALIFICATION_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1_000;
 export const FOUNDER_OWNER_PREVIEW_CAPABILITIES = ["openai", "calendar_reading"] as const;
 
-type OwnerPreviewCapability = (typeof FOUNDER_OWNER_PREVIEW_CAPABILITIES)[number];
+export type FounderOwnerPreviewCapability = (typeof FOUNDER_OWNER_PREVIEW_CAPABILITIES)[number];
+export const FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS = {
+  conversation: ["openai"],
+  calendarLimitedOperation: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+  forbidden: [],
+} as const satisfies Record<string, readonly FounderOwnerPreviewCapability[]>;
 type PreviewQualificationEnvironment = Record<string, string | undefined>;
 
 export type FounderPreviewQualification = {
@@ -17,7 +22,7 @@ export type FounderPreviewQualification = {
   stage: "owner_preview";
   applicationRevision: string;
   runtimeRevision: string;
-  capability: OwnerPreviewCapability;
+  capability: FounderOwnerPreviewCapability;
   qualifiedAt: string;
   expiresAt: string;
   evidenceDigest: `sha256:${string}`;
@@ -78,7 +83,7 @@ export function requireFounderOwnerPreviewQualifications(
 
 function requireCapabilityQualification(
   value: unknown,
-  capability: OwnerPreviewCapability,
+  capability: FounderOwnerPreviewCapability,
   input: {
     userId: string;
     operatorId: string;

@@ -16,6 +16,7 @@ import {
   operatorProposedActions,
 } from "@/src/server/db/schema";
 import { requireFounderOwnerPreviewAccessInTransaction } from "@/src/server/founder-product-contract/release-stage-access";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
   assertFounderExternalActionsNotPausedInTransaction,
   type FounderAiWorkTransaction,
@@ -46,6 +47,7 @@ const FOUNDER_MAIL_RECONCILIATION_LEASE_MS = 5 * 60 * 1000;
 export type FounderMailExecutionDependencies = FounderProposedActionDependencies &
   Pick<FounderMailSendingConnectionDependencies, "keyring" | "env"> & {
     adapter?: FounderGoogleMailSendingAdapter;
+    requireReleaseStageAccess?: typeof requireFounderOwnerPreviewAccessInTransaction;
   };
 
 export type FounderActionReceiptDto = {
@@ -232,11 +234,13 @@ export async function executeFounderApprovedGmailActionForUser(
         .limit(1);
       if (existingStart) return { kind: "in_progress" as const };
       const checkedAt = now();
-      await requireFounderOwnerPreviewAccessInTransaction(tx, {
+      await (
+        dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction
+      )(tx, {
         userId,
         now: checkedAt,
         applicationRevision: resolveApplicationRevision(dependencies.env),
-        requiredCapabilities: ["openai"],
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
       });
       await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id, checkedAt);
       const check = await recheckFounderProposedActionForExecution(
@@ -318,6 +322,7 @@ export async function executeFounderApprovedGmailActionForUser(
       started,
       now,
       dependencies.env,
+      dependencies.requireReleaseStageAccess,
     );
 
     let result: Awaited<ReturnType<NonNullable<FounderGoogleMailSendingAdapter["sendMessage"]>>>;
@@ -613,14 +618,15 @@ async function assertFounderMailSubmissionStillReady(
   },
   now: () => Date,
   environment: Record<string, string | undefined> | undefined,
+  requireReleaseStageAccess: typeof requireFounderOwnerPreviewAccessInTransaction | undefined,
 ): Promise<void> {
   await connection.db.transaction(async (tx) => {
     const checkedAt = now();
-    await requireFounderOwnerPreviewAccessInTransaction(tx, {
+    await (requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction)(tx, {
       userId,
       now: checkedAt,
       applicationRevision: resolveApplicationRevision(environment),
-      requiredCapabilities: ["openai"],
+      requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
     });
     const [action] = await tx
       .select()
