@@ -1539,7 +1539,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
   });
 
   it("retains the final archive for expiry without minting replacements after retirement", async () => {
-    await createDurableRecoveryArchive(
+    const finalArchiveId = await createDurableRecoveryArchive(
       {
         action: "release_stage_admission",
         userId: USER_ID,
@@ -1572,17 +1572,30 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     await connection.db.insert(founderInfrastructureRetirements).values({
       userId: USER_ID,
       runnerId,
+      recoveryArchiveId: finalArchiveId,
       idempotencyKey: `sha256:${"1".repeat(64)}`,
       providerResourceId: "droplet-373",
       providerFirewallId: "firewall-373",
+      providerOperationTag: `bruno-deploy-${runnerId.replaceAll("-", "")}`,
+      providerResourceName: "retired-owner-runner",
+      providerRegion: "sfo3",
+      providerSizeSlug: "s-1vcpu-1gb",
+      providerFirewallName: "bruno-runners-droplet-373",
+      providerResourceCreatedAt: START,
+      hardDestructionDueAt: retiredAt,
       status: "completed",
       resourcesBefore: 2,
       resourcesAfter: 0,
+      providerDropletState: "absent",
+      providerFirewallState: "absent",
+      providerObservedAt: retiredAt,
       workStoppedAt: retiredAt,
       credentialsDisabledAt: retiredAt,
+      archiveOutcome: "verified",
       firewallDeletedAt: retiredAt,
       dropletDeletedAt: retiredAt,
       absenceVerifiedAt: retiredAt,
+      billableRuntimeSeconds: 1,
       failureCode: null,
       attemptCount: 1,
       leaseToken: "retirement-lease-373",
