@@ -174,6 +174,24 @@ commit tokens, encryption keys, runner credentials, Clerk keys, or database cred
 | `CLERK_SECRET_KEY` | Clerk mode | Clerk server key. |
 | `BRUNO_PREVIEW_PROTECTION_VERIFIED` | Development-mode Vercel previews only | Must be exactly `true`, and only after Deployment Protection has been independently verified. |
 
+### Commerce and Product Entitlement
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `BRUNO_LEMON_SQUEEZY_MODE` | No | `off` by default; set exactly `test` or `live` only in the matching Lemon Squeezy environment. |
+| `BRUNO_LEMON_SQUEEZY_API_KEY` | Lemon Squeezy checkout | Server-only API key used for hosted checkout, current-state reconciliation, cancellation, and refunds. |
+| `BRUNO_LEMON_SQUEEZY_WEBHOOK_SECRET` | Lemon Squeezy webhook | Dedicated secret used to authenticate the exact raw webhook body before parsing. |
+| `BRUNO_LEMON_SQUEEZY_STORE_ID` | Lemon Squeezy checkout | Positive numeric Store ID that provider reads must continue to match. |
+| `BRUNO_LEMON_SQUEEZY_VARIANT_ID` | Lemon Squeezy checkout | Positive numeric subscription Variant ID; trials are skipped and plan switching is not exposed. |
+
+`/operator/payment` starts hosted checkout and shows only persisted Bruno.Ai state. A checkout return,
+query parameter, email, or valid Clerk session never creates Product Entitlement. The webhook stores
+an idempotent signed receipt before current Lemon Squeezy Subscription and Order reads are applied.
+While that reconciliation is incomplete, every device continues to show confirming payment. The
+minute commerce reconciler uses `CRON_SECRET`; after one hour without access it closes the attempt,
+cancels renewal, confirms a full refund, and retries exact Infrastructure Retirement. Keep commerce
+default-off until the separately authorized test/live provider qualification is complete.
+
 See [Authentication modes](./docs/AUTHENTICATION.md) and the
 [Clerk development runbook](./docs/CLERK_DEVELOPMENT.md) before changing hosted authentication.
 

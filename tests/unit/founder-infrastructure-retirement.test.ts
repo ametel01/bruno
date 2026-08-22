@@ -736,6 +736,7 @@ describe("Founder Infrastructure Retirement deadline", () => {
         userId: USER_ID,
         checkoutCorrelationId: correlation.id,
         providerSubscriptionId: unsigned.subscriptionId,
+        providerOrderId: `order-${unsigned.subscriptionId}`,
         eventType: "subscription_unpaid",
         payloadDigest: `sha256:${createHash("sha256")
           .update(JSON.stringify(unsigned))
@@ -752,6 +753,7 @@ describe("Founder Infrastructure Retirement deadline", () => {
       providerSubscriptionId: unsigned.subscriptionId,
       status: "unpaid",
       reconciledProviderStatus: "unpaid",
+      providerStateUpdatedAt: NOW,
       reconciledAt: NOW,
       retirementDueAt: NOW,
       updatedAt: NOW,

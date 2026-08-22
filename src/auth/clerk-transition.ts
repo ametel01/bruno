@@ -14,10 +14,12 @@ const INTERNAL_SERVICE_AUTH_PATHS = new Set([
   "/api/internal/cold-deployment-slo/evaluate",
   "/api/internal/hermes-staging/acceptance",
   "/api/internal/hermes-staging/reconcile",
+  "/api/internal/operator/commerce",
   "/api/internal/production-rollout/status",
   "/api/internal/runner-infrastructure/reconcile",
   "/api/internal/runner-release/required",
   "/api/internal/runner-replacements/reconcile",
+  "/api/webhooks/lemon-squeezy",
 ]);
 
 export function isClerkAuthPagePath(pathname: string): boolean {

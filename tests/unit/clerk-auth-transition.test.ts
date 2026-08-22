@@ -48,9 +48,11 @@ describe("Clerk route matrix", () => {
     "/api/internal/cold-deployment-slo/evaluate",
     "/api/internal/hermes-staging/acceptance",
     "/api/internal/hermes-staging/reconcile",
+    "/api/internal/operator/commerce",
     "/api/internal/runner-infrastructure/reconcile",
     "/api/internal/runner-release/required",
     "/api/internal/runner-replacements/reconcile",
+    "/api/webhooks/lemon-squeezy",
   ])("recognizes independently authenticated internal route %s", (pathname) => {
     expect(isInternalServiceAuthPath(pathname)).toBe(true);
   });
@@ -59,6 +61,7 @@ describe("Clerk route matrix", () => {
     "/api/internal",
     "/api/internal/future",
     "/api/internal/runner-release/required/extra",
+    "/api/webhooks/lemon-squeezy/extra",
   ])("does not broaden the internal service bypass to %s", (pathname) => {
     expect(isInternalServiceAuthPath(pathname)).toBe(false);
   });
