@@ -1,0 +1,1 @@
+ALTER TABLE "founder_product_contract_scenario_executions" DROP CONSTRAINT "founder_product_contract_scenario_executions_user_id_users_id_fk";

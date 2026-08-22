@@ -19,7 +19,7 @@ import {
   isFounderGoogleCalendarReleased,
   isFounderGoogleMailReadingReleased,
 } from "@/src/server/operators/founder-google-reading-release";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import { getFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 
 type OnboardingTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -74,8 +74,9 @@ export type FounderOnboardingDependencies = {
 export async function getFounderOnboardingForUser(
   userId: string,
   dependencies: FounderOnboardingDependencies = {},
-): Promise<FounderOnboardingDto> {
-  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+): Promise<FounderOnboardingDto | null> {
+  const operator = await getFounderOperatorForUser(userId, dependencies);
+  if (!operator) return null;
   return withConnection(dependencies, async (connection) =>
     connection.db.transaction(async (tx) => {
       const [preparation] = await tx

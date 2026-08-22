@@ -90,6 +90,7 @@ export type FounderAiRoutingDecision = {
 
 export type FounderAiRoutingOptions = {
   now?: Date;
+  allowedProviders?: readonly FounderAiProvider[];
   excludedProviders?: readonly FounderAiProvider[];
   policy?: FounderAiCompatibilityPolicy;
   staleAfterMs?: number;
@@ -121,6 +122,7 @@ export function selectFounderAiProvider(
 ): FounderAiRoutingDecision | null {
   const now = options.now ?? new Date();
   const policy = options.policy ?? getActiveFounderAiCompatibilityPolicy();
+  const allowed = options.allowedProviders ? new Set(options.allowedProviders) : null;
   const excluded = new Set(options.excludedProviders ?? []);
   const staleAfterMs = options.staleAfterMs ?? FOUNDER_AI_PROVIDER_STALE_AFTER_MS;
 
@@ -128,6 +130,7 @@ export function selectFounderAiProvider(
     .filter(
       (candidate): candidate is FounderAiRoutingCandidate & { provider: FounderAiProvider } =>
         isEligibleFounderAiConnection(candidate, { ...options, now, policy, staleAfterMs }) &&
+        (!allowed || allowed.has(candidate.provider as FounderAiProvider)) &&
         !excluded.has(candidate.provider as FounderAiProvider),
     )
     .sort((left, right) => {

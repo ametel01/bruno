@@ -5,10 +5,15 @@ import {
   parseFounderProviderDecisionSummary,
 } from "@/scripts/create-founder-general-release-decision";
 import { buildFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
-import { FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS } from "@/src/shared/founder-product-contract";
+import {
+  FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS,
+  FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
+} from "@/src/shared/founder-product-contract";
+import { createFounderProductContractScenarioLedger } from "@/src/testing/founder-product-contract";
 
 const REVISION = "a".repeat(40);
 const DIGEST = `sha256:${"b".repeat(64)}`;
+const SIGNING_SECRET = "founder-contract-test-secret";
 
 describe("Founder Initial General Release decision", () => {
   it("denies a CI artifact without attended usability, accessibility, or provider evidence", () => {
@@ -53,7 +58,20 @@ describe("Founder Initial General Release decision", () => {
         firstBriefWithin15MinutesActiveFounderTime: 7,
         fullComprehension: 8,
       },
-      providers: { anthropic: { outcome: "hidden", included: false } },
+      providers: { anthropic: { outcome: "released", sourceRevision: REVISION } },
+      providerPolicy: {
+        requiredForRelease: [
+          "openai",
+          "anthropic",
+          "calendar_reading",
+          "gmail_reading",
+          "gmail_sending",
+        ],
+        founderChoice: "openai_anthropic_or_both",
+        routingAuthority: "founder_authorized_connections_only",
+        capacity: "founder_owned_no_bruno_funded_fallback",
+        qualificationLoss: "capability_scoped_hold_at_safe_work_checkpoint",
+      },
     });
     expect(decision.summaryDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
   });
@@ -94,31 +112,120 @@ describe("Founder Initial General Release decision", () => {
     expect(decision.outcome).toBe("denied");
   });
 
-  it("requires every core provider while keeping independently hidden Anthropic excluded", () => {
+  it.each([
+    "openai",
+    "anthropic",
+    "calendarReading",
+    "gmailReading",
+    "gmailSending",
+  ] as const)("denies when independently required %s evidence is hidden", (provider) => {
     const summary = providerSummary();
-    summary.providers.gmailSending.outcome = "hidden";
-    const decision = buildFounderInitialGeneralReleaseDecision({
-      productContract: productContract("release"),
-      moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
-      providerSummary: parseFounderProviderDecisionSummary(JSON.stringify(summary)),
-    });
+    summary.providers[provider].outcome = "hidden";
+    const decision = generalReleaseDecision(summary);
 
     expect(decision).toMatchObject({
       outcome: "denied",
-      reasons: ["gmailSending_not_released"],
-      providers: { anthropic: { outcome: "hidden", included: false } },
+      reasons: [`${provider}_not_released`],
     });
+  });
+
+  it("denies revision-mismatched, stale, expired, and future-dated provider evidence", () => {
+    const summary = providerSummary();
+    summary.providers.openai.sourceRevision = "c".repeat(40);
+    summary.providers.anthropic.qualifiedAt = "2026-08-10T12:00:00.000Z";
+    summary.providers.calendarReading.expiresAt = "2026-08-20T12:00:00.000Z";
+    summary.providers.gmailReading.qualifiedAt = "2026-08-20T12:00:01.000Z";
+
+    expect(generalReleaseDecision(summary)).toMatchObject({
+      outcome: "denied",
+      reasons: [
+        "openai_revision_mismatch",
+        "anthropic_evidence_stale",
+        "calendarReading_evidence_expired",
+        "gmailReading_evidence_time_invalid",
+      ],
+    });
+  });
+
+  it("does not let OpenAI, Anthropic, or a Core Operation capability borrow evidence", () => {
+    const summary = providerSummary();
+    summary.providers.anthropic.evidenceDigest = summary.providers.openai.evidenceDigest;
+
+    expect(generalReleaseDecision(summary)).toMatchObject({
+      outcome: "denied",
+      reasons: ["provider_evidence_not_independent"],
+    });
+  });
+
+  it("keeps only the provider evidence allowlist in the retained decision", () => {
+    const summary = providerSummary() as ReturnType<typeof providerSummary> & {
+      private?: string;
+      providers: ReturnType<typeof providerSummary>["providers"] & {
+        openai: ReturnType<typeof providerSummary>["providers"]["openai"] & {
+          credential?: string;
+        };
+      };
+    };
+    const study = moderatedSummary() as ReturnType<typeof moderatedSummary> & {
+      participants: ReturnType<typeof moderatedSummary>["participants"] & { private?: string };
+      criticalFailures: ReturnType<typeof moderatedSummary>["criticalFailures"] & {
+        transcript?: string;
+      };
+    };
+    summary.private = "do-not-retain";
+    summary.providers.openai.credential = "do-not-retain";
+    study.participants.private = "do-not-retain";
+    study.criticalFailures.transcript = "do-not-retain";
+
+    const decision = generalReleaseDecision(summary, study);
+
+    expect(decision.outcome).toBe("approved");
+    expect(JSON.stringify(decision)).not.toContain("do-not-retain");
   });
 
   it("rejects malformed summaries without reflecting supplied content", () => {
     expect(() => parseFounderModeratedSummary('{"private":"do-not-print"}')).toThrow(
       "Moderated Founder summary is invalid.",
     );
-    expect(() => parseFounderProviderDecisionSummary("not-json-do-not-print")).toThrow(
-      "Founder provider decision summary is invalid.",
+    const malformed = parseFounderProviderDecisionSummary("not-json-do-not-print");
+    expect(malformed).toBeNull();
+    const malformedDecision = buildFounderInitialGeneralReleaseDecision({
+      productContract: productContract("release"),
+      moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
+      providerSummary: malformed,
+    });
+    expect(malformedDecision).toMatchObject({
+      outcome: "denied",
+      reasons: ["provider_decision_evidence_missing"],
+    });
+    expect(JSON.stringify(malformedDecision)).not.toContain("do-not-print");
+
+    const missingAnthropic = providerSummary();
+    delete (missingAnthropic.providers as Partial<typeof missingAnthropic.providers>).anthropic;
+    const missing = parseFounderProviderDecisionSummary(
+      JSON.stringify({ ...missingAnthropic, private: "do-not-print" }),
     );
+    expect(missing).toBeNull();
+    expect(
+      buildFounderInitialGeneralReleaseDecision({
+        productContract: productContract("release"),
+        moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
+        providerSummary: missing,
+      }),
+    ).toMatchObject({
+      outcome: "denied",
+      reasons: ["provider_decision_evidence_missing"],
+    });
   });
 });
+
+function generalReleaseDecision(summary = providerSummary(), study = moderatedSummary()) {
+  return buildFounderInitialGeneralReleaseDecision({
+    productContract: productContract("release"),
+    moderatedSummary: parseFounderModeratedSummary(JSON.stringify(study)),
+    providerSummary: parseFounderProviderDecisionSummary(JSON.stringify(summary)),
+  });
+}
 
 function productContract(mode: "ci" | "release") {
   return buildFounderProductContractEvidence({
@@ -129,8 +236,17 @@ function productContract(mode: "ci" | "release") {
     unit: { numPassedTests: 156, numFailedTests: 0, numPendingTests: 0 },
     sourceRevision: REVISION,
     runId: "release-370",
+    runAttempt: 1,
     mode,
     observedAt: "2026-08-20T12:00:00.000Z",
+    scenarioLedger: createFounderProductContractScenarioLedger({
+      sourceRevision: REVISION,
+      runId: "release-370",
+      observedAt: "2026-08-20T12:00:00.000Z",
+      results: lifecycleScenarioResults(),
+      signingSecret: SIGNING_SECRET,
+    }),
+    scenarioSigningSecret: SIGNING_SECRET,
     ...(mode === "release"
       ? {
           voiceOverDigest: DIGEST,
@@ -142,6 +258,23 @@ function productContract(mode: "ci" | "release") {
         }
       : {}),
   });
+}
+
+function lifecycleScenarioResults() {
+  return FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS.map((id) => ({
+    id,
+    status: "passed" as const,
+    attempts: 1,
+    sourceRevision: REVISION,
+    observedAt: "2026-08-20T12:00:00.000Z",
+    cleanup: {
+      status: "passed" as const,
+      verified: true,
+      resourcesBefore: id === "infrastructure_retirement" ? 2 : 0,
+      resourcesAfter: 0,
+      observedAt: "2026-08-20T12:00:00.000Z",
+    },
+  }));
 }
 
 function moderatedSummary() {
@@ -175,17 +308,23 @@ function moderatedSummary() {
 }
 
 function providerSummary() {
-  const released = { outcome: "released" as "released" | "hidden", evidenceDigest: DIGEST };
+  const released = (digit: string) => ({
+    outcome: "released" as "released" | "hidden",
+    sourceRevision: REVISION,
+    qualifiedAt: "2026-08-20T11:00:00.000Z",
+    expiresAt: "2026-08-27T11:00:00.000Z",
+    evidenceDigest: `sha256:${digit.repeat(64)}` as `sha256:${string}`,
+  });
   return {
     schemaVersion: "bruno.founder-provider-decision-summary.v1",
     sourceRevision: REVISION,
     evidenceDigest: DIGEST,
     providers: {
-      openai: { ...released },
-      calendarReading: { ...released },
-      gmailReading: { ...released },
-      gmailSending: { ...released },
-      anthropic: { outcome: "hidden" as "released" | "hidden", evidenceDigest: DIGEST },
+      openai: released("1"),
+      anthropic: released("2"),
+      calendarReading: released("3"),
+      gmailReading: released("4"),
+      gmailSending: released("5"),
     },
   };
 }

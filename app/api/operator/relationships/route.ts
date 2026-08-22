@@ -1,10 +1,15 @@
 import {
+  founderOperatorAccessErrorResponse,
+  requireFounderOperatorWorkspaceAccess,
+} from "@/app/api/operator/_shared/owner-preview-access";
+import {
   confirmFounderRelationshipCandidateForUser,
+  type FounderRelationshipObservation,
   FounderRelationshipsError,
+  founderRelationshipEvidenceRequirement,
   getFounderRelationshipsForUser,
   ingestFounderRelationshipEvidenceForUser,
   rejectFounderRelationshipCandidateForUser,
-  type FounderRelationshipObservation,
   updateFounderRelationshipRecordForUser,
 } from "@/src/server/operators/founder-relationships";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
@@ -14,6 +19,11 @@ export const dynamic = "force-dynamic";
 export async function GET(): Promise<Response> {
   const applicationUser = await requireConfiguredApplicationUser();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    "workspace_with_mail",
+  );
+  if (accessFailure) return accessFailure;
   try {
     const relationships = await getFounderRelationshipsForUser(applicationUser.userId);
     return Response.json({ relationships }, { headers: noStoreHeaders() });
@@ -25,6 +35,11 @@ export async function GET(): Promise<Response> {
 export async function POST(request: Request): Promise<Response> {
   const applicationUser = await requireConfiguredApplicationUser();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    "workspace_with_mail",
+  );
+  if (accessFailure) return accessFailure;
   let payload: unknown;
   try {
     payload = await request.json();
@@ -38,6 +53,11 @@ export async function POST(request: Request): Promise<Response> {
     if (payload.action === "ingest_evidence") {
       const observations = readObservations(payload.observations);
       if (!observations.ok) return validationResponse(observations.message);
+      const evidenceAccessFailure = await requireFounderOperatorWorkspaceAccess(
+        applicationUser.userId,
+        founderRelationshipEvidenceRequirement(observations.value),
+      );
+      if (evidenceAccessFailure) return evidenceAccessFailure;
       const relationships = await ingestFounderRelationshipEvidenceForUser(
         applicationUser.userId,
         observations.value,
@@ -230,6 +250,8 @@ function validationResponse(message: string): Response {
 }
 
 function errorResponse(error: unknown): Response {
+  const accessResponse = founderOperatorAccessErrorResponse(error);
+  if (accessResponse) return accessResponse;
   if (error instanceof FounderRelationshipsError) {
     return Response.json(
       { error: { code: error.code, message: error.message } },

@@ -6,6 +6,7 @@ import { FounderOperatorPreparation } from "@/app/operator/_components/founder-o
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
 import type { FounderOnboardingDto } from "@/src/server/operators/founder-onboarding";
 import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
+import { resolveFounderOperatorExperience } from "@/src/shared/founder-operator-experience";
 
 const OPERATOR: FounderOperatorDto = {
   id: "00000000-0000-4000-8000-000000003391",
@@ -27,6 +28,42 @@ const OPERATOR: FounderOperatorDto = {
 };
 
 describe("Founder Operator preparation shell", () => {
+  it("allows the legacy compatibility projection only in development mode", () => {
+    expect(
+      resolveFounderOperatorExperience({
+        authMode: "development",
+        nodeEnvironment: "development",
+        requestedExperience: "legacy_compatibility",
+      }),
+    ).toBe("legacy_compatibility");
+    for (const authMode of ["clerk", "operator", "invalid"] as const) {
+      expect(
+        resolveFounderOperatorExperience({
+          authMode,
+          nodeEnvironment: "development",
+          requestedExperience: "legacy_compatibility",
+        }),
+      ).toBe("owner_preview");
+    }
+    expect(
+      resolveFounderOperatorExperience({
+        authMode: "development",
+        nodeEnvironment: "production",
+        requestedExperience: "legacy_compatibility",
+      }),
+    ).toBe("owner_preview");
+  });
+
+  it("asks the Founder to begin preparation without creating state on page load", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, { initialOperator: null }),
+    );
+
+    expect(html).toContain("Create my Operator");
+    expect(html).toContain("Opening this page alone does not create one.");
+    expect(html).not.toContain("Confirm timezone");
+  });
+
   it("moves the legacy shell navigation to Founder outcomes", () => {
     const html = renderToStaticMarkup(
       createElement(
@@ -113,6 +150,105 @@ describe("Founder Operator preparation shell", () => {
     expect(html).toContain("Your progress is saved");
   });
 
+  it("shows restore verification without exposing archive mechanics or credentials", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: OPERATOR,
+        initialRecoveryArchive: {
+          state: "current",
+          lastVerifiedAt: "2026-08-22T00:00:00.000Z",
+          restoreVerifiedAt: "2026-08-22T00:00:00.000Z",
+          nextArchiveDueAt: "2026-08-23T00:00:00.000Z",
+          retentionEndsAt: "2026-09-21T00:00:00.000Z",
+          latestAttempt: {
+            status: "failed",
+            observedAt: "2026-08-22T22:00:00.000Z",
+          },
+          deletion: {
+            status: "completed",
+            attemptedAt: "2026-08-22T00:00:00.000Z",
+            completedAt: "2026-08-22T00:00:01.000Z",
+          },
+        },
+      }),
+    );
+
+    expect(html).toContain("Protected recovery");
+    expect(html).toContain("Recovery Archive verified");
+    expect(html).toContain("provider access is never copied");
+    expect(html).toContain("Current protection remains verified");
+    expect(html).toContain("latest daily refresh needs another try");
+    expect(html).toContain("were safely deleted");
+    expect(html).not.toMatch(/object key|ciphertext|credential digest|storage bucket/i);
+  });
+
+  it("distinguishes unavailable protection and a failed expiry deletion", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: OPERATOR,
+        initialRecoveryArchive: {
+          state: "unavailable",
+          lastVerifiedAt: null,
+          restoreVerifiedAt: null,
+          nextArchiveDueAt: null,
+          retentionEndsAt: null,
+          latestAttempt: null,
+          deletion: {
+            status: "failed",
+            attemptedAt: "2026-08-22T00:00:00.000Z",
+            completedAt: null,
+          },
+        },
+      }),
+    );
+
+    expect(html).toContain("Recovery Archive unavailable");
+    expect(html).toContain("Unavailable");
+    expect(html).toContain("deletion needs attention");
+    expect(html).not.toContain("Recovery Archive is being prepared");
+  });
+
+  it("never presents a delete request as completed Infrastructure Retirement", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: OPERATOR,
+        initialInfrastructureRetirement: {
+          state: "in_progress",
+          receiptId: "retirement-374",
+          attemptCount: 2,
+          hardDestructionDueAt: "2026-08-22T00:00:00.000Z",
+          workStoppedAt: "2026-08-22T00:00:00.000Z",
+          credentialsDisabledAt: "2026-08-22T00:00:00.000Z",
+          archive: { outcome: "failed", criticalFailure: true },
+          exactResource: {
+            provider: "digitalocean",
+            dropletId: "droplet-374",
+            firewallId: "firewall-374",
+          },
+          provider: {
+            droplet: "absent",
+            firewall: "unknown",
+            lastCheckedAt: "2026-08-22T00:00:01.000Z",
+            absenceVerifiedAt: null,
+          },
+          billableRuntime: {
+            startedAt: "2026-08-20T00:00:00.000Z",
+            endedAt: null,
+            seconds: null,
+          },
+          needsAttention: true,
+        },
+      }),
+    );
+
+    expect(html).toContain("Runtime removal is still being verified");
+    expect(html).toContain("In progress");
+    expect(html).toContain("not complete until DigitalOcean independently confirms");
+    expect(html).toContain("critical preservation failure");
+    expect(html).toContain("same exact resource");
+    expect(html).not.toContain("Runtime cost stopped");
+  });
+
   it("anchors the next incomplete onboarding step in the Founder workspace", () => {
     const html = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {
@@ -168,6 +304,7 @@ describe("Founder Operator preparation shell", () => {
           },
           runtime: { status: "ready", recoveryMessage: null },
         },
+        ownerPreviewAdmitted: true,
       }),
     );
 
@@ -177,6 +314,180 @@ describe("Founder Operator preparation shell", () => {
     expect(html).toContain('id="needs-you"');
     expect(html).not.toContain("Telegram");
     expect(html).not.toContain("WhatsApp");
+  });
+
+  it("keeps a ready runtime outside the Founder workspace until Owner Preview is admitted", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: {
+          ...OPERATOR,
+          preparation: {
+            ...OPERATOR.preparation,
+            status: "ready",
+            timezone: "Asia/Manila",
+            timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+          },
+          runtime: { status: "ready", recoveryMessage: null },
+        },
+        initialOnboarding: {
+          nextStep: "conversation",
+          defaultRoute: "/operator#conversation",
+          activated: true,
+          operation: "calendar_limited",
+          capabilities: { ai: "ready", calendar: "ready", mail: "not_offered", core: "missing" },
+          facts: {
+            timezoneConfirmed: true,
+            runtimeReady: true,
+            processingConsent: true,
+            firstBriefReady: true,
+            primarySuiteIdentity: "google-owner-preview",
+          },
+        } satisfies FounderOnboardingDto,
+        ownerPreviewAdmitted: false,
+      }),
+    );
+
+    expect(html).toContain("Owner Preview is waiting for current protection");
+    expect(html).not.toContain('aria-label="Current Founder workspace"');
+    expect(html).not.toContain("What should we handle today?");
+  });
+
+  it("preserves the safe Founder workspace while new work is held", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: {
+          ...OPERATOR,
+          preparation: {
+            ...OPERATOR.preparation,
+            status: "ready",
+            timezone: "Asia/Manila",
+            timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+          },
+          runtime: { status: "ready", recoveryMessage: null },
+        },
+        initialOnboarding: {
+          nextStep: "conversation",
+          defaultRoute: "/operator#conversation",
+          activated: true,
+          operation: "calendar_limited",
+          capabilities: { ai: "ready", calendar: "ready", mail: "not_offered", core: "missing" },
+          facts: {
+            timezoneConfirmed: true,
+            runtimeReady: true,
+            processingConsent: true,
+            firstBriefReady: true,
+            primarySuiteIdentity: "google-owner-preview",
+          },
+        } satisfies FounderOnboardingDto,
+        ownerPreviewAdmitted: true,
+        ownerPreviewWorkAllowed: false,
+      }),
+    );
+
+    expect(html).toContain("Some new work is paused");
+    expect(html).toContain('aria-label="Current Founder workspace"');
+    expect(html).toContain("What should we handle today?");
+  });
+
+  it("shows the attended Trusted Preview Learning Round without hidden capabilities", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: {
+          ...OPERATOR,
+          preparation: {
+            ...OPERATOR.preparation,
+            status: "ready",
+            timezone: "Asia/Manila",
+            timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+          },
+          runtime: { status: "ready", recoveryMessage: null },
+        },
+        ownerPreviewAdmitted: true,
+        ownerPreviewWorkAllowed: true,
+        ownerPreview: {
+          stage: "Trusted Preview",
+          state: "active",
+          availableCapabilities: ["OpenAI", "Calendar reading"],
+          supportBoundary: "Attended onboarding and observation",
+          evidenceClassification: "Learning Round",
+          automaticPromotion: false,
+          founderAcceptanceEligible: false,
+          cohortSlot: 2,
+        },
+        openAiReleased: true,
+        calendarReadingReleased: true,
+        mailReadingReleased: true,
+        mailSendingReleased: true,
+      }),
+    );
+
+    expect(html).toContain("Trusted Preview");
+    expect(html).toContain("Available now: OpenAI and Calendar reading.");
+    expect(html).toContain("attended onboarding and observation");
+    expect(html).toContain("cannot become Founder Acceptance Evidence");
+    expect(html).not.toMatch(/Gmail|Anthropic|Core Operation/);
+  });
+
+  it("presents an identity-bound Trusted Preview invitation instead of open admission", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: {
+          ...OPERATOR,
+          preparation: {
+            ...OPERATOR.preparation,
+            status: "ready",
+            timezone: "Asia/Manila",
+            timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+          },
+          runtime: { status: "ready", recoveryMessage: null },
+        },
+        trustedPreviewInvitationToken: "A".repeat(43),
+      }),
+    );
+
+    expect(html).toContain("Trusted Preview is waiting for current protection");
+    expect(html).toContain("Accept Trusted Preview invitation");
+    expect(html).not.toContain("Enter Owner Preview");
+  });
+
+  it("preserves safe workspace checkpoints when the admitted runtime needs attention", () => {
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: {
+          ...OPERATOR,
+          preparation: {
+            ...OPERATOR.preparation,
+            status: "ready",
+            timezone: "Asia/Manila",
+            timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+          },
+          runtime: {
+            status: "needs_attention",
+            recoveryMessage: "Runtime recovery is required.",
+          },
+        },
+        initialOnboarding: {
+          nextStep: "conversation",
+          defaultRoute: "/operator#conversation",
+          activated: true,
+          operation: "calendar_limited",
+          capabilities: { ai: "ready", calendar: "ready", mail: "not_offered", core: "missing" },
+          facts: {
+            timezoneConfirmed: true,
+            runtimeReady: false,
+            processingConsent: true,
+            firstBriefReady: true,
+            primarySuiteIdentity: "google-owner-preview",
+          },
+        } satisfies FounderOnboardingDto,
+        ownerPreviewAdmitted: true,
+        ownerPreviewWorkAllowed: false,
+      }),
+    );
+
+    expect(html).toContain("Some new work is paused");
+    expect(html).toContain('aria-label="Current Founder workspace"');
+    expect(html).toContain("What should we handle today?");
   });
 
   it("keeps OpenAI hidden until current Connected Acceptance releases it", () => {
@@ -191,11 +502,15 @@ describe("Founder Operator preparation shell", () => {
       runtime: { status: "ready", recoveryMessage: null },
     };
     const hidden = renderToStaticMarkup(
-      createElement(FounderOperatorPreparation, { initialOperator: readyOperator }),
+      createElement(FounderOperatorPreparation, {
+        initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
+      }),
     );
     const released = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {
         initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
         openAiReleased: true,
       }),
     );
@@ -238,6 +553,7 @@ describe("Founder Operator preparation shell", () => {
             primarySuiteIdentity: "founder@example.com",
           },
         } satisfies FounderOnboardingDto,
+        ownerPreviewAdmitted: true,
       }),
     );
 
@@ -264,6 +580,7 @@ describe("Founder Operator preparation shell", () => {
           },
           runtime: { status: "ready", recoveryMessage: null },
         },
+        ownerPreviewAdmitted: true,
         calendarReadingReleased: true,
       }),
     );
@@ -275,7 +592,7 @@ describe("Founder Operator preparation shell", () => {
     expect(html).not.toContain("WhatsApp");
   });
 
-  it("keeps Calendar and Gmail reading independently hidden until each acceptance passes", () => {
+  it("keeps Gmail reading hidden throughout Calendar-only Owner Preview", () => {
     const readyOperator: FounderOperatorDto = {
       ...OPERATOR,
       preparation: {
@@ -287,17 +604,22 @@ describe("Founder Operator preparation shell", () => {
       runtime: { status: "ready", recoveryMessage: null },
     };
     const hidden = renderToStaticMarkup(
-      createElement(FounderOperatorPreparation, { initialOperator: readyOperator }),
+      createElement(FounderOperatorPreparation, {
+        initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
+      }),
     );
     const calendarOnly = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {
         initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
         calendarReadingReleased: true,
       }),
     );
     const mailOnly = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {
         initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
         mailReadingReleased: true,
         mailReleaseControls: {
           qualified: true,
@@ -315,10 +637,61 @@ describe("Founder Operator preparation shell", () => {
     expect(calendarOnly).toContain("Your Calendar Connection");
     expect(calendarOnly).not.toContain("Your Mail Connection");
     expect(mailOnly).not.toContain("Your Calendar Connection");
-    expect(mailOnly).toContain("Your Mail Connection");
+    expect(mailOnly).not.toContain("Your Mail Connection");
+    expect(mailOnly).not.toMatch(/Gmail|Anthropic|Core Operation/);
+    expect(mailOnly).toContain("Support is fully attended");
   });
 
-  it("keeps Gmail sending hidden until its separate acceptance passes", () => {
+  it("keeps legacy Mail and Core UI available only through the explicit compatibility projection", () => {
+    const readyOperator: FounderOperatorDto = {
+      ...OPERATOR,
+      preparation: {
+        ...OPERATOR.preparation,
+        status: "ready",
+        timezone: "Asia/Manila",
+        timezoneConfirmedAt: "2026-08-18T01:00:00.000Z",
+      },
+      runtime: { status: "ready", recoveryMessage: null },
+    };
+    const html = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: readyOperator,
+        initialOnboarding: {
+          nextStep: "mail",
+          defaultRoute: "/operator#onboarding-mail",
+          activated: false,
+          operation: "core",
+          capabilities: { ai: "ready", calendar: "ready", mail: "stale", core: "missing" },
+          facts: {
+            timezoneConfirmed: true,
+            runtimeReady: true,
+            processingConsent: false,
+            firstBriefReady: false,
+            primarySuiteIdentity: "founder@example.com",
+          },
+        } satisfies FounderOnboardingDto,
+        ownerPreviewAdmitted: true,
+        experience: "legacy_compatibility",
+        mailReadingReleased: true,
+        mailReleaseControls: {
+          qualified: true,
+          requiredScope: "https://www.googleapis.com/auth/gmail.readonly",
+          disclosure: "bounded",
+          retentionDays: 90,
+          deletion: "staged",
+          aiLimitedUse: "bounded",
+        },
+      }),
+    );
+
+    expect(html).toContain("Next step: Review Mail evidence access");
+    expect(html).toContain("Mail: Needs a fresh check");
+    expect(html).toContain("Your Mail Connection");
+    expect(html).toContain("Core Operation");
+    expect(html).not.toContain("Owner Preview capabilities");
+  });
+
+  it("keeps Gmail sending hidden even when its separate release evidence passes", () => {
     const readyOperator: FounderOperatorDto = {
       ...OPERATOR,
       preparation: {
@@ -330,17 +703,21 @@ describe("Founder Operator preparation shell", () => {
       runtime: { status: "ready", recoveryMessage: null },
     };
     const hidden = renderToStaticMarkup(
-      createElement(FounderOperatorPreparation, { initialOperator: readyOperator }),
+      createElement(FounderOperatorPreparation, {
+        initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
+      }),
     );
     const released = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {
         initialOperator: readyOperator,
+        ownerPreviewAdmitted: true,
         mailSendingReleased: true,
       }),
     );
 
     expect(hidden).not.toContain("Optional Mail Sending Connection");
-    expect(released).toContain("Optional Mail Sending Connection");
-    expect(released).toContain("Review send-only Gmail");
+    expect(released).not.toContain("Optional Mail Sending Connection");
+    expect(released).not.toContain("Review send-only Gmail");
   });
 });

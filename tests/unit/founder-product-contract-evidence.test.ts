@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { buildFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
-import { FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS } from "@/src/shared/founder-product-contract";
+import {
+  FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS,
+  FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
+} from "@/src/shared/founder-product-contract";
+import {
+  createFounderProductContractScenarioLedger,
+  parseFounderProductContractScenarioLedger,
+  sanitizeFounderProductContractScenarioResult,
+  type FounderProductContractScenarioResult,
+} from "@/src/testing/founder-product-contract";
 
 const REVISION = "a".repeat(40);
 const DIGEST = `sha256:${"b".repeat(64)}`;
+const SIGNING_SECRET = "founder-contract-test-secret";
 
 describe("Founder Product Contract evidence", () => {
   it("emits an allowlisted exact-release summary while keeping attended evidence explicit", () => {
@@ -106,6 +116,57 @@ describe("Founder Product Contract evidence", () => {
     );
   });
 
+  it("refuses evidence from a rerun of the same workflow candidate", () => {
+    expect(() => buildFounderProductContractEvidence({ ...validInput(), runAttempt: 2 })).toThrow(
+      "Workflow reruns cannot authorize Founder Product Contract evidence.",
+    );
+  });
+
+  it("refuses a missing lifecycle ledger in normal CI", () => {
+    const input = validInput() as Record<string, unknown>;
+    delete input.scenarioLedger;
+    expect(() => buildFounderProductContractEvidence(input as never)).toThrow(
+      "requires a signed lifecycle ledger",
+    );
+  });
+
+  it("refuses release mode with an empty lifecycle ledger", () => {
+    expect(() =>
+      buildFounderProductContractEvidence({
+        ...validInput(),
+        mode: "release",
+        scenarioLedger: signedScenarioLedger([]),
+        voiceOverDigest: DIGEST,
+        voiceOverOsVersion: "macOS 15.6",
+        voiceOverBrowserVersion: "Safari 26.0",
+        talkBackDigest: DIGEST,
+        talkBackOsVersion: "Android 16",
+        talkBackBrowserVersion: "Chrome 140",
+      }),
+    ).toThrow(
+      "Required Founder Product Contract scenario release_stage_admission was not present.",
+    );
+  });
+
+  it("includes cleanup evidence and rejects an unverified cleanup", () => {
+    const scenarioResults = lifecycleScenarioResults();
+    const failedCleanup = scenarioResults.map((scenario) =>
+      scenario.id === "recovery_archive_lifecycle"
+        ? {
+            ...scenario,
+            cleanup: { ...scenario.cleanup, status: "failed" as const, verified: false },
+          }
+        : scenario,
+    );
+
+    expect(() =>
+      buildFounderProductContractEvidence({
+        ...validInput(),
+        scenarioLedger: signedScenarioLedger(failedCleanup),
+      }),
+    ).toThrow("cleanup was not verified");
+  });
+
   it("refuses attended evidence whose environment metadata is incomplete", () => {
     expect(() =>
       buildFounderProductContractEvidence({
@@ -113,6 +174,97 @@ describe("Founder Product Contract evidence", () => {
         voiceOverDigest: DIGEST,
       }),
     ).toThrow("VoiceOver evidence metadata is incomplete.");
+  });
+
+  it("does not retain cleanup fields outside the allowlist", () => {
+    const ledger = signedScenarioLedger();
+    const first = ledger.results[0];
+    if (!first) throw new Error("Expected a lifecycle scenario.");
+    (first.cleanup as unknown as Record<string, unknown>).credentials = "should-not-survive";
+
+    const evidence = buildFounderProductContractEvidence({
+      ...validInput(),
+      scenarioLedger: ledger,
+    });
+
+    expect(JSON.stringify(evidence)).not.toContain("should-not-survive");
+    expect(sanitizeFounderProductContractScenarioResult(first).cleanup).not.toHaveProperty(
+      "credentials",
+    );
+  });
+
+  it("rejects an unsigned or structurally extended lifecycle ledger", () => {
+    const ledger = signedScenarioLedger();
+    const extended = JSON.parse(JSON.stringify(ledger)) as Record<string, unknown>;
+    const results = extended.results as Array<Record<string, unknown>>;
+    const first = results[0];
+    if (!first) throw new Error("Expected a lifecycle scenario.");
+    (first.cleanup as Record<string, unknown>).credentials = "should-not-survive";
+
+    expect(() =>
+      parseFounderProductContractScenarioLedger({
+        value: JSON.stringify(extended),
+        sourceRevision: REVISION,
+        runId: "local-365",
+        observedAt: "2026-08-20T00:00:00.000Z",
+        signingSecret: SIGNING_SECRET,
+      }),
+    ).toThrow("is invalid");
+
+    expect(() =>
+      parseFounderProductContractScenarioLedger({
+        value: JSON.stringify({ ...ledger, signature: "hmac-sha256:forged" }),
+        sourceRevision: REVISION,
+        runId: "local-365",
+        observedAt: "2026-08-20T00:00:00.000Z",
+        signingSecret: SIGNING_SECRET,
+      }),
+    ).toThrow("signature is invalid");
+  });
+
+  it("accepts an exact lifecycle ledger and rejects a missing required scenario", () => {
+    const scenarioResults = lifecycleScenarioResults();
+    const evidence = buildFounderProductContractEvidence({
+      ...validInput(),
+      scenarioLedger: signedScenarioLedger(scenarioResults),
+    });
+
+    expect(evidence.scenarios).toEqual(
+      scenarioResults.map(({ id, status, attempts, cleanup }) => ({
+        id,
+        status,
+        attempts,
+        cleanup,
+      })),
+    );
+    expect(evidence.scenarioLedger).toEqual({
+      schemaVersion: "bruno.founder-product-contract.scenario-ledger.v1",
+      producer: "bruno.persisted-founder-application",
+      sourceRevision: REVISION,
+      runId: "local-365",
+      observedAt: "2026-08-20T00:00:00.000Z",
+      results: scenarioResults,
+      resultsDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      signature: expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/),
+    });
+    expect(
+      parseFounderProductContractScenarioLedger({
+        value: JSON.stringify(evidence.scenarioLedger),
+        sourceRevision: REVISION,
+        runId: "local-365",
+        observedAt: "2026-08-20T00:00:00.000Z",
+        signingSecret: SIGNING_SECRET,
+      }),
+    ).toEqual(evidence.scenarioLedger);
+    expect(evidence.cleanup).toMatchObject({ status: "passed", verified: true });
+    expect(() =>
+      buildFounderProductContractEvidence({
+        ...validInput(),
+        scenarioLedger: signedScenarioLedger(scenarioResults.slice(1)),
+      }),
+    ).toThrow(
+      "Required Founder Product Contract scenario release_stage_admission was not present.",
+    );
   });
 });
 
@@ -126,7 +278,39 @@ function validInput() {
     unit: { numPassedTests: 64, numFailedTests: 0, numPendingTests: 0 },
     sourceRevision: REVISION,
     runId: "local-365",
+    runAttempt: 1,
     mode: "ci" as const,
     observedAt: "2026-08-20T00:00:00.000Z",
+    scenarioLedger: signedScenarioLedger(),
+    scenarioSigningSecret: SIGNING_SECRET,
   };
+}
+
+function lifecycleScenarioResults() {
+  return FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS.map((id) => ({
+    id,
+    status: "passed" as const,
+    attempts: 1,
+    sourceRevision: REVISION,
+    observedAt: "2026-08-20T00:00:00.000Z",
+    cleanup: {
+      status: "passed" as const,
+      verified: true,
+      resourcesBefore: id === "infrastructure_retirement" ? 2 : 0,
+      resourcesAfter: 0,
+      observedAt: "2026-08-20T00:00:00.000Z",
+    },
+  }));
+}
+
+function signedScenarioLedger(
+  results: readonly FounderProductContractScenarioResult[] = lifecycleScenarioResults(),
+) {
+  return createFounderProductContractScenarioLedger({
+    sourceRevision: REVISION,
+    runId: "local-365",
+    observedAt: "2026-08-20T00:00:00.000Z",
+    results,
+    signingSecret: SIGNING_SECRET,
+  });
 }

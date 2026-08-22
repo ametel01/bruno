@@ -116,6 +116,8 @@ export type DigitalOceanOwnedSetObservation = {
   state: "owned" | "absent";
   droplet: "present" | "absent";
   firewall: "present" | "absent";
+  /** Provider-reported creation time used as the authoritative billable-cost origin. */
+  dropletCreatedAt?: string | null;
 };
 
 export type DigitalOceanOwnedSetFailureReason =
@@ -1076,6 +1078,10 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
         state: dropletState === "absent" && firewallState === "absent" ? "absent" : "owned",
         droplet: dropletState,
         firewall: firewallState,
+        dropletCreatedAt:
+          droplet.state === "present"
+            ? readApiDate(droplet.value?.droplet?.createdAt ?? droplet.value?.droplet?.created_at)
+            : null,
       },
     };
   }
@@ -2056,6 +2062,7 @@ export class FakeDigitalOceanProvider
         state: dropletState === "absent" && firewallState === "absent" ? "absent" : "owned",
         droplet: dropletState,
         firewall: firewallState,
+        dropletCreatedAt: droplet?.createdAt ?? null,
       },
     };
   }

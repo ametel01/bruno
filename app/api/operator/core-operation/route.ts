@@ -1,9 +1,13 @@
 import {
+  founderOperatorAccessErrorResponse,
+  requireFounderOperatorWorkspaceAccess,
+} from "@/app/api/operator/_shared/owner-preview-access";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import {
   confirmFounderCoreProcessingConsentForUser,
   FounderCoreOperationError,
-  type getFounderCoreOperationForUser,
+  getFounderCoreOperationForUser,
   openFounderCoreBriefForUser,
-  reconcileFounderCoreOperationForUser,
 } from "@/src/server/operators/founder-core-operation";
 import type { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import { requireConfiguredApplicationUser as defaultRequireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
@@ -13,7 +17,6 @@ export const dynamic = "force-dynamic";
 type Dependencies = {
   requireApplicationUser?: typeof requireConfiguredApplicationUser;
   getOperation?: typeof getFounderCoreOperationForUser;
-  reconcileOperation?: typeof reconcileFounderCoreOperationForUser;
   confirmConsent?: typeof confirmFounderCoreProcessingConsentForUser;
   openBrief?: typeof openFounderCoreBriefForUser;
 };
@@ -27,11 +30,14 @@ export async function GET(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
-  const operation = await (
-    dependencies.reconcileOperation ??
-    dependencies.getOperation ??
-    reconcileFounderCoreOperationForUser
-  )(applicationUser.userId);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    "workspace",
+  );
+  if (accessFailure) return accessFailure;
+  const operation = await (dependencies.getOperation ?? getFounderCoreOperationForUser)(
+    applicationUser.userId,
+  );
   return Response.json({ operation }, { headers: noStoreHeaders() });
 }
 
@@ -44,6 +50,11 @@ export async function POST(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+  );
+  if (accessFailure) return accessFailure;
   let payload: unknown;
   try {
     payload = await request.json();
@@ -65,6 +76,8 @@ export async function POST(
       return Response.json({ operation }, { headers: noStoreHeaders() });
     }
   } catch (error) {
+    const accessResponse = founderOperatorAccessErrorResponse(error);
+    if (accessResponse) return accessResponse;
     if (error instanceof FounderCoreOperationError) {
       return Response.json(
         { error: { code: error.code, message: error.message } },

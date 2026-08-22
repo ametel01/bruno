@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildTestGoogleMailSendingAcceptanceRelease } from "@/scripts/founder-google-mail-sending-test-release";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  founderRecoveryArchives,
+  founderReleaseDecisions,
   operatorActionAuthorizations,
   operatorActionExecutionAttempts,
   operatorActionReceipts,
@@ -36,10 +38,12 @@ import {
   encryptOperatorSecret,
   type OperatorSecretKeyring,
 } from "@/src/server/secrets/operator-secret-keyring";
+import { insertPastDueFounderEntitlementFixture } from "@/tests/helpers/founder-entitlement";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003501";
 const NOW = new Date("2026-08-19T05:00:00.000Z");
 const REVISION = "a".repeat(40);
+const CONTROLLED_DEADLINE = new Date("2099-01-01T00:00:00.000Z");
 const KEYRING: OperatorSecretKeyring = {
   activeVersion: "test-v1",
   keys: new Map([["test-v1", Buffer.alloc(32, 9)]]),
@@ -66,9 +70,14 @@ describe("Founder approved Gmail execution", () => {
       now: () => NOW,
     });
     await connection.db.update(operatorPreparations).set({ status: "ready", completedAt: NOW });
-    await connection.db
-      .update(operatorRuntimes)
-      .set({ status: "ready", transportState: "connected", safetyState: "verified", readyAt: NOW });
+    await connection.db.update(operatorRuntimes).set({
+      status: "ready",
+      transportState: "connected",
+      safetyState: "verified",
+      configRevision: "runtime-mail-v1",
+      readyAt: NOW,
+    });
+    await seedOwnerPreviewAccess(operator.id);
 
     const calendar = await connection.db
       .insert(operatorCalendarConnections)
@@ -213,6 +222,74 @@ describe("Founder approved Gmail execution", () => {
     );
   });
 
+  it("blocks Gmail effects throughout Calendar-only Owner Preview", async () => {
+    const action = await approveAction();
+    let sendCount = 0;
+
+    await expect(
+      execute(
+        action.id,
+        {
+          sendMessage: async () => {
+            sendCount += 1;
+            return { ok: true, providerMessageId: "must-not-send", providerThreadId: null };
+          },
+        },
+        true,
+      ),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+    expect(sendCount).toBe(0);
+    expect(await connection.db.select().from(operatorActionExecutionAttempts)).toHaveLength(0);
+    expect(
+      (await connection.db.select().from(operatorActionAuthorizations))[0]?.claimedAt,
+    ).toBeNull();
+    expect((await connection.db.select().from(operatorProposedActions))[0]?.state).toBe(
+      "authorized",
+    );
+  });
+
+  it("uses the controlled send time when Product Entitlement reaches its deadline", async () => {
+    const action = await approveAction({ validUntil: "2100-01-01T00:00:00.000Z" });
+    await connection.db
+      .update(operatorMailSendingConnections)
+      .set({ tokenExpiresAt: new Date("2100-01-01T00:00:00.000Z") });
+    await insertPastDueFounderEntitlementFixture({
+      connection,
+      userId: OWNER_ID,
+      fixtureId: "gmail-execution-deadline",
+      reconciledAt: NOW,
+      retirementDueAt: CONTROLLED_DEADLINE,
+    });
+    let sendCount = 0;
+
+    await expect(
+      executeFounderApprovedGmailActionForUser(OWNER_ID, action.id, 1, {
+        createConnection: () => connection,
+        adapter: {
+          createAuthorizationUrl: async () => ({ authorizationUrl: "", expiresAt: NOW }),
+          exchangeAuthorizationCode: async () => ({
+            accessToken: "",
+            refreshToken: null,
+            tokenExpiresAt: NOW,
+            grantedScopes: [],
+          }),
+          getIdentity: async () => ({ providerSubjectId: "", accountLabel: null }),
+          revokeAuthorization: async () => ({ providerRevoked: false }),
+          sendMessage: async () => {
+            sendCount += 1;
+            return { ok: true, providerMessageId: "must-not-send", providerThreadId: null };
+          },
+        },
+        keyring: KEYRING,
+        env: ENV,
+        now: () => CONTROLLED_DEADLINE,
+        requireReleaseStageAccess: async () => undefined,
+      }),
+    ).rejects.toThrow("Product Entitlement no longer authorizes external work");
+    expect(sendCount).toBe(0);
+    expect(await connection.db.select().from(operatorActionExecutionAttempts)).toHaveLength(0);
+  });
+
   it("reconciles a started attempt after a worker restart without resending", async () => {
     const action = await approveAction();
     const [authorization] = await connection.db
@@ -251,7 +328,9 @@ describe("Founder approved Gmail execution", () => {
     );
   });
 
-  async function approveAction() {
+  async function approveAction(
+    overrides: Partial<Parameters<typeof createFounderProposedActionForUser>[1]> = {},
+  ) {
     const action = await createFounderProposedActionForUser(
       OWNER_ID,
       {
@@ -265,8 +344,13 @@ describe("Founder approved Gmail execution", () => {
         sideEffects: ["one message would be sent"],
         preconditions: [{ key: "mail_sending_ready", description: "Mail Sending is Ready." }],
         validUntil: "2026-08-20T05:00:00.000Z",
+        ...overrides,
       },
-      { createConnection: () => connection, now: () => NOW },
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        requireReleaseStageAccess: async () => undefined,
+      },
     );
     await decideFounderProposedActionForUser(OWNER_ID, action.id, "approve", 1, null, {
       createConnection: () => connection,
@@ -278,6 +362,7 @@ describe("Founder approved Gmail execution", () => {
   async function execute(
     actionId: string,
     transport: Pick<NonNullable<FounderMailExecutionDependencies["adapter"]>, "sendMessage">,
+    enforceOwnerPreview = false,
   ) {
     return executeFounderApprovedGmailActionForUser(OWNER_ID, actionId, 1, {
       createConnection: () => connection,
@@ -296,6 +381,43 @@ describe("Founder approved Gmail execution", () => {
       keyring: KEYRING,
       env: ENV,
       now: () => NOW,
+      ...(enforceOwnerPreview ? {} : { requireReleaseStageAccess: async () => undefined }),
+    });
+  }
+
+  async function seedOwnerPreviewAccess(operatorId: string): Promise<void> {
+    await connection.db.insert(founderReleaseDecisions).values({
+      userId: OWNER_ID,
+      operatorId,
+      stage: "owner_preview",
+      outcome: "enter",
+      applicationRevision: REVISION,
+      runtimeRevision: "runtime-mail-v1",
+      capabilityManifest: ["openai", "calendar_reading"],
+      openAiQualificationExpiresAt: new Date(NOW.valueOf() + 8 * 24 * 60 * 60 * 1_000),
+      calendarQualificationExpiresAt: new Date(NOW.valueOf() + 8 * 24 * 60 * 60 * 1_000),
+      evidenceDigests: [`sha256:${"6".repeat(64)}`],
+      decidedAt: NOW,
+      createdAt: NOW,
+    });
+    const archiveId = "00000000-0000-4000-8000-000000003573";
+    await connection.db.insert(founderRecoveryArchives).values({
+      id: archiveId,
+      userId: OWNER_ID,
+      operatorId,
+      runtimeRevision: "runtime-mail-v1",
+      status: "verified",
+      formatVersion: 1,
+      storageObjectKey: `founder-recovery/${OWNER_ID}/${archiveId}.age`,
+      recoveryCredentialObjectKey: `founder-recovery/${OWNER_ID}/${archiveId}.key`,
+      ciphertextDigest: `sha256:${"1".repeat(64)}`,
+      recoveryCredentialDigest: `sha256:${"2".repeat(64)}`,
+      stateDigest: `sha256:${"3".repeat(64)}`,
+      restorableVerified: true,
+      restoreVerifiedAt: NOW,
+      observedAt: NOW,
+      expiresAt: new Date(NOW.valueOf() + 30 * 24 * 60 * 60 * 1_000),
+      createdAt: NOW,
     });
   }
 });

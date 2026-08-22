@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 
 const mocks = vi.hoisted(() => ({
   requireApplicationUser: vi.fn(),
@@ -104,5 +105,27 @@ describe("Action Preview route", () => {
     );
     expect(response.status).toBe(200);
     expect(mocks.dismissMailOffer).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it("returns a sanitized denial when protection expires inside the edit transaction", async () => {
+    mocks.editPreview.mockRejectedValueOnce(new FounderReleaseStageAccessError());
+    const { POST } = await import("@/app/api/operator/action-preview/route");
+    const response = await POST(
+      new Request("http://localhost/api/operator/action-preview", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "edit",
+          recipient: { name: "Ada", address: "ada@example.com" },
+          content: "Hello",
+          supportingEvidence: [{ label: "Calendar", detail: "Call" }],
+          expectedExternalEffect: "Nothing is sent.",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "owner_preview_access_required" },
+    });
   });
 });

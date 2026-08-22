@@ -54,6 +54,7 @@ Configure `runner-release-canary` with required reviewers and these scoped value
 | --- | --- | --- |
 | Secret | `RUNNER_RELEASE_BEARER_TOKEN` | Dedicated command bearer shared only with simulated release runners. |
 | Secret | `BRUNO_RELEASE_SIGNING_KEY_PEM` | Ed25519 private key used only while creating the canonical release bundle. |
+| Secret | `BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET` | Protected HMAC secret supplied only to the trusted lifecycle-ledger producer and verification steps. |
 | Variable | `BRUNO_RELEASE_SIGNING_KEY_ID` | Identifier carried by the release signature. |
 | Variable | `BRUNO_RELEASE_TRUST_SET` | JSON map of current and retained release key IDs to Ed25519 public keys. |
 | Variable | `BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE` | Exact digest-addressed Snapshot Attestation v2 OCI reference selected for the release. |
@@ -61,6 +62,10 @@ Configure `runner-release-canary` with required reviewers and these scoped value
 | Variable | `BRUNO_SNAPSHOT_TRUST_SET` | JSON map used to verify the selected snapshot signing key. |
 | Variable | `BRUNO_RELEASE_PREVIOUS_OCI_REFERENCE` | Retained previous Verified Release OCI reference after the first publication. |
 | Variable | `BRUNO_RELEASE_PREVIOUS_BUNDLE_DIGEST` | Canonical digest paired with the retained previous release. |
+
+The Founder Product Contract workflow creates a masked random HMAC key inside each automated `ci`
+job. The ephemeral key is never persisted and cannot authorize release-mode evidence; release
+dispatches use only the protected environment secret above.
 
 The canary provisions a job-scoped PostgreSQL service from a digest-pinned image and applies every
 repository migration before starting the control plane. The service is destroyed with the GitHub

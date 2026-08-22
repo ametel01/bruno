@@ -174,6 +174,24 @@ commit tokens, encryption keys, runner credentials, Clerk keys, or database cred
 | `CLERK_SECRET_KEY` | Clerk mode | Clerk server key. |
 | `BRUNO_PREVIEW_PROTECTION_VERIFIED` | Development-mode Vercel previews only | Must be exactly `true`, and only after Deployment Protection has been independently verified. |
 
+### Commerce and Product Entitlement
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `BRUNO_LEMON_SQUEEZY_MODE` | No | `off` by default; set exactly `test` or `live` only in the matching Lemon Squeezy environment. |
+| `BRUNO_LEMON_SQUEEZY_API_KEY` | Lemon Squeezy checkout | Server-only API key used for hosted checkout, current-state reconciliation, cancellation, and refunds. |
+| `BRUNO_LEMON_SQUEEZY_WEBHOOK_SECRET` | Lemon Squeezy webhook | Dedicated secret used to authenticate the exact raw webhook body before parsing. |
+| `BRUNO_LEMON_SQUEEZY_STORE_ID` | Lemon Squeezy checkout | Positive numeric Store ID that provider reads must continue to match. |
+| `BRUNO_LEMON_SQUEEZY_VARIANT_ID` | Lemon Squeezy checkout | Positive numeric subscription Variant ID; trials are skipped and plan switching is not exposed. |
+
+`/operator/payment` starts hosted checkout and shows only persisted Bruno.Ai state. A checkout return,
+query parameter, email, or valid Clerk session never creates Product Entitlement. The webhook stores
+an idempotent signed receipt before current Lemon Squeezy Subscription and Order reads are applied.
+While that reconciliation is incomplete, every device continues to show confirming payment. The
+minute commerce reconciler uses `CRON_SECRET`; after one hour without access it closes the attempt,
+cancels renewal, confirms a full refund, and retries exact Infrastructure Retirement. Keep commerce
+default-off until the separately authorized test/live provider qualification is complete.
+
 See [Authentication modes](./docs/AUTHENTICATION.md) and the
 [Clerk development runbook](./docs/CLERK_DEVELOPMENT.md) before changing hosted authentication.
 
@@ -226,9 +244,9 @@ Additional validated tuning variables are documented inline in `.env.example` an
 ensure those images are available to the Droplet without relying on credentials that bootstrap
 does not install.
 
-### Backups
+### Object storage and Recovery Archives
 
-All five variables are required together to enable S3-compatible backup and restore:
+All five variables are required together to enable S3-compatible object storage:
 
 - `BRUNO_BACKUP_STORAGE_ENDPOINT_URL`
 - `BRUNO_BACKUP_STORAGE_BUCKET`
@@ -236,8 +254,69 @@ All five variables are required together to enable S3-compatible backup and rest
 - `BRUNO_BACKUP_STORAGE_ACCESS_KEY_ID`
 - `BRUNO_BACKUP_STORAGE_SECRET_ACCESS_KEY`
 
-Leaving all five unset disables object-backed backups without preventing the rest of the app from
-starting.
+Leaving all five unset disables object-backed manual backups without preventing the rest of the app
+from starting. Owner Preview and later Release Stages additionally require:
+
+- `BRUNO_RECOVERY_ARCHIVE_MASTER_KEY` — a dedicated, base64-encoded 32-byte key used only to wrap
+  per-archive recovery credentials.
+- `BRUNO_OWNER_PREVIEW_QUALIFICATIONS` — the current
+  `bruno.owner-preview-qualifications.v1` JSON bundle containing separate OpenAI and Calendar
+  `bruno.preview-qualification.v1` records. Each record is independently scoped to the exact Owner,
+  Operator, `owner_preview` stage, application revision, runtime revision, capability,
+  qualification window, evidence digest, and required safety gates.
+
+Configure the storage variables and master key together before admitting Owner Preview. Partial
+configuration fails closed. Do not reuse an Agent Secret, Connection Secret, cron secret, runner
+credential, or provider credential as this key.
+
+Recovery Archive storage additionally fails closed unless the HTTPS endpoint identifies supported
+managed object storage independent from the Operator Droplet: Amazon S3, DigitalOcean Spaces,
+Cloudflare R2, or Backblaze B2. Arbitrary S3-compatible and self-hosted MinIO endpoints remain
+usable for ordinary backups but cannot satisfy Recovery Archive placement.
+
+Recovery Archive buckets must have object versioning disabled. Bruno checks the live bucket
+versioning response before both creation and deletion and fails closed when permanent deletion
+cannot be proved; a delete marker over retained object versions does not satisfy the contract.
+
+Recovery Archives use the object store only as an off-Droplet transport. Their encrypted payload,
+separate wrapped recovery credential, authenticated restore check, 24-hour refresh boundary, and
+30-day deletion receipt are distinct from the manual backup manifest and from DigitalOcean
+snapshots. The protected `/api/internal/operator/recovery-archives` cron runs hourly, creates a new
+archive two hourly schedule intervals before the current verified copy reaches 24 hours, and
+processes expiry even after a
+Release Hold or denied admission. Every admitted Operator continues daily protection during full or
+partial Holds, using the last admitted durable checkpoint when runtime recovery needs attention;
+denial or completed retirement ends refresh. Object identities are persisted before upload, so an interrupted
+or partially failed creation remains discoverable for bounded cleanup. A completed Infrastructure
+Retirement stops new daily copies while the final retained archive continues to its 30-day expiry;
+a later `resume` Release Decision can start protection again for a restored Operator. Production
+Operator preparation grants Owner Preview admission only after current OpenAI and Calendar Preview
+Qualification and the initial archive's isolated rebuild check all pass. That check inserts a
+synthetic Operator, preparation, and safe reconnect-required runtime through Bruno's actual
+PostgreSQL schema inside an always-rolled-back transaction, proving the archived mapping satisfies
+the current enums, foreign keys, uniqueness rules, and check constraints. Founder workspace reads
+require a prior exact-revision Owner Preview admission. New work and effect-starting transactions
+additionally require a verified archive observed within the last 24 hours and every capability named
+by that boundary to remain available. A Release Hold keeps the complete admitted manifest while
+persisting the affected capability subset, so unrelated qualified work and all safe reads remain
+available. A stale archive or non-Ready runtime pauses new work without hiding saved checkpoints.
+Preview Qualification expiry is persisted per capability and an access-boundary reconciliation
+records a capability-scoped Hold before work can continue. Runtime recovery failure preserves the
+admitted runtime revision, records the attempted revision only in evidence, and serializes its Hold
+through the canonical exact-revision writer; cumulative Holds retain every applicable evidence
+digest. Legacy decisions without persisted expiry migrate as immediately expired and require fresh
+qualification. Owner Preview remains Calendar-only Limited Operation:
+Core Operation and Gmail effects stay unavailable even if retained Mail state exists. Their deep
+mutation seams recheck this boundary; read endpoints only project existing operation state.
+Infrastructure Retirement marks the destroyed runtime as needing attention before
+its receipt completes, so only newly provisioned and verified infrastructure can become Ready
+again. The encrypted durable state preserves an external-action pause as the complete boolean,
+closed non-secret recovery reason, and timestamp tuple required to rebuild it safely; raw
+Founder-controlled pause text is never archived. Each verified archive is bound to the trusted
+runtime revision persisted before upload, and legacy rows without provable revision identity cannot
+be reused for admission or authorize work. Every S3-compatible
+request, including response-body reads, uses a 10-second abort deadline so unavailable storage
+cannot indefinitely hold recovery, expiry, or retirement work.
 
 ## Deploy the control plane and runners
 
@@ -311,11 +390,24 @@ vercel env add BRUNO_AGENT_SECRET_KEYS_JSON production
 vercel env add CRON_SECRET production
 ```
 
-`vercel.json` schedules both `/api/internal/agent-deployments/reconcile` and
-`/api/internal/agent-runtime/reconcile` every minute. Each request must carry the exact cron secret
-as a bearer credential. Deployment recovery processes at most 25 due items under one shared
-40-second deadline; runtime convergence continues to claim at most one due row. Keep the value in
-Vercel; do not place it in a URL, log, or committed file.
+Before any Owner Preview admission, add all five object-storage variables, the dedicated Recovery
+Archive master key, and the exact current Preview Qualification through encrypted prompts:
+
+```sh
+vercel env add BRUNO_BACKUP_STORAGE_ENDPOINT_URL production
+vercel env add BRUNO_BACKUP_STORAGE_BUCKET production
+vercel env add BRUNO_BACKUP_STORAGE_REGION production
+vercel env add BRUNO_BACKUP_STORAGE_ACCESS_KEY_ID production
+vercel env add BRUNO_BACKUP_STORAGE_SECRET_ACCESS_KEY production
+vercel env add BRUNO_RECOVERY_ARCHIVE_MASTER_KEY production
+vercel env add BRUNO_OWNER_PREVIEW_QUALIFICATIONS production
+```
+
+`vercel.json` schedules deployment and runtime reconciliation every minute and Recovery Archive
+reconciliation hourly. Each request must carry the exact cron secret as a bearer credential.
+Deployment recovery processes at most 25 due items under one shared 40-second deadline; runtime
+convergence continues to claim at most one due row. Keep the value in Vercel; do not place it in a
+URL, log, or committed file.
 
 Leave `BRUNO_READY_AGENT_CREATION_ENABLED` unset during initial deployment. Add it with the exact
 value `true` only to the controlled environment after the authorized staging acceptance passes.

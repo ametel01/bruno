@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   buildFounderInitialGeneralReleaseDecision,
@@ -8,6 +9,10 @@ import {
 } from "@/scripts/create-founder-general-release-decision";
 import { createFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
 import { FOUNDER_PRODUCT_CONTRACT_UNIT_FILES } from "@/src/shared/founder-product-contract";
+import {
+  FOUNDER_PRODUCT_CONTRACT_SCENARIO_SIGNING_SECRET_ENV,
+  parseFounderProductContractScenarioLedger,
+} from "@/src/testing/founder-product-contract";
 import { buildTestGoogleMailSendingAcceptanceRelease } from "./founder-google-mail-sending-test-release";
 import { buildTestGoogleConnectedAcceptanceRelease } from "./founder-google-test-release";
 import { buildTestOpenAiConnectedAcceptanceRelease } from "./founder-openai-test-release";
@@ -27,7 +32,20 @@ await mkdir(artifactDirectory, { recursive: true });
 await rm(evidencePath, { force: true });
 await rm(generalReleaseDecisionPath, { force: true });
 const sourceRevision = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION");
+const observedAt = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_OBSERVED_AT");
+const runId = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID");
+const providerFailureRunId = `fpct-failure:${createHash("sha256").update(runId).digest("hex")}`;
+const runAttempt = requiredPositiveIntegerEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT");
+const scenarioSigningSecret = requiredEnvironment(
+  FOUNDER_PRODUCT_CONTRACT_SCENARIO_SIGNING_SECRET_ENV,
+);
+const scenarioLedgerPath = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH");
+await rm(browserResultPath, { force: true });
+await rm(unitResultPath, { force: true });
+await rm(scenarioLedgerPath, { force: true });
 const deterministicProviderEnvironment = {
+  BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE: "deterministic",
+  BRUNO_FOUNDER_CONTRACT_COMMERCE_WEBHOOK_SECRET: "founder-contract-lemon-test-secret-v1",
   BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
     "calendar_reading",
     new Date(),
@@ -45,6 +63,11 @@ const deterministicProviderEnvironment = {
     sourceRevision,
   ),
   VERCEL_GIT_COMMIT_SHA: sourceRevision,
+  BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: scenarioSigningSecret,
+  BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH: scenarioLedgerPath,
+  BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION: sourceRevision,
+  BRUNO_FOUNDER_CONTRACT_RUN_ID: runId,
+  BRUNO_FOUNDER_CONTRACT_OBSERVED_AT: observedAt,
 };
 
 await run(
@@ -66,6 +89,29 @@ await run(
   [
     "node_modules/.bin/playwright",
     "test",
+    "tests/e2e/founder-product-contract-failure.spec.ts",
+    "--config=playwright.founder-contract-lifecycle.config.ts",
+  ],
+  {
+    ...deterministicProviderEnvironment,
+    BRUNO_FOUNDER_CONTRACT_RUN_ID: providerFailureRunId,
+  },
+);
+
+await run(
+  [
+    "node_modules/.bin/playwright",
+    "test",
+    "tests/e2e/founder-product-contract-lifecycle.spec.ts",
+    "--config=playwright.founder-contract-lifecycle.config.ts",
+  ],
+  deterministicProviderEnvironment,
+);
+
+await run(
+  [
+    "node_modules/.bin/playwright",
+    "test",
     "tests/e2e/founder-product-contract.spec.ts",
     "--config=playwright.founder-contract.config.ts",
   ],
@@ -74,6 +120,14 @@ await run(
     BRUNO_FOUNDER_CONTRACT_BROWSER_RESULT: browserResultPath,
   },
 );
+
+const scenarioLedger = parseFounderProductContractScenarioLedger({
+  value: await readFile(requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH"), "utf8"),
+  sourceRevision,
+  runId,
+  observedAt,
+  signingSecret: scenarioSigningSecret,
+});
 
 const voiceOverDigest = process.env.BRUNO_FOUNDER_CONTRACT_VOICEOVER_DIGEST;
 const voiceOverOsVersion = process.env.BRUNO_FOUNDER_CONTRACT_VOICEOVER_OS_VERSION;
@@ -85,15 +139,18 @@ const evidence = await createFounderProductContractEvidence({
   browserResultPath,
   unitResultPath,
   sourceRevision,
-  runId: requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID"),
+  runId,
+  runAttempt,
   mode,
-  observedAt: requiredEnvironment("BRUNO_FOUNDER_CONTRACT_OBSERVED_AT"),
+  observedAt,
   ...(voiceOverDigest ? { voiceOverDigest } : {}),
   ...(voiceOverOsVersion ? { voiceOverOsVersion } : {}),
   ...(voiceOverBrowserVersion ? { voiceOverBrowserVersion } : {}),
   ...(talkBackDigest ? { talkBackDigest } : {}),
   ...(talkBackOsVersion ? { talkBackOsVersion } : {}),
   ...(talkBackBrowserVersion ? { talkBackBrowserVersion } : {}),
+  scenarioLedger,
+  scenarioSigningSecret,
 });
 
 await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
@@ -135,4 +192,12 @@ function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required.`);
   return value;
+}
+
+function requiredPositiveIntegerEnvironment(name: string): number {
+  const value = requiredEnvironment(name);
+  if (!/^[1-9][0-9]*$/.test(value)) throw new Error(`${name} must be a positive integer.`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new Error(`${name} must be a safe integer.`);
+  return parsed;
 }

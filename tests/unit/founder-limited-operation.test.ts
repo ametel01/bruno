@@ -9,6 +9,7 @@ import {
   operatorFounderActivations,
   operatorGovernanceReceipts,
   operatorLimitedOperations,
+  operatorMorningBriefPreferences,
   operatorMorningBriefs,
   operatorPreparations,
   operatorProcessingConsents,
@@ -23,6 +24,8 @@ import {
   openFounderMorningBriefForUser,
   reconcileFounderLimitedOperationForUser,
 } from "@/src/server/operators/founder-limited-operation";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
+import { getFounderMorningBriefPreferencesForUser } from "@/src/server/operators/founder-morning-brief";
 import {
   confirmFounderTimezoneForUser,
   ensureFounderOperatorForUser,
@@ -34,6 +37,11 @@ const NOW = new Date("2026-08-19T01:00:00.000Z");
 
 describe("Founder Calendar-only Limited Operation", () => {
   let connection: DatabaseConnection;
+  const dependencies = (now: () => Date = () => NOW) => ({
+    createConnection: () => connection,
+    now,
+    requireReleaseStageAccess: async () => undefined,
+  });
 
   beforeEach(async () => {
     connection = createDatabaseConnection();
@@ -115,8 +123,10 @@ describe("Founder Calendar-only Limited Operation", () => {
     await expect(
       getFounderLimitedOperationForUser(OWNER_ID, {
         createConnection: () => connection,
-        now: () => NOW,
       }),
+    ).resolves.toBeNull();
+    await expect(
+      reconcileFounderLimitedOperationForUser(OWNER_ID, dependencies()),
     ).resolves.toMatchObject({
       name: "Calendar-only Limited Operation",
       status: "awaiting_consent",
@@ -125,10 +135,7 @@ describe("Founder Calendar-only Limited Operation", () => {
       brief: null,
     });
 
-    const confirmed = await confirmFounderProcessingConsentForUser(OWNER_ID, {
-      createConnection: () => connection,
-      now: () => NOW,
-    });
+    const confirmed = await confirmFounderProcessingConsentForUser(OWNER_ID, dependencies());
     expect(confirmed).toMatchObject({
       status: "limited",
       mailIncluded: false,
@@ -151,33 +158,73 @@ describe("Founder Calendar-only Limited Operation", () => {
     expect(confirmed.brief?.content).toContain("verified quiet brief");
   });
 
+  it("denies direct reconciliation before it creates an operation or brief", async () => {
+    await expect(
+      reconcileFounderLimitedOperationForUser(OWNER_ID, {
+        createConnection: () => connection,
+        now: () => NOW,
+        env: { VERCEL_GIT_COMMIT_SHA: "a".repeat(40) },
+      }),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+    await expect(connection.db.select().from(operatorLimitedOperations)).resolves.toHaveLength(0);
+    await expect(connection.db.select().from(operatorMorningBriefs)).resolves.toHaveLength(0);
+  });
+
+  it("resamples protection time inside the mutation transaction", async () => {
+    const expiredAt = new Date(NOW.getTime() + 24 * 60 * 60 * 1_000);
+    let current = NOW;
+    const guardedAt: Date[] = [];
+
+    await expect(
+      reconcileFounderLimitedOperationForUser(OWNER_ID, {
+        createConnection: () => connection,
+        now: () => current,
+        requireReleaseStageAccessForUser: async (_userId, preflightAt) => {
+          expect(preflightAt).toEqual(NOW);
+          current = expiredAt;
+        },
+        requireReleaseStageAccess: async (_tx, input) => {
+          guardedAt.push(input.now);
+          if (input.now >= expiredAt) throw new FounderReleaseStageAccessError();
+        },
+      }),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+
+    expect(guardedAt).toEqual([expiredAt]);
+    await expect(connection.db.select().from(operatorLimitedOperations)).resolves.toHaveLength(0);
+    await expect(connection.db.select().from(operatorMorningBriefs)).resolves.toHaveLength(0);
+  });
+
+  it("projects default Morning Brief preferences without persisting them", async () => {
+    await expect(
+      getFounderMorningBriefPreferencesForUser(OWNER_ID, {
+        createConnection: () => connection,
+        now: () => NOW,
+      }),
+    ).resolves.toMatchObject({ localTime: "07:00", timezone: "Asia/Manila" });
+    await expect(
+      connection.db.select().from(operatorMorningBriefPreferences),
+    ).resolves.toHaveLength(0);
+  });
+
   it("replays consent, brief preparation, and activation without duplicates", async () => {
-    const first = await confirmFounderProcessingConsentForUser(OWNER_ID, {
-      createConnection: () => connection,
-      now: () => NOW,
-    });
-    const second = await confirmFounderProcessingConsentForUser(OWNER_ID, {
-      createConnection: () => connection,
-      now: () => new Date(NOW.getTime() + 1_000),
-    });
-    await reconcileFounderLimitedOperationForUser(OWNER_ID, {
-      createConnection: () => connection,
-      now: () => NOW,
-    });
+    const first = await confirmFounderProcessingConsentForUser(OWNER_ID, dependencies());
+    const second = await confirmFounderProcessingConsentForUser(
+      OWNER_ID,
+      dependencies(() => new Date(NOW.getTime() + 1_000)),
+    );
+    await reconcileFounderLimitedOperationForUser(OWNER_ID, dependencies());
     expect(second.brief?.id).toBe(first.brief?.id);
     expect(await connection.db.select().from(operatorProcessingConsents)).toHaveLength(1);
     expect(await connection.db.select().from(operatorAuthorityPolicies)).toHaveLength(1);
     expect(await connection.db.select().from(operatorGovernanceReceipts)).toHaveLength(2);
     expect(await connection.db.select().from(operatorMorningBriefs)).toHaveLength(1);
 
-    const opened = await openFounderMorningBriefForUser(OWNER_ID, {
-      createConnection: () => connection,
-      now: () => NOW,
-    });
-    const replayed = await openFounderMorningBriefForUser(OWNER_ID, {
-      createConnection: () => connection,
-      now: () => new Date(NOW.getTime() + 2_000),
-    });
+    const opened = await openFounderMorningBriefForUser(OWNER_ID, dependencies());
+    const replayed = await openFounderMorningBriefForUser(
+      OWNER_ID,
+      dependencies(() => new Date(NOW.getTime() + 2_000)),
+    );
     expect(opened.activatedAt).toBe(replayed.activatedAt);
     expect(replayed.brief).toMatchObject({ id: first.brief?.id, status: "opened" });
     expect(await connection.db.select().from(operatorFounderActivations)).toHaveLength(1);
@@ -189,10 +236,7 @@ describe("Founder Calendar-only Limited Operation", () => {
     const [calendar] = await connection.db.select().from(operatorCalendarConnections).limit(1);
     expect(calendar).toMatchObject({ lastEvidenceCount: 2 });
 
-    const operation = await confirmFounderProcessingConsentForUser(OWNER_ID, {
-      createConnection: () => connection,
-      now: () => NOW,
-    });
+    const operation = await confirmFounderProcessingConsentForUser(OWNER_ID, dependencies());
 
     expect(operation.brief).toMatchObject({
       quiet: true,
@@ -203,10 +247,7 @@ describe("Founder Calendar-only Limited Operation", () => {
   });
 
   it("creates a new generation when material Calendar evidence changes", async () => {
-    const first = await confirmFounderProcessingConsentForUser(OWNER_ID, {
-      createConnection: () => connection,
-      now: () => NOW,
-    });
+    const first = await confirmFounderProcessingConsentForUser(OWNER_ID, dependencies());
     const [operator] = await connection.db
       .select()
       .from(operators)
@@ -238,10 +279,7 @@ describe("Founder Calendar-only Limited Operation", () => {
       createdAt: NOW,
       updatedAt: NOW,
     });
-    const refreshed = await reconcileFounderLimitedOperationForUser(OWNER_ID, {
-      createConnection: () => connection,
-      now: () => NOW,
-    });
+    const refreshed = await reconcileFounderLimitedOperationForUser(OWNER_ID, dependencies());
     expect(refreshed?.brief?.generation).toBe((first.brief?.generation ?? 0) + 1);
     expect(refreshed?.brief?.attentionCount).toBe(1);
     expect(refreshed?.brief?.calendarWindow).toEqual({
@@ -251,10 +289,7 @@ describe("Founder Calendar-only Limited Operation", () => {
   });
 
   it("does not inherit a Limited Operation when the Calendar connection is replaced", async () => {
-    const original = await confirmFounderProcessingConsentForUser(OWNER_ID, {
-      createConnection: () => connection,
-      now: () => NOW,
-    });
+    const original = await confirmFounderProcessingConsentForUser(OWNER_ID, dependencies());
     await connection.db.insert(users).values({ id: REPLACEMENT_OWNER_ID });
     const replacementOperator = await ensureFounderOperatorForUser(REPLACEMENT_OWNER_ID, {
       createConnection: () => connection,
@@ -290,10 +325,7 @@ describe("Founder Calendar-only Limited Operation", () => {
       .set({ calendarConnectionId: replacementCalendar.id })
       .where(eq(operatorLimitedOperations.id, operationRow.id));
 
-    const needsAttention = await getFounderLimitedOperationForUser(OWNER_ID, {
-      createConnection: () => connection,
-      now: () => NOW,
-    });
+    const needsAttention = await reconcileFounderLimitedOperationForUser(OWNER_ID, dependencies());
     expect(needsAttention).toMatchObject({
       status: "needs_attention",
       consent: { status: "missing" },
@@ -302,10 +334,7 @@ describe("Founder Calendar-only Limited Operation", () => {
     });
     expect(needsAttention?.brief?.id).not.toBe(original.brief?.id);
     await expect(
-      confirmFounderProcessingConsentForUser(OWNER_ID, {
-        createConnection: () => connection,
-        now: () => NOW,
-      }),
+      confirmFounderProcessingConsentForUser(OWNER_ID, dependencies()),
     ).rejects.toMatchObject({ code: "connection_replacement_requires_migration" });
   });
 });

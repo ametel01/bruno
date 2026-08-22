@@ -4,7 +4,8 @@ import { and, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
-import { operators } from "@/src/server/db/schema";
+import { founderProductEntitlements, operators } from "@/src/server/db/schema";
+import { founderProductEntitlementAuthorizesWork } from "@/src/server/founder-product-contract/entitlement";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import { ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY } from "@/src/server/operators/founder-ai-routing";
 
@@ -55,14 +56,16 @@ export class FounderExternalActionPauseError extends Error {
 
 export async function getFounderExternalActionPauseForUser(
   userId: string,
-  dependencies: { createConnection?: () => DatabaseConnection } = {},
+  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
 ): Promise<FounderExternalActionPauseDto> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
     return await connection.db.transaction(async (tx) => {
       const operator = await selectOperator(tx, userId);
-      return operator ? projectPause(operator) : { paused: false, reason: null, pausedAt: null };
+      if (!operator) return { paused: false, reason: null, pausedAt: null };
+      const entitlement = await selectEntitlement(tx, userId);
+      return projectEffectivePause(operator, entitlement, dependencies.now?.() ?? new Date());
     });
   } finally {
     if (ownsConnection) await connection.close();
@@ -108,7 +111,7 @@ export async function setFounderExternalActionPauseForUser(
 
 export async function assertFounderExternalActionsNotPaused(
   userId: string,
-  dependencies: { createConnection?: () => DatabaseConnection } = {},
+  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
 ): Promise<void> {
   const pause = await getFounderExternalActionPauseForUser(userId, dependencies);
   if (pause.paused) {
@@ -121,20 +124,25 @@ export async function assertFounderExternalActionsNotPaused(
 export async function assertFounderExternalActionsNotPausedInTransaction(
   tx: FounderAiWorkTransaction,
   operatorId: string,
+  now = new Date(),
 ): Promise<void> {
   await lockOperator(tx, operatorId);
   const [operator] = await tx
     .select({
       externalActionPause: operators.externalActionPause,
       externalActionPauseReason: operators.externalActionPauseReason,
+      externalActionPausedAt: operators.externalActionPausedAt,
+      userId: operators.userId,
     })
     .from(operators)
     .where(and(eq(operators.id, operatorId), eq(operators.status, "active")))
     .limit(1);
-  if (operator?.externalActionPause) {
+  if (!operator) return;
+  const entitlement = await selectEntitlement(tx, operator.userId);
+  const pause = projectEffectivePause(operator, entitlement, now);
+  if (pause.paused) {
     throw new FounderExternalActionPauseError(
-      operator.externalActionPauseReason ??
-        "New external actions are paused until the Founder resumes them.",
+      pause.reason ?? "New external actions are paused until the Founder resumes them.",
     );
   }
 }
@@ -154,7 +162,53 @@ async function lockOperator(tx: FounderAiWorkTransaction, operatorId: string): P
   );
 }
 
-function projectPause(operator: typeof operators.$inferSelect): FounderExternalActionPauseDto {
+async function selectEntitlement(tx: FounderAiWorkTransaction, userId: string) {
+  const [entitlement] = await tx
+    .select({
+      status: founderProductEntitlements.status,
+      retirementDueAt: founderProductEntitlements.retirementDueAt,
+      reconciledAt: founderProductEntitlements.reconciledAt,
+    })
+    .from(founderProductEntitlements)
+    .where(eq(founderProductEntitlements.userId, userId))
+    .limit(1);
+  return entitlement;
+}
+
+function projectEffectivePause(
+  operator: Pick<
+    typeof operators.$inferSelect,
+    "externalActionPause" | "externalActionPauseReason" | "externalActionPausedAt"
+  >,
+  entitlement:
+    | Pick<
+        typeof founderProductEntitlements.$inferSelect,
+        "status" | "retirementDueAt" | "reconciledAt"
+      >
+    | undefined,
+  now: Date,
+): FounderExternalActionPauseDto {
+  if (operator.externalActionPause) return projectPause(operator);
+  if (!entitlement || founderProductEntitlementAuthorizesWork(entitlement, now)) {
+    return { paused: false, reason: null, pausedAt: null };
+  }
+  const effectivePausedAt =
+    entitlement.retirementDueAt && entitlement.retirementDueAt <= now
+      ? entitlement.retirementDueAt
+      : entitlement.reconciledAt;
+  return {
+    paused: true,
+    reason: "Product Entitlement no longer authorizes external work.",
+    pausedAt: effectivePausedAt.toISOString(),
+  };
+}
+
+function projectPause(
+  operator: Pick<
+    typeof operators.$inferSelect,
+    "externalActionPause" | "externalActionPauseReason" | "externalActionPausedAt"
+  >,
+): FounderExternalActionPauseDto {
   return {
     paused: operator.externalActionPause,
     reason: operator.externalActionPauseReason,

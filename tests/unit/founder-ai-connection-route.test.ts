@@ -170,7 +170,7 @@ describe("Founder AI connection route", () => {
     expect(mocks.disconnectConnection).toHaveBeenCalledWith(USER_ID);
   });
 
-  it("dispatches Anthropic actions through the same route contract without exposing credentials", async () => {
+  it("keeps Anthropic hidden during Owner Preview even when globally released", async () => {
     const { POST } = await import("@/app/api/operator/connections/route");
     const base = "http://localhost/api/operator/connections";
     const started = await POST(
@@ -181,8 +181,8 @@ describe("Founder AI connection route", () => {
       undefined,
       { isAnthropicReleased: () => true },
     );
-    expect(started.status).toBe(200);
-    expect(mocks.startAnthropicAuthorization).toHaveBeenCalledWith(USER_ID);
+    expect(started.status).toBe(409);
+    expect(mocks.startAnthropicAuthorization).not.toHaveBeenCalled();
     const polled = await POST(
       new Request(base, {
         method: "POST",
@@ -195,9 +195,11 @@ describe("Founder AI connection route", () => {
       undefined,
       { isAnthropicReleased: () => true },
     );
-    expect(polled.status).toBe(200);
-    expect(mocks.pollAnthropicAuthorization).toHaveBeenCalledWith(USER_ID, "claude-session");
-    expect(JSON.stringify(await polled.json())).not.toMatch(/token|secret|setup-token|api.?key/i);
+    expect(polled.status).toBe(409);
+    expect(mocks.pollAnthropicAuthorization).not.toHaveBeenCalled();
+    await expect(polled.json()).resolves.toMatchObject({
+      error: { code: "owner_preview_capability_unavailable" },
+    });
   });
 
   it("fails closed before invoking Anthropic without exact acceptance", async () => {
@@ -219,8 +221,8 @@ describe("Founder AI connection route", () => {
     expect(start.status).toBe(409);
     await expect(start.json()).resolves.toEqual({
       error: {
-        code: "provider_not_released",
-        message: "Anthropic is unavailable until current Connected Acceptance passes.",
+        code: "owner_preview_capability_unavailable",
+        message: "Anthropic is unavailable during Owner Preview.",
       },
     });
     expect(mocks.recheckAnthropicConnection).not.toHaveBeenCalled();

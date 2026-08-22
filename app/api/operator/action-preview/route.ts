@@ -1,4 +1,9 @@
 import {
+  founderOperatorAccessErrorResponse,
+  requireFounderOperatorWorkspaceAccess,
+} from "@/app/api/operator/_shared/owner-preview-access";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import {
   dismissFounderMailSendingOfferForUser,
   editFounderActionPreviewForUser,
   FounderActionPreviewError,
@@ -25,6 +30,11 @@ export async function GET(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    "workspace",
+  );
+  if (accessFailure) return accessFailure;
   const preview = await (dependencies.getPreview ?? getFounderActionPreviewForUser)(
     applicationUser.userId,
   );
@@ -40,6 +50,11 @@ export async function POST(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+  );
+  if (accessFailure) return accessFailure;
   let payload: unknown;
   try {
     payload = await request.json();
@@ -56,6 +71,8 @@ export async function POST(
       )(applicationUser.userId);
       return Response.json({ preview }, { headers: noStoreHeaders() });
     } catch (error) {
+      const accessResponse = founderOperatorAccessErrorResponse(error);
+      if (accessResponse) return accessResponse;
       if (error instanceof FounderActionPreviewError) {
         return Response.json(
           { error: { code: error.code, message: error.message } },
@@ -77,6 +94,8 @@ export async function POST(
     );
     return Response.json({ preview }, { headers: noStoreHeaders() });
   } catch (error) {
+    const accessResponse = founderOperatorAccessErrorResponse(error);
+    if (accessResponse) return accessResponse;
     if (error instanceof FounderActionPreviewError) {
       return Response.json(
         { error: { code: error.code, message: error.message } },

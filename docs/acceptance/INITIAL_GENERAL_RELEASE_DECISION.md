@@ -30,12 +30,20 @@ The exact-release workflow now emits
   provider deletion;
 - zero permission/safety failures, unintended effects, unsafe misunderstandings, technical setup
   requirements, or Founder credential handling;
-- exact-revision released evidence for OpenAI, Calendar reading, Gmail reading, and Gmail sending;
-  and
-- Anthropic included only when its independent provider decision is `released`.
+- independent exact-revision released evidence for OpenAI, Anthropic, Calendar reading, Gmail
+  reading, and one-to-one Gmail sending.
 
-Any missing, malformed, mismatched, or below-threshold input produces a denied decision. A malformed
-summary fails without echoing supplied content.
+Each provider record carries only its released outcome, source revision, qualification and expiry
+instants, and sanitized evidence digest. Hidden, missing, malformed, expired, stale, future-dated,
+or revision-mismatched evidence denies the decision. No capability may borrow another capability's
+digest, including OpenAI and Anthropic. A missing or malformed provider summary produces a denied
+artifact without echoing supplied content.
+
+Releasing both AI providers does not require a Founder to connect both. After release, Provider
+Routing may use OpenAI only, Anthropic only, or both according to the Ready accounts that Founder
+explicitly authorized. Bruno.Ai supplies neither funded capacity nor silent enrollment. Loss of one
+provider's current qualification pauses only its dependent capability at a Safe Work Checkpoint;
+the other provider and unrelated qualified work remain available.
 
 ## Evidence minimization and retention
 

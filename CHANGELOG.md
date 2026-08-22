@@ -21,6 +21,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Owner Preview admission now requires a current encrypted, isolated-rebuild-verified Recovery
+  Archive outside the Droplet plus exact Owner, stage, application, runtime, and capability Preview
+  Qualification, independently evidenced for OpenAI and Calendar. Hourly reconciliation refreshes
+  eligible archives before the 24-hour access boundary, expires both archive objects after 30 days
+  with an absence-backed Deletion Receipt, bounds S3-compatible operations, and keeps Infrastructure
+  Retirement independent from archive health. Founder workspace and effect-starting boundaries now
+  distinguish prior admission for safe workspace reads from current protection for new work and
+  effects. Holds preserve checkpoints and scope pauses to their affected capabilities, non-Ready
+  runtimes retain safe workspace reads, every Hold continues archive refresh, and safe operation
+  reads no longer reconcile state. Calendar-only Owner Preview rejects Core and Gmail effects at
+  their deep mutation seams; qualification expiry and runtime failures use the lifecycle-serialized
+  canonical Hold writer without replacing the admitted runtime revision or dropping cumulative Hold
+  evidence. Legacy qualification expiry migrates fail-closed, and scheduled protection can archive
+  the last admitted checkpoint while runtime recovery needs attention. Retirement invalidates
+  destroyed runtime readiness, admission rechecks evidence at its final commit, and restore proof
+  preserves the complete external-action pause tuple with a closed non-secret recovery reason,
+  excludes raw Founder-controlled pause text, and binds archive reuse and authorization to the
+  persisted runtime revision.
 - A protected production rollout now advances versioned defaults through QStash, an Approved
   Snapshot, release-attested readiness, and the measured runner size while new cold provisioning is
   halted. It exercises dispatch, snapshot, validation, and compatible stock/full runner-size

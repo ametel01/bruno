@@ -11,8 +11,17 @@ import {
   operatorCalendarResources,
   operators,
 } from "@/src/server/db/schema";
+import {
+  type FounderOwnerPreviewAccess,
+  FounderReleaseStageAccessError,
+  getFounderOwnerPreviewAccessForUser,
+} from "@/src/server/founder-product-contract/release-stage-access";
 import { reconcileFounderLimitedOperationForUser } from "@/src/server/operators/founder-limited-operation";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  deriveFounderConnectionRecovery,
+  type FounderRecoveryDto,
+} from "@/src/server/operators/founder-recovery";
 import {
   type FounderRelationshipObservation,
   ingestFounderRelationshipEvidenceForUser,
@@ -24,10 +33,6 @@ import {
   type OperatorSecretKeyring,
   parseOperatorSecretKeyring,
 } from "@/src/server/secrets/operator-secret-keyring";
-import {
-  deriveFounderConnectionRecovery,
-  type FounderRecoveryDto,
-} from "@/src/server/operators/founder-recovery";
 
 type FounderCalendarTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -153,6 +158,7 @@ export type FounderCalendarConnectionDependencies = {
   keyring?: OperatorSecretKeyring;
   env?: Record<string, string | undefined>;
   randomBytes?: (size: number) => Buffer;
+  getOwnerPreviewAccess?: (userId: string, now: Date) => Promise<FounderOwnerPreviewAccess>;
 };
 
 export type FounderGoogleCalendarAuthorizationResult = {
@@ -344,6 +350,40 @@ export async function completeFounderGoogleCalendarAuthorizationForState(
         .where(eq(operatorCalendarConnections.id, found.id));
       return found;
     });
+
+    const [owner] = await connection.db
+      .select({ userId: operators.userId })
+      .from(operators)
+      .where(eq(operators.id, pending.operatorId))
+      .limit(1);
+    if (!owner) {
+      throw new FounderCalendarConnectionError(
+        "connection_unavailable",
+        "Calendar connection owner could not be verified.",
+        503,
+      );
+    }
+    const ownerPreviewAccess = dependencies.getOwnerPreviewAccess
+      ? await dependencies.getOwnerPreviewAccess(owner.userId, now())
+      : await getFounderOwnerPreviewAccessForUser(owner.userId, now(), {
+          createConnection: () => connection,
+          ...(dependencies.env ? { env: dependencies.env } : {}),
+        });
+    if (
+      !ownerPreviewAccess.admitted ||
+      !ownerPreviewAccess.availableCapabilities.includes("calendar_reading")
+    ) {
+      return await persistConnectionFailure({
+        connection,
+        operatorId: pending.operatorId,
+        connectionId: pending.id,
+        now: now(),
+        code: "owner_preview_access_required",
+        message: "Google Calendar authorization paused under the current Release Decision.",
+        authorizationState: "pending",
+        evidenceState: "unavailable",
+      });
+    }
 
     try {
       const keyring = resolveKeyring(dependencies);
@@ -756,10 +796,16 @@ export async function verifyFounderGoogleCalendarForUser(
         // relationship projection could not be refreshed in this attempt.
       }
     }
-    await reconcileFounderLimitedOperationForUser(userId, {
-      createConnection: () => connection,
-      now,
-    });
+    try {
+      await reconcileFounderLimitedOperationForUser(userId, {
+        createConnection: () => connection,
+        now,
+      });
+    } catch (error) {
+      if (!(error instanceof FounderReleaseStageAccessError)) throw error;
+      // Calendar readiness is an admission prerequisite. Before admission, there
+      // is no authorized Limited Operation to reconcile yet.
+    }
     return updated;
   } catch (error) {
     if (error instanceof FounderCalendarConnectionError) throw error;

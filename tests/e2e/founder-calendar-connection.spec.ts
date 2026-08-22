@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { type BrowserContext, expect, test } from "@playwright/test";
 import postgres from "postgres";
+import { FOUNDER_OPERATOR_LEGACY_COMPATIBILITY_EXPERIENCE } from "@/src/shared/founder-operator-experience";
 
 const DEVELOPMENT_USER_E2E_LOCK_KEY = 125_341;
+const LEGACY_OPERATOR_URL = `/operator?experience=${FOUNDER_OPERATOR_LEGACY_COMPATIBILITY_EXPERIENCE}`;
 
 test.use({ screenshot: "off", trace: "off", video: "off" });
 
@@ -38,7 +40,7 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
       };
       await installCalendarRoutes(context, state);
       await installMailRoutes(context, mailState);
-      await page.goto("/operator");
+      await page.goto(LEGACY_OPERATOR_URL);
 
       await expect(page.getByText("Your Calendar Connection", { exact: true })).toBeVisible();
       await expect(
@@ -78,7 +80,7 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
       try {
         const secondPage = await secondContext.newPage();
         await installCalendarRoutes(secondContext, state);
-        await secondPage.goto("/operator");
+        await secondPage.goto(LEGACY_OPERATOR_URL);
         await expect(
           secondPage.getByRole("heading", { name: "Google Calendar is ready" }),
         ).toBeVisible();
@@ -98,7 +100,7 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
         };
         await installCalendarRoutes(dismissContext, state);
         await installMailRoutes(dismissContext, dismissMailState);
-        await dismissPage.goto("/operator");
+        await dismissPage.goto(LEGACY_OPERATOR_URL);
         await expect(
           dismissPage.getByRole("heading", { name: "Bring Mail evidence into your workspace?" }),
         ).toBeVisible();
@@ -113,7 +115,7 @@ test("founder explicitly selects calendars and sees bounded verification evidenc
       } finally {
         await closeContextAfterNetworkIdle(dismissContext);
       }
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
     });
   } finally {
     await page.close();
@@ -136,7 +138,7 @@ test("founder resumes a persisted Core Operation on desktop and mobile", async (
           await page.emulateMedia({ reducedMotion: "reduce" });
           const state = { confirmed: false, activated: false, mode: "ready" as const };
           await installCoreRoutes(context, state);
-          await page.goto("/operator");
+          await page.goto(LEGACY_OPERATOR_URL);
           await expect(page.getByRole("heading", { name: "Core Operation" })).toBeVisible();
           await expect(page.getByText("Mail Sending is never required here.")).toBeVisible();
           await page.getByRole("checkbox", { name: /matched Calendar and selected Mail/ }).check();
@@ -212,7 +214,7 @@ test("founder sees denied, partial, and stale onboarding facts on desktop and mo
           try {
             const page = await context.newPage();
             await installCoreRoutes(context, { confirmed: false, activated: false, mode });
-            await page.goto("/operator");
+            await page.goto(LEGACY_OPERATOR_URL);
             const step = mode === "denied" ? "ai" : mode === "partial" ? "calendar" : "mail";
             await expect(page.locator(`[data-next-step="${step}"]`)).toBeVisible();
             await expect(
@@ -783,7 +785,11 @@ async function withDatabase<T>(run: (sql: postgres.Sql) => Promise<T>): Promise<
 
 async function closeContextAfterNetworkIdle(context: BrowserContext): Promise<void> {
   await Promise.all(
-    context.pages().map((page) => page.waitForLoadState("networkidle").catch(() => undefined)),
+    context
+      .pages()
+      .map((page) =>
+        page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined),
+      ),
   );
   await context.close();
 }

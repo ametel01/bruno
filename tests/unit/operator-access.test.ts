@@ -76,6 +76,8 @@ describe("operator access path decisions", () => {
     "/api/internal/runner-release/required",
     "/api/internal/agent-deployments/reconcile",
     "/api/internal/production-rollout/status",
+    "/api/internal/operator/commerce",
+    "/api/webhooks/lemon-squeezy",
     "/robots.txt",
     "/images/logo.svg",
   ])("leaves independently authenticated path %s outside the operator gate", (pathname) => {

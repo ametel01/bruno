@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: CI proves automated invariants; release also requires attended AT digests
+        description: Both modes require signed lifecycle evidence; release also requires attended AT digests
         required: true
         default: ci
         type: choice
@@ -48,6 +48,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
   id-token: write
   attestations: write
@@ -61,6 +62,7 @@ jobs:
     name: Exact-release Founder contract
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: ${{ inputs.mode == 'release' && 'runner-release-canary' || 'ci' }}
 
     services:
       postgres:
@@ -84,7 +86,8 @@ jobs:
       PORT: "3100"
       PLAYWRIGHT_BASE_URL: http://localhost:3100
       BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION: ${{ github.sha }}
-      BRUNO_FOUNDER_CONTRACT_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
+      BRUNO_FOUNDER_CONTRACT_RUN_ID: github-${{ github.run_id }}
+      BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT: ${{ github.run_attempt }}
       BRUNO_FOUNDER_CONTRACT_MODE: ${{ inputs.mode || 'ci' }}
       BRUNO_FOUNDER_CONTRACT_VOICEOVER_DIGEST: ${{ inputs.voiceover_evidence_digest }}
       BRUNO_FOUNDER_CONTRACT_VOICEOVER_OS_VERSION: ${{ inputs.voiceover_os_version }}
@@ -94,6 +97,7 @@ jobs:
       BRUNO_FOUNDER_CONTRACT_TALKBACK_BROWSER_VERSION: ${{ inputs.talkback_browser_version }}
       BRUNO_FOUNDER_MODERATED_SUMMARY_JSON: ${{ inputs.moderated_founder_summary_json }}
       BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON: ${{ inputs.provider_decision_summary_json }}
+      BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH: founder-contract-artifacts/scenario-ledger.json
 
     steps:
       - name: Check out exact release candidate
@@ -107,6 +111,11 @@ jobs:
       - name: Install frozen dependencies
         run: bun install --frozen-lockfile
 
+      - name: Reject previously failed exact candidate
+        env:
+          BRUNO_FOUNDER_CONTRACT_GITHUB_TOKEN: ${{ github.token }}
+        run: bun scripts/check-founder-product-contract-candidate-history.ts
+
       - name: Install exact browser engines
         run: bunx playwright install --with-deps chromium firefox webkit
 
@@ -116,8 +125,19 @@ jobs:
       - name: Bind the observation time
         run: echo "BRUNO_FOUNDER_CONTRACT_OBSERVED_AT=$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" >> "$GITHUB_ENV"
 
-      - name: Run all-or-nothing Founder Product Contract
+      - name: Run all-or-nothing Founder Product Contract (release)
+        if: inputs.mode == 'release'
+        env:
+          BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: ${{ secrets.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET }}
         run: bun run founder:contract
+
+      - name: Run all-or-nothing Founder Product Contract (ci)
+        if: inputs.mode != 'release'
+        shell: bash
+        run: |
+          ci_signing_secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$ci_signing_secret"
+          BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET="$ci_signing_secret" bun run founder:contract
 
       - name: Attest the allowlisted exact-release summary
         uses: actions/attest-build-provenance@v2

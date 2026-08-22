@@ -1,20 +1,22 @@
-import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import postgres from "postgres";
+import { createFounderProductContractClock } from "@/src/testing/founder-product-contract";
+import {
+  createFounderProductContractFixture,
+  deleteFounderProductContractFixture,
+  withPinnedFounderDevelopmentUser,
+} from "./founder-product-contract-fixture";
 
-const DEVELOPMENT_USER_E2E_LOCK_KEY = 125_365;
-
-test("one persisted Operator scenario drives API, browser, keyboard, and accessibility evidence", async ({
-  page,
-  request,
-}) => {
-  const fixture = await createFixture();
+test("Operator UI remains usable across the required browser matrix", async ({ page, request }) => {
+  const clock = createFounderProductContractClock(
+    process.env.BRUNO_FOUNDER_CONTRACT_OBSERVED_AT ?? new Date().toISOString(),
+  );
+  const fixture = await createFounderProductContractFixture(clock);
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
   try {
-    await withPinnedDevelopmentUser(fixture.userId, async () => {
+    await withPinnedFounderDevelopmentUser(fixture.userId, async () => {
       const apiResponse = await request.get("/api/operator");
       expect(apiResponse.status()).toBe(200);
       expect(apiResponse.headers()["cache-control"]).toBe("no-store");
@@ -25,6 +27,11 @@ test("one persisted Operator scenario drives API, browser, keyboard, and accessi
       await expect(page.getByRole("heading", { name: "Bruno.Ai Operator" })).toBeVisible();
       await expect(page.getByText("Your Operator is ready.")).toBeVisible();
       await expect(page.getByText("Next step: Connect your Ready AI Connection")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Owner Preview" })).toBeVisible();
+      await expect(page.getByText("Available now: OpenAI and Calendar reading.")).toBeVisible();
+      await expect(page.getByText(/Gmail|Anthropic|Core Operation/)).toHaveCount(0);
+      await expect(page.getByText(/Support is fully attended/)).toBeVisible();
+      await expect(page.getByText(/never promotes Bruno automatically/)).toBeVisible();
 
       const forbiddenTechnicalControl =
         /agent template|manage api keys?|connect telegram|numeric allowlist|cron expression|runner management|deployment configuration|view raw logs?|open terminal/i;
@@ -52,70 +59,8 @@ test("one persisted Operator scenario drives API, browser, keyboard, and accessi
       await expect(page.getByText("Your Operator is ready.")).toBeVisible();
       await page.waitForLoadState("networkidle");
       expect(pageErrors).toEqual([]);
-      await page.close();
     });
   } finally {
-    await deleteFixture(fixture);
+    await deleteFounderProductContractFixture(fixture);
   }
 });
-
-async function createFixture(): Promise<{ userId: string; operatorId: string }> {
-  const userId = randomUUID();
-  const operatorId = randomUUID();
-  const preparationId = randomUUID();
-  const runtimeId = randomUUID();
-  const createdAt = "2026-08-20T00:00:00.000Z";
-  const readyAt = "2026-08-20T00:00:01.000Z";
-
-  await withDatabase(async (sql) => {
-    await sql`insert into users (id, created_at, updated_at) values (${userId}, ${createdAt}, ${readyAt})`;
-    await sql`insert into operators (id, user_id, status, created_at, updated_at) values (${operatorId}, ${userId}, 'active', ${createdAt}, ${readyAt})`;
-    await sql`insert into operator_preparations (id, operator_id, status, timezone, timezone_confirmed_at, started_at, completed_at, created_at, updated_at) values (${preparationId}, ${operatorId}, 'ready', 'Asia/Manila', ${createdAt}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
-    await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${runtimeId}, ${operatorId}, 'ready', 'connected', 'verified', 'founder-contract-v1', 'founder-contract-runtime', 1, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
-  });
-
-  return { userId, operatorId };
-}
-
-async function deleteFixture(fixture: { userId: string; operatorId: string }): Promise<void> {
-  await withDatabase(async (sql) => {
-    await sql`delete from operator_conversations where operator_id = ${fixture.operatorId}`;
-    await sql`delete from operator_runtimes where operator_id = ${fixture.operatorId}`;
-    await sql`delete from operator_preparations where operator_id = ${fixture.operatorId}`;
-    await sql`delete from operators where id = ${fixture.operatorId}`;
-    await sql`delete from users where id = ${fixture.userId}`;
-  });
-}
-
-async function withPinnedDevelopmentUser<T>(userId: string, run: () => Promise<T>): Promise<T> {
-  return withDatabase(async (sql) => {
-    await sql`select pg_advisory_lock(${DEVELOPMENT_USER_E2E_LOCK_KEY})`;
-    const [previous] = await sql<
-      { value: string }[]
-    >`select value from app_metadata where key = 'local_development_user_id'`;
-    await sql`insert into app_metadata (key, value) values ('local_development_user_id', ${userId}) on conflict (key) do update set value = excluded.value, updated_at = now()`;
-    try {
-      return await run();
-    } finally {
-      if (previous) {
-        await sql`update app_metadata set value = ${previous.value}, updated_at = now() where key = 'local_development_user_id'`;
-      } else {
-        await sql`delete from app_metadata where key = 'local_development_user_id'`;
-      }
-      await sql`select pg_advisory_unlock(${DEVELOPMENT_USER_E2E_LOCK_KEY})`;
-    }
-  });
-}
-
-async function withDatabase<T>(run: (sql: postgres.Sql) => Promise<T>): Promise<T> {
-  const sql = postgres(process.env.DATABASE_URL ?? "postgres://bruno:bruno@127.0.0.1:54329/bruno", {
-    connect_timeout: 5,
-    idle_timeout: 60,
-    max: 1,
-  });
-  try {
-    return await run(sql);
-  } finally {
-    await sql.end({ timeout: 5 });
-  }
-}

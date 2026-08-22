@@ -4,8 +4,15 @@ import {
   FOUNDER_PRODUCT_CONTRACT_ATTENDED_TASKS,
   FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS,
   FOUNDER_PRODUCT_CONTRACT_INVARIANTS,
+  FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
   FOUNDER_PRODUCT_CONTRACT_SCHEMA_VERSION,
 } from "@/src/shared/founder-product-contract";
+import {
+  type FounderProductContractScenarioLedger,
+  sanitizeFounderProductContractScenarioResult,
+  verifyFounderProductContractScenarioLedger,
+  validateFounderProductContractScenarios,
+} from "@/src/testing/founder-product-contract";
 
 type ContractMode = "ci" | "release";
 
@@ -36,6 +43,7 @@ export async function createFounderProductContractEvidence(input: {
   unitResultPath: string;
   sourceRevision: string;
   runId: string;
+  runAttempt: number;
   mode: ContractMode;
   observedAt: string;
   voiceOverDigest?: string;
@@ -44,6 +52,8 @@ export async function createFounderProductContractEvidence(input: {
   talkBackDigest?: string;
   talkBackOsVersion?: string;
   talkBackBrowserVersion?: string;
+  scenarioLedger: FounderProductContractScenarioLedger;
+  scenarioSigningSecret: string;
 }): Promise<FounderProductContractEvidence> {
   const browser = JSON.parse(await readFile(input.browserResultPath, "utf8")) as PlaywrightResult;
   const unit = JSON.parse(await readFile(input.unitResultPath, "utf8")) as VitestResult;
@@ -55,6 +65,7 @@ export function buildFounderProductContractEvidence(input: {
   unit: VitestResult;
   sourceRevision: string;
   runId: string;
+  runAttempt: number;
   mode: ContractMode;
   observedAt: string;
   voiceOverDigest?: string;
@@ -63,9 +74,17 @@ export function buildFounderProductContractEvidence(input: {
   talkBackDigest?: string;
   talkBackOsVersion?: string;
   talkBackBrowserVersion?: string;
+  scenarioLedger: FounderProductContractScenarioLedger;
+  scenarioSigningSecret: string;
 }) {
   requirePattern(input.sourceRevision, /^[a-f0-9]{40}$/, "source revision");
   requirePattern(input.runId, /^[A-Za-z0-9._:-]{1,128}$/, "run ID");
+  if (!Number.isSafeInteger(input.runAttempt) || input.runAttempt < 1) {
+    throw new Error("Workflow run attempt must be a positive integer.");
+  }
+  if (input.runAttempt > 1) {
+    throw new Error("Workflow reruns cannot authorize Founder Product Contract evidence.");
+  }
   const observedAt = new Date(input.observedAt);
   if (Number.isNaN(observedAt.valueOf()) || observedAt.toISOString() !== input.observedAt) {
     throw new Error("Observed time must be an exact ISO-8601 instant.");
@@ -118,6 +137,41 @@ export function buildFounderProductContractEvidence(input: {
   if (input.mode === "release" && (!voiceOverEvidence || !talkBackEvidence)) {
     throw new Error("Release evidence requires bound VoiceOver and TalkBack evidence digests.");
   }
+  if (!input.scenarioLedger) {
+    throw new Error("Founder Product Contract evidence requires a signed lifecycle ledger.");
+  }
+  const scenarioLedger = verifyFounderProductContractScenarioLedger({
+    ledger: input.scenarioLedger,
+    sourceRevision: input.sourceRevision,
+    runId: input.runId,
+    observedAt: input.observedAt,
+    signingSecret: input.scenarioSigningSecret,
+  });
+  validateFounderProductContractScenarios({
+    required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
+    results: scenarioLedger.results,
+    sourceRevision: input.sourceRevision,
+    observedAt: input.observedAt,
+  });
+  const scenarioEvidence = scenarioLedger.results.map((result) => {
+    const sanitized = sanitizeFounderProductContractScenarioResult(result);
+    return {
+      id: sanitized.id,
+      status: sanitized.status,
+      attempts: sanitized.attempts,
+      cleanup: sanitized.cleanup,
+    };
+  });
+  const retainedScenarioLedger = {
+    schemaVersion: scenarioLedger.schemaVersion,
+    producer: scenarioLedger.producer,
+    sourceRevision: scenarioLedger.sourceRevision,
+    runId: scenarioLedger.runId,
+    observedAt: scenarioLedger.observedAt,
+    results: scenarioLedger.results.map(sanitizeFounderProductContractScenarioResult),
+    resultsDigest: scenarioLedger.resultsDigest,
+    signature: scenarioLedger.signature,
+  } as const;
 
   const invariantResults = FOUNDER_PRODUCT_CONTRACT_INVARIANTS.map((invariant) => {
     if (invariant.id === "voiceover_safari") {
@@ -155,7 +209,7 @@ export function buildFounderProductContractEvidence(input: {
     },
     observedAt: input.observedAt,
     execution: {
-      reruns: 0,
+      reruns: input.runAttempt - 1,
       unit: { passed: unitPassed, failed: 0, skipped: 0 },
       browser: {
         passed: browserStats.expected,
@@ -166,6 +220,19 @@ export function buildFounderProductContractEvidence(input: {
       },
     },
     invariants: invariantResults,
+    ...(scenarioEvidence ? { scenarios: scenarioEvidence } : {}),
+    scenarioLedger: retainedScenarioLedger,
+    ...(scenarioEvidence
+      ? {
+          cleanup: {
+            status: scenarioEvidence.every(({ cleanup }) => cleanup.status === "passed")
+              ? "passed"
+              : "failed",
+            verified: scenarioEvidence.every(({ cleanup }) => cleanup.verified),
+            scenarios: scenarioEvidence.map(({ id, cleanup }) => ({ id, ...cleanup })),
+          },
+        }
+      : {}),
     sanitization: {
       allowlisted: true,
       excluded: [

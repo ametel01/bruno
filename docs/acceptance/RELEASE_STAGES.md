@@ -118,7 +118,11 @@ Infrastructure Retirement verifies the exact owned resource set, disables runtim
 deletes the firewall and Droplet, and rechecks authoritative provider absence. An Infrastructure
 Retirement Receipt remains in progress until no billable runtime resource remains. Ambiguous identity,
 unknown provider outcome, and failed cleanup retry idempotently against the same exact resource and
-never broaden deletion scope.
+never broaden deletion scope. The receipt freezes the complete provider identity before deletion,
+records work stoppage and the emergency archive outcome, and measures the billable interval from
+DigitalOcean's resource creation time through the final authoritative absence observation. Local
+assignment, idle, stopped, or powered-off state does not end that interval while the Droplet remains
+present at DigitalOcean.
 
 If no valid Recovery Archive can be produced by the hard deadline, Bruno.Ai still destroys the
 Droplet and records a critical preservation failure truthfully. During the 30-day retention window,
@@ -195,6 +199,13 @@ Preview Qualification never bypasses a provider gate and cannot be consumed as C
 or Founder Acceptance Evidence. Gmail reading and Gmail sending qualify independently. Anthropic is
 hidden during Owner Preview and Trusted Preview, but both Anthropic and OpenAI must qualify for
 External Beta and pass Connected Acceptance before Initial General Release.
+
+The External Beta boundary persists one record per capability with the named cohort, exact
+application and runtime revisions, sanitized evidence digest, observation time, and expiry. The
+admission manifest is all-or-nothing, while post-admission capability status remains independent so
+one lost qualification can pause only its affected work. Founder-facing status uses Available and
+Paused labels and does not expose candidate revisions, evidence digests, provider internals, or
+runtime configuration.
 
 ## Promotion authority
 

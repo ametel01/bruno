@@ -19,8 +19,16 @@ import {
   operatorProductGuardrails,
   operatorProposedActions,
 } from "@/src/server/db/schema";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import {
+  type FounderOwnerPreviewWorkAuthorityDependencies,
+  withFounderOwnerPreviewWorkAuthority,
+} from "@/src/server/founder-product-contract/work-authority";
 import { assertFounderExternalActionsNotPausedInTransaction } from "@/src/server/operators/founder-ai-work";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  ensureFounderOperatorForUser,
+  getFounderOperatorForUser,
+} from "@/src/server/operators/founder-operator";
 import {
   deriveFounderRecovery,
   type FounderRecoveryDto,
@@ -158,7 +166,7 @@ export type FounderActionExecutionClaimDto = {
   duplicate: boolean;
 };
 
-export type FounderProposedActionDependencies = {
+export type FounderProposedActionDependencies = FounderOwnerPreviewWorkAuthorityDependencies & {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
   randomUUID?: () => string;
@@ -199,14 +207,20 @@ export async function createFounderProposedActionForUser(
   draft: FounderProposedActionDraft,
   dependencies: FounderProposedActionDependencies = {},
 ): Promise<FounderProposedActionDto> {
-  const normalized = normalizeDraft(draft, dependencies.now?.() ?? new Date());
+  const now = dependencies.now ?? (() => new Date());
+  const normalized = normalizeDraft(draft, now());
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
-  return withConnection(dependencies, (connection) =>
-    connection.db.transaction(async (tx) => {
-      const now = dependencies.now?.() ?? new Date();
+  return withFounderOwnerPreviewWorkAuthority(
+    {
+      userId,
+      now,
+      requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+    },
+    dependencies,
+    async (tx, at) => {
       await lockOperator(tx, operator.id);
-      const policy = await ensureAuthorityPolicy(tx, operator.id, now);
-      const guardrails = await ensureProductGuardrails(tx, operator.id, now);
+      const policy = await ensureAuthorityPolicy(tx, operator.id, at);
+      const guardrails = await ensureProductGuardrails(tx, operator.id, at);
       const existing = normalized.idempotencyKey
         ? await findByIdempotency(tx, operator.id, normalized.idempotencyKey)
         : null;
@@ -240,8 +254,8 @@ export async function createFounderProposedActionForUser(
           executionWindowEnd: normalized.executionWindowEnd,
           idempotencyKey: normalized.idempotencyKey ?? (dependencies.randomUUID ?? randomUUID)(),
           state: state.state,
-          createdAt: now,
-          updatedAt: now,
+          createdAt: at,
+          updatedAt: at,
         })
         .returning();
       if (!created) {
@@ -259,12 +273,12 @@ export async function createFounderProposedActionForUser(
             operatorId: operator.id,
             proposedActionId: created.id,
             decisionId: null,
-            createdAt: now,
+            createdAt: at,
           })
           .onConflictDoNothing({ target: operatorActionAuthorizations.proposedActionId });
       }
       return projectProposedAction(tx, created);
-    }),
+    },
   );
 }
 
@@ -378,7 +392,8 @@ export async function getFounderProposedActionsForUser(
   userId: string,
   dependencies: FounderProposedActionDependencies = {},
 ): Promise<FounderProposedActionDto[]> {
-  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const operator = await getFounderOperatorForUser(userId, dependencies);
+  if (!operator) return [];
   return withConnection(dependencies, (connection) =>
     connection.db.transaction(async (tx) => {
       const rows = await currentRows(tx, operator.id);
@@ -403,11 +418,17 @@ export async function reviseFounderProposedActionForUser(
   draft: FounderProposedActionDraft,
   dependencies: FounderProposedActionDependencies = {},
 ): Promise<FounderProposedActionDto> {
-  const normalized = normalizeDraft(draft, dependencies.now?.() ?? new Date());
+  const now = dependencies.now ?? (() => new Date());
+  const normalized = normalizeDraft(draft, now());
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
-  return withConnection(dependencies, (connection) =>
-    connection.db.transaction(async (tx) => {
-      const now = dependencies.now?.() ?? new Date();
+  return withFounderOwnerPreviewWorkAuthority(
+    {
+      userId,
+      now,
+      requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+    },
+    dependencies,
+    async (tx, at) => {
       await lockOperator(tx, operator.id);
       const [action] = await tx
         .select()
@@ -434,12 +455,12 @@ export async function reviseFounderProposedActionForUser(
         ? await findByIdempotency(tx, operator.id, normalized.idempotencyKey)
         : null;
       if (existing) return projectProposedAction(tx, existing);
-      const policy = await ensureAuthorityPolicy(tx, operator.id, now);
-      const guardrails = await ensureProductGuardrails(tx, operator.id, now);
+      const policy = await ensureAuthorityPolicy(tx, operator.id, at);
+      const guardrails = await ensureProductGuardrails(tx, operator.id, at);
       const bound = await validateActionBindings(tx, operator.id, normalized);
       await tx
         .update(operatorProposedActions)
-        .set({ state: "superseded", updatedAt: now })
+        .set({ state: "superseded", updatedAt: at })
         .where(eq(operatorProposedActions.id, action.id));
       const revised = await insertActionVersion(
         tx,
@@ -451,11 +472,11 @@ export async function reviseFounderProposedActionForUser(
         bound.processingConsentVersion,
         policy,
         guardrails,
-        now,
+        at,
         dependencies.randomUUID,
       );
       return projectProposedAction(tx, revised);
-    }),
+    },
   );
 }
 
@@ -493,180 +514,191 @@ export async function decideFounderProposedActionForUser(
       "Request changes must include the new material action details.",
     );
   }
-  const normalizedChanges = changes
-    ? normalizeDraft(changes, dependencies.now?.() ?? new Date())
-    : null;
+  const now = dependencies.now ?? (() => new Date());
+  const normalizedChanges = changes ? normalizeDraft(changes, now()) : null;
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
-  return withConnection(dependencies, (connection) =>
-    connection.db.transaction(async (tx) => {
-      const now = dependencies.now?.() ?? new Date();
-      await lockOperator(tx, operator.id);
-      const [action] = await tx
-        .select()
-        .from(operatorProposedActions)
-        .where(
-          and(
-            eq(operatorProposedActions.id, actionId),
-            eq(operatorProposedActions.operatorId, operator.id),
-          ),
-        )
-        .limit(1)
-        .for("update");
-      if (!action) {
-        throw new FounderProposedActionError("action_not_found", "Proposed Action not found.", 404);
-      }
-      if (action.version !== expectedVersion) {
-        throw new FounderProposedActionError(
-          "stale_proposal",
-          "This Proposed Action version is no longer current.",
-          409,
-        );
-      }
-      const [recorded] = await tx
+  const decide = async (tx: ProposedActionTransaction, at: Date) => {
+    await lockOperator(tx, operator.id);
+    const [action] = await tx
+      .select()
+      .from(operatorProposedActions)
+      .where(
+        and(
+          eq(operatorProposedActions.id, actionId),
+          eq(operatorProposedActions.operatorId, operator.id),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    if (!action) {
+      throw new FounderProposedActionError("action_not_found", "Proposed Action not found.", 404);
+    }
+    if (action.version !== expectedVersion) {
+      throw new FounderProposedActionError(
+        "stale_proposal",
+        "This Proposed Action version is no longer current.",
+        409,
+      );
+    }
+    const [recorded] = await tx
+      .select()
+      .from(operatorActionDecisions)
+      .where(eq(operatorActionDecisions.proposedActionId, action.id))
+      .limit(1);
+    if (recorded) {
+      return {
+        action: await projectProposedAction(tx, action),
+        decision: toDecisionDto(recorded),
+        duplicate: true,
+      };
+    }
+    if (action.state !== "awaiting_approval" && action.state !== "proposed") {
+      throw new FounderProposedActionError(
+        "decision_conflict",
+        "This Proposed Action is no longer awaiting a Founder decision.",
+        409,
+      );
+    }
+    if (action.validUntil <= at) {
+      await tx
+        .update(operatorProposedActions)
+        .set({ state: "expired", updatedAt: at })
+        .where(eq(operatorProposedActions.id, action.id))
+        .returning();
+      throw new FounderProposedActionError(
+        "proposal_expired",
+        "This Proposed Action expired and needs a fresh proposal.",
+        409,
+      );
+    }
+    const policy = await ensureAuthorityPolicy(tx, operator.id, at);
+    const guardrails = await ensureProductGuardrails(tx, operator.id, at);
+    const boundChanges = normalizedChanges
+      ? await validateActionBindings(tx, operator.id, normalizedChanges)
+      : null;
+    const staleBindingReason = await validateStoredActionBindings(tx, operator.id, action);
+    if (staleBindingReason) {
+      await tx
+        .update(operatorProposedActions)
+        .set({ state: "blocked", updatedAt: at })
+        .where(eq(operatorProposedActions.id, action.id));
+      throw new FounderProposedActionError("proposal_blocked", staleBindingReason, 409);
+    }
+    const evaluation = evaluateStoredState(action, policy, guardrails);
+    if (evaluation.blocked) {
+      await tx
+        .update(operatorProposedActions)
+        .set({ state: "blocked", updatedAt: at })
+        .where(eq(operatorProposedActions.id, action.id));
+      throw new FounderProposedActionError(
+        "proposal_blocked",
+        evaluation.reason ?? "Product Guardrails block this Proposed Action.",
+        409,
+      );
+    }
+    const decisionId = (dependencies.randomUUID ?? randomUUID)();
+    const [decision] = await tx
+      .insert(operatorActionDecisions)
+      .values({
+        id: decisionId,
+        operatorId: operator.id,
+        proposedActionId: action.id,
+        proposedActionVersion: action.version,
+        kind,
+        createdAt: at,
+      })
+      .onConflictDoNothing({ target: operatorActionDecisions.proposedActionId })
+      .returning();
+    if (!decision) {
+      const [afterConflict] = await tx
         .select()
         .from(operatorActionDecisions)
         .where(eq(operatorActionDecisions.proposedActionId, action.id))
         .limit(1);
-      if (recorded) {
-        return {
-          action: await projectProposedAction(tx, action),
-          decision: toDecisionDto(recorded),
-          duplicate: true,
-        };
-      }
-      if (action.state !== "awaiting_approval" && action.state !== "proposed") {
-        throw new FounderProposedActionError(
-          "decision_conflict",
-          "This Proposed Action is no longer awaiting a Founder decision.",
-          409,
-        );
-      }
-      if (action.validUntil <= now) {
-        await tx
-          .update(operatorProposedActions)
-          .set({ state: "expired", updatedAt: now })
-          .where(eq(operatorProposedActions.id, action.id))
-          .returning();
-        throw new FounderProposedActionError(
-          "proposal_expired",
-          "This Proposed Action expired and needs a fresh proposal.",
-          409,
-        );
-      }
-      const policy = await ensureAuthorityPolicy(tx, operator.id, now);
-      const guardrails = await ensureProductGuardrails(tx, operator.id, now);
-      const boundChanges = normalizedChanges
-        ? await validateActionBindings(tx, operator.id, normalizedChanges)
-        : null;
-      const staleBindingReason = await validateStoredActionBindings(tx, operator.id, action);
-      if (staleBindingReason) {
-        await tx
-          .update(operatorProposedActions)
-          .set({ state: "blocked", updatedAt: now })
-          .where(eq(operatorProposedActions.id, action.id));
-        throw new FounderProposedActionError("proposal_blocked", staleBindingReason, 409);
-      }
-      const evaluation = evaluateStoredState(action, policy, guardrails);
-      if (evaluation.blocked) {
-        await tx
-          .update(operatorProposedActions)
-          .set({ state: "blocked", updatedAt: now })
-          .where(eq(operatorProposedActions.id, action.id));
-        throw new FounderProposedActionError(
-          "proposal_blocked",
-          evaluation.reason ?? "Product Guardrails block this Proposed Action.",
-          409,
-        );
-      }
-      const decisionId = (dependencies.randomUUID ?? randomUUID)();
-      const [decision] = await tx
-        .insert(operatorActionDecisions)
-        .values({
-          id: decisionId,
-          operatorId: operator.id,
-          proposedActionId: action.id,
-          proposedActionVersion: action.version,
-          kind,
-          createdAt: now,
-        })
-        .onConflictDoNothing({ target: operatorActionDecisions.proposedActionId })
-        .returning();
-      if (!decision) {
-        const [afterConflict] = await tx
-          .select()
-          .from(operatorActionDecisions)
-          .where(eq(operatorActionDecisions.proposedActionId, action.id))
-          .limit(1);
-        if (!afterConflict) {
-          throw new FounderProposedActionError(
-            "action_unavailable",
-            "The Founder decision could not be recorded.",
-            503,
-          );
-        }
-        return {
-          action: await projectProposedAction(tx, action),
-          decision: toDecisionDto(afterConflict),
-          duplicate: true,
-        };
-      }
-
-      if (kind === "request_changes" && normalizedChanges) {
-        await tx
-          .update(operatorProposedActions)
-          .set({ state: "superseded", updatedAt: now })
-          .where(eq(operatorProposedActions.id, action.id));
-        const next = await insertActionVersion(
-          tx,
-          operator.id,
-          action.version + 1,
-          action.id,
-          normalizedChanges,
-          boundChanges?.connectionAccessVersion ?? null,
-          boundChanges?.processingConsentVersion ?? null,
-          policy,
-          guardrails,
-          now,
-          dependencies.randomUUID,
-        );
-        return {
-          action: await projectProposedAction(tx, next),
-          decision: toDecisionDto(decision),
-          duplicate: false,
-        };
-      }
-
-      const nextState = kind === "approve" ? "authorized" : "declined";
-      const [updated] = await tx
-        .update(operatorProposedActions)
-        .set({ state: nextState, updatedAt: now })
-        .where(eq(operatorProposedActions.id, action.id))
-        .returning();
-      if (!updated) {
+      if (!afterConflict) {
         throw new FounderProposedActionError(
           "action_unavailable",
-          "The Proposed Action could not be updated.",
+          "The Founder decision could not be recorded.",
           503,
         );
       }
-      if (kind === "approve") {
-        await tx
-          .insert(operatorActionAuthorizations)
-          .values({
-            id: (dependencies.randomUUID ?? randomUUID)(),
-            operatorId: operator.id,
-            proposedActionId: action.id,
-            decisionId: decision.id,
-            createdAt: now,
-          })
-          .onConflictDoNothing({ target: operatorActionAuthorizations.proposedActionId });
-      }
       return {
-        action: await projectProposedAction(tx, updated),
+        action: await projectProposedAction(tx, action),
+        decision: toDecisionDto(afterConflict),
+        duplicate: true,
+      };
+    }
+
+    if (kind === "request_changes" && normalizedChanges) {
+      await tx
+        .update(operatorProposedActions)
+        .set({ state: "superseded", updatedAt: at })
+        .where(eq(operatorProposedActions.id, action.id));
+      const next = await insertActionVersion(
+        tx,
+        operator.id,
+        action.version + 1,
+        action.id,
+        normalizedChanges,
+        boundChanges?.connectionAccessVersion ?? null,
+        boundChanges?.processingConsentVersion ?? null,
+        policy,
+        guardrails,
+        at,
+        dependencies.randomUUID,
+      );
+      return {
+        action: await projectProposedAction(tx, next),
         decision: toDecisionDto(decision),
         duplicate: false,
       };
-    }),
+    }
+
+    const nextState = kind === "approve" ? "authorized" : "declined";
+    const [updated] = await tx
+      .update(operatorProposedActions)
+      .set({ state: nextState, updatedAt: at })
+      .where(eq(operatorProposedActions.id, action.id))
+      .returning();
+    if (!updated) {
+      throw new FounderProposedActionError(
+        "action_unavailable",
+        "The Proposed Action could not be updated.",
+        503,
+      );
+    }
+    if (kind === "approve") {
+      await tx
+        .insert(operatorActionAuthorizations)
+        .values({
+          id: (dependencies.randomUUID ?? randomUUID)(),
+          operatorId: operator.id,
+          proposedActionId: action.id,
+          decisionId: decision.id,
+          createdAt: at,
+        })
+        .onConflictDoNothing({ target: operatorActionAuthorizations.proposedActionId });
+    }
+    return {
+      action: await projectProposedAction(tx, updated),
+      decision: toDecisionDto(decision),
+      duplicate: false,
+    };
+  };
+
+  if (kind === "request_changes") {
+    return withFounderOwnerPreviewWorkAuthority(
+      {
+        userId,
+        now,
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+      },
+      dependencies,
+      decide,
+    );
+  }
+  return withConnection(dependencies, (connection) =>
+    connection.db.transaction((tx) => decide(tx, now())),
   );
 }
 
@@ -763,7 +795,7 @@ export async function claimFounderActionAuthorizationForUser(
         throw new FounderProposedActionError("proposal_blocked", blockedReason, 409);
       }
       if (startsFounderExternalEffect(action)) {
-        await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id);
+        await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id, now);
       }
 
       const [claimed] = await tx

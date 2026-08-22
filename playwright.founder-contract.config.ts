@@ -8,6 +8,7 @@ const resultPath =
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  testMatch: ["founder-product-contract.spec.ts"],
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,

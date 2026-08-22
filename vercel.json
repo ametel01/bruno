@@ -30,6 +30,14 @@
     {
       "path": "/api/internal/operator/deletion",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/internal/operator/recovery-archives",
+      "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/internal/operator/commerce",
+      "schedule": "* * * * *"
     }
   ]
 }

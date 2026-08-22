@@ -11,16 +11,29 @@ export type BackupStorageFailure = {
 };
 
 export type BackupStorageUploadResult =
-  | { ok: true; storageUri: string; byteLength: number }
+  | { ok: true; storageUri: string; byteLength: number; versionId: string }
   | BackupStorageFailure;
 
 export type BackupStorageDownloadResult =
   | { ok: true; storageUri: string; body: Uint8Array; contentType: string | null }
   | BackupStorageFailure;
 
+export type BackupStorageDeleteResult = { ok: true } | BackupStorageFailure;
+export type BackupStoragePresenceResult = { ok: true; exists: boolean } | BackupStorageFailure;
+export type BackupStorageDeletionSafetyResult =
+  | { ok: true; versioning: "disabled" }
+  | BackupStorageFailure;
+
 export type BackupObjectStorage = {
   upload(input: BackupStorageUploadInput): Promise<BackupStorageUploadResult>;
   download(input: BackupStorageDownloadInput): Promise<BackupStorageDownloadResult>;
+};
+
+export type DeletableBackupObjectStorage = BackupObjectStorage & {
+  delete(input: BackupStorageDownloadInput): Promise<BackupStorageDeleteResult>;
+  deleteVersion(input: BackupStorageVersionDeleteInput): Promise<BackupStorageDeleteResult>;
+  exists(input: BackupStorageDownloadInput): Promise<BackupStoragePresenceResult>;
+  verifyDeletionSafety(): Promise<BackupStorageDeletionSafetyResult>;
 };
 
 export type BackupStorageUploadInput = {
@@ -33,6 +46,10 @@ export type BackupStorageDownloadInput = {
   key: string;
 };
 
+export type BackupStorageVersionDeleteInput = BackupStorageDownloadInput & {
+  versionId: string;
+};
+
 export type S3CompatibleBackupStorageConfig = {
   endpointUrl: string;
   bucket: string;
@@ -42,6 +59,7 @@ export type S3CompatibleBackupStorageConfig = {
 };
 
 type FetchImplementation = typeof fetch;
+const DEFAULT_S3_REQUEST_TIMEOUT_MS = 10_000;
 
 type StoredBackupArtifact = {
   body: Uint8Array;
@@ -87,11 +105,35 @@ export function readBackupStorageConfig(
 
 export function createBackupObjectStorage(
   config = readBackupStorageConfig(),
-): BackupObjectStorage | null {
+): DeletableBackupObjectStorage | null {
   return config ? new S3CompatibleBackupObjectStorage(config) : null;
 }
 
-export function backupStorageFailure(operation: "upload" | "download"): BackupStorageFailure {
+/**
+ * Recovery Archives must live on managed object storage whose TLS hostname proves
+ * that it is independent from the Founder Operator Droplet. Arbitrary S3-compatible
+ * endpoints remain valid for ordinary backups, but cannot satisfy this boundary.
+ */
+export function assertIndependentRecoveryArchiveStorage(
+  config: S3CompatibleBackupStorageConfig,
+): void {
+  const hostname = new URL(config.endpointUrl).hostname.toLowerCase();
+  const managedProviderHost = [
+    /(^|\.)digitaloceanspaces\.com$/,
+    /(^|\.)s3([.-][a-z0-9-]+)*\.amazonaws\.com$/,
+    /(^|\.)r2\.cloudflarestorage\.com$/,
+    /(^|\.)backblazeb2\.com$/,
+  ].some((pattern) => pattern.test(hostname));
+  if (!managedProviderHost) {
+    throw new EnvValidationError([
+      "BRUNO_BACKUP_STORAGE_ENDPOINT_URL must identify supported managed object storage independent from the Operator Droplet for Recovery Archives.",
+    ]);
+  }
+}
+
+export function backupStorageFailure(
+  operation: "upload" | "download" | "delete" | "exists" | "deletion_safety",
+): BackupStorageFailure {
   return {
     ok: false,
     status: "failed",
@@ -99,7 +141,7 @@ export function backupStorageFailure(operation: "upload" | "download"): BackupSt
   };
 }
 
-export class FakeBackupObjectStorage implements BackupObjectStorage {
+export class FakeBackupObjectStorage implements DeletableBackupObjectStorage {
   private readonly artifacts = new Map<string, StoredBackupArtifact>();
 
   constructor(private readonly bucket = "bruno-test-backups") {}
@@ -120,6 +162,7 @@ export class FakeBackupObjectStorage implements BackupObjectStorage {
       ok: true,
       storageUri: buildBackupStorageUri(this.bucket, keyResult.key),
       byteLength: input.body.byteLength,
+      versionId: "null",
     };
   }
 
@@ -143,18 +186,49 @@ export class FakeBackupObjectStorage implements BackupObjectStorage {
       contentType: artifact.contentType,
     };
   }
+
+  async delete(input: BackupStorageDownloadInput): Promise<BackupStorageDeleteResult> {
+    const keyResult = validateBackupArtifactKey(input.key);
+    if (!keyResult.ok) return backupStorageFailure("delete");
+    this.artifacts.delete(keyResult.key);
+    return { ok: true };
+  }
+
+  async deleteVersion(input: BackupStorageVersionDeleteInput): Promise<BackupStorageDeleteResult> {
+    const keyResult = validateBackupArtifactKey(input.key);
+    if (!keyResult.ok || !isValidBackupObjectVersionId(input.versionId)) {
+      return backupStorageFailure("delete");
+    }
+    this.artifacts.delete(keyResult.key);
+    return { ok: true };
+  }
+
+  async exists(input: BackupStorageDownloadInput): Promise<BackupStoragePresenceResult> {
+    const keyResult = validateBackupArtifactKey(input.key);
+    if (!keyResult.ok) return backupStorageFailure("exists");
+    return { ok: true, exists: this.artifacts.has(keyResult.key) };
+  }
+
+  async verifyDeletionSafety(): Promise<BackupStorageDeletionSafetyResult> {
+    return { ok: true, versioning: "disabled" };
+  }
 }
 
-export class S3CompatibleBackupObjectStorage implements BackupObjectStorage {
+export class S3CompatibleBackupObjectStorage implements DeletableBackupObjectStorage {
   private readonly endpoint: URL;
   private readonly fetchImplementation: FetchImplementation;
+  private readonly requestTimeoutMs: number;
 
   constructor(
     private readonly config: S3CompatibleBackupStorageConfig,
-    dependencies: { fetchImplementation?: FetchImplementation } = {},
+    dependencies: { fetchImplementation?: FetchImplementation; requestTimeoutMs?: number } = {},
   ) {
     this.endpoint = new URL(config.endpointUrl);
     this.fetchImplementation = dependencies.fetchImplementation ?? fetch;
+    this.requestTimeoutMs = dependencies.requestTimeoutMs ?? DEFAULT_S3_REQUEST_TIMEOUT_MS;
+    if (!Number.isFinite(this.requestTimeoutMs) || this.requestTimeoutMs <= 0) {
+      throw new Error("S3-compatible request timeout must be positive and finite.");
+    }
   }
 
   async upload(input: BackupStorageUploadInput): Promise<BackupStorageUploadResult> {
@@ -173,9 +247,12 @@ export class S3CompatibleBackupObjectStorage implements BackupObjectStorage {
     });
 
     try {
-      const response = await this.fetchImplementation(request);
+      const response = await this.executeRequest(request, async (value) => ({
+        ok: value.ok,
+        versionId: value.headers.get("x-amz-version-id") ?? "null",
+      }));
 
-      if (!response.ok) {
+      if (!response.ok || !isValidBackupObjectVersionId(response.versionId)) {
         return backupStorageFailure("upload");
       }
 
@@ -183,6 +260,7 @@ export class S3CompatibleBackupObjectStorage implements BackupObjectStorage {
         ok: true,
         storageUri: buildBackupStorageUri(this.config.bucket, keyResult.key),
         byteLength: body.byteLength,
+        versionId: response.versionId,
       };
     } catch {
       return backupStorageFailure("upload");
@@ -203,7 +281,11 @@ export class S3CompatibleBackupObjectStorage implements BackupObjectStorage {
     });
 
     try {
-      const response = await this.fetchImplementation(request);
+      const response = await this.executeRequest(request, async (value) => ({
+        ok: value.ok,
+        body: await value.arrayBuffer(),
+        contentType: value.headers.get("content-type"),
+      }));
 
       if (!response.ok) {
         return backupStorageFailure("download");
@@ -212,23 +294,115 @@ export class S3CompatibleBackupObjectStorage implements BackupObjectStorage {
       return {
         ok: true,
         storageUri: buildBackupStorageUri(this.config.bucket, keyResult.key),
-        body: new Uint8Array(await response.arrayBuffer()),
-        contentType: response.headers.get("content-type"),
+        body: new Uint8Array(response.body),
+        contentType: response.contentType,
       };
     } catch {
       return backupStorageFailure("download");
     }
   }
 
+  async delete(input: BackupStorageDownloadInput): Promise<BackupStorageDeleteResult> {
+    const keyResult = validateBackupArtifactKey(input.key);
+    if (!keyResult.ok) return backupStorageFailure("delete");
+    try {
+      const response = await this.executeRequest(
+        this.createSignedRequest({ method: "DELETE", key: keyResult.key, body: new Uint8Array() }),
+        async (value) => value,
+      );
+      return response.ok ? { ok: true } : backupStorageFailure("delete");
+    } catch {
+      return backupStorageFailure("delete");
+    }
+  }
+
+  async deleteVersion(input: BackupStorageVersionDeleteInput): Promise<BackupStorageDeleteResult> {
+    const keyResult = validateBackupArtifactKey(input.key);
+    if (!keyResult.ok || !isValidBackupObjectVersionId(input.versionId)) {
+      return backupStorageFailure("delete");
+    }
+    try {
+      const query = `versionId=${encodeS3QueryValue(input.versionId)}`;
+      const response = await this.executeRequest(
+        this.createSignedRequest({
+          method: "DELETE",
+          key: keyResult.key,
+          query,
+          body: new Uint8Array(),
+        }),
+        async (value) => value,
+      );
+      return response.ok ? { ok: true } : backupStorageFailure("delete");
+    } catch {
+      return backupStorageFailure("delete");
+    }
+  }
+
+  async exists(input: BackupStorageDownloadInput): Promise<BackupStoragePresenceResult> {
+    const keyResult = validateBackupArtifactKey(input.key);
+    if (!keyResult.ok) return backupStorageFailure("exists");
+    try {
+      const response = await this.executeRequest(
+        this.createSignedRequest({ method: "HEAD", key: keyResult.key, body: new Uint8Array() }),
+        async (value) => value,
+      );
+      if (response.status === 404) return { ok: true, exists: false };
+      return response.ok ? { ok: true, exists: true } : backupStorageFailure("exists");
+    } catch {
+      return backupStorageFailure("exists");
+    }
+  }
+
+  async verifyDeletionSafety(): Promise<BackupStorageDeletionSafetyResult> {
+    try {
+      const response = await this.executeRequest(
+        this.createSignedRequest({
+          method: "GET",
+          key: "",
+          query: "versioning=",
+          body: new Uint8Array(),
+        }),
+        async (value) => ({ ok: value.ok, body: await value.text() }),
+      );
+      if (!response.ok) return backupStorageFailure("deletion_safety");
+      if (!isUnversionedBucketConfiguration(response.body)) {
+        return backupStorageFailure("deletion_safety");
+      }
+      return { ok: true, versioning: "disabled" };
+    } catch {
+      return backupStorageFailure("deletion_safety");
+    }
+  }
+
+  private async executeRequest<T>(
+    request: Request,
+    readResponse: (response: Response) => Promise<T>,
+  ): Promise<T> {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new Error("S3-compatible request deadline exceeded.")),
+      this.requestTimeoutMs,
+    );
+    try {
+      const response = await this.fetchImplementation(
+        new Request(request, { signal: controller.signal }),
+      );
+      return await readResponse(response);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   private createSignedRequest(input: {
-    method: "GET" | "PUT";
+    method: "DELETE" | "GET" | "HEAD" | "PUT";
     key: string;
     body: Uint8Array;
     contentType?: string;
+    query?: string;
   }): Request {
     const url = new URL(this.endpoint);
     url.pathname = joinUrlPath(url.pathname, this.config.bucket, input.key);
-    url.search = "";
+    url.search = input.query ? `?${input.query}` : "";
 
     const now = new Date();
     const amzDate = toAmzDate(now);
@@ -253,7 +427,7 @@ export class S3CompatibleBackupObjectStorage implements BackupObjectStorage {
     const canonicalRequest = [
       input.method,
       url.pathname,
-      "",
+      input.query ?? "",
       canonicalHeaders,
       signedHeaders,
       payloadHash,
@@ -388,10 +562,30 @@ function hasControlCharacter(value: string): boolean {
   return false;
 }
 
+function isValidBackupObjectVersionId(value: string): boolean {
+  return value.length > 0 && value.length <= 1024 && !hasControlCharacter(value);
+}
+
+function encodeS3QueryValue(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
 function isLoopbackHttp(url: URL): boolean {
   return (
     url.protocol === "http:" &&
     (url.hostname === "127.0.0.1" || url.hostname === "::1" || url.hostname === "localhost")
+  );
+}
+
+function isUnversionedBucketConfiguration(value: string): boolean {
+  const withoutDeclaration = value
+    .trim()
+    .replace(/^<\?xml\s+version="1\.0"(?:\s+encoding="UTF-8")?\s*\?>\s*/, "");
+  return /^<VersioningConfiguration(?: xmlns="http:\/\/s3\.amazonaws\.com\/doc\/2006-03-01\/")?\s*(?:\/>|>\s*<\/VersioningConfiguration>)$/.test(
+    withoutDeclaration,
   );
 }
 

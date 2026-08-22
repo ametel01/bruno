@@ -35,6 +35,42 @@ export const agentStatusEnum = pgEnum("agent_status", [
 ]);
 
 export const operatorStatusEnum = pgEnum("operator_status", ["active", "archived"]);
+export const founderReleaseStageEnum = pgEnum("founder_release_stage", [
+  "owner_preview",
+  "trusted_preview",
+  "external_beta",
+  "initial_general_release",
+]);
+export const founderReleaseDecisionOutcomeEnum = pgEnum("founder_release_decision_outcome", [
+  "enter",
+  "deny",
+  "hold",
+  "resume",
+]);
+export const founderProductEntitlementStatusEnum = pgEnum("founder_product_entitlement_status", [
+  "verified",
+  "past_due",
+  "unpaid",
+  "cancelled",
+  "expired",
+  "refunded",
+]);
+export const founderRecoveryArchiveStatusEnum = pgEnum("founder_recovery_archive_status", [
+  "pending",
+  "verified",
+  "failed",
+  "deleted",
+]);
+export const founderProductContractScenarioEnum = pgEnum("founder_product_contract_scenario", [
+  "release_stage_admission",
+  "product_entitlement_lifecycle",
+  "recovery_archive_lifecycle",
+  "infrastructure_retirement",
+]);
+export const founderInfrastructureRetirementStatusEnum = pgEnum(
+  "founder_infrastructure_retirement_status",
+  ["in_progress", "completed", "failed"],
+);
 export const operatorDeletionRequestKindEnum = pgEnum("operator_deletion_request_kind", [
   "retained_data",
   "account_closure",
@@ -810,6 +846,549 @@ export const operators = pgTable(
     ),
     uniqueIndex("operators_user_id_idx").on(table.userId),
     index("operators_status_idx").on(table.status),
+  ],
+);
+
+export const founderReleaseDecisions = pgTable(
+  "founder_release_decisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    stage: founderReleaseStageEnum("stage").notNull(),
+    outcome: founderReleaseDecisionOutcomeEnum("outcome").notNull(),
+    applicationRevision: text("application_revision").notNull(),
+    runtimeRevision: text("runtime_revision").notNull(),
+    capabilityManifest: jsonb("capability_manifest").$type<readonly string[]>().notNull(),
+    openAiQualificationExpiresAt: timestamp("openai_qualification_expires_at", {
+      withTimezone: true,
+    }),
+    calendarQualificationExpiresAt: timestamp("calendar_qualification_expires_at", {
+      withTimezone: true,
+    }),
+    affectedCapabilities: jsonb("affected_capabilities")
+      .$type<readonly string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    evidenceDigests: jsonb("evidence_digests").$type<readonly string[]>().notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "founder_release_decisions_application_revision_check",
+      sql`${table.applicationRevision} ~ '^[a-f0-9]{40}$'`,
+    ),
+    check(
+      "founder_release_decisions_runtime_revision_check",
+      sql`length(trim(${table.runtimeRevision})) > 0`,
+    ),
+    check(
+      "founder_release_decisions_affected_capabilities_check",
+      sql`(${table.outcome} = 'hold' AND jsonb_array_length(${table.affectedCapabilities}) > 0) OR (${table.outcome} <> 'hold' AND jsonb_array_length(${table.affectedCapabilities}) = 0)`,
+    ),
+    check(
+      "founder_release_decisions_affected_capabilities_manifest_check",
+      sql`${table.affectedCapabilities} <@ ${table.capabilityManifest}`,
+    ),
+    check(
+      "founder_release_decisions_owner_preview_manifest_check",
+      sql`${table.stage} <> 'owner_preview' OR (jsonb_array_length(${table.capabilityManifest}) = 2 AND ${table.capabilityManifest} @> '["openai", "calendar_reading"]'::jsonb)`,
+    ),
+    check(
+      "founder_release_decisions_owner_preview_qualification_expiry_check",
+      sql`${table.stage} <> 'owner_preview' OR ${table.outcome} = 'deny' OR (${table.openAiQualificationExpiresAt} IS NOT NULL AND ${table.calendarQualificationExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "founder_release_decisions_trusted_preview_manifest_check",
+      sql`${table.stage} <> 'trusted_preview' OR (jsonb_array_length(${table.capabilityManifest}) = 2 AND ${table.capabilityManifest} @> '["openai", "calendar_reading"]'::jsonb)`,
+    ),
+    check(
+      "founder_release_decisions_trusted_preview_qualification_expiry_check",
+      sql`${table.stage} <> 'trusted_preview' OR ${table.outcome} NOT IN ('enter', 'resume') OR (${table.openAiQualificationExpiresAt} IS NOT NULL AND ${table.calendarQualificationExpiresAt} IS NOT NULL)`,
+    ),
+    index("founder_release_decisions_user_stage_idx").on(
+      table.userId,
+      table.stage,
+      table.decidedAt,
+    ),
+  ],
+);
+
+export const founderPreviewQualifications = pgTable(
+  "founder_preview_qualifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    stage: founderReleaseStageEnum("stage").notNull(),
+    cohort: text("cohort").notNull(),
+    capability: text("capability").notNull(),
+    applicationRevision: text("application_revision").notNull(),
+    runtimeRevision: text("runtime_revision").notNull(),
+    evidenceDigest: text("evidence_digest").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "founder_preview_qualifications_external_beta_stage_check",
+      sql`${table.stage} = 'external_beta'`,
+    ),
+    check(
+      "founder_preview_qualifications_cohort_check",
+      sql`${table.cohort} ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'`,
+    ),
+    check(
+      "founder_preview_qualifications_capability_check",
+      sql`${table.capability} IN ('openai', 'anthropic', 'calendar_reading', 'gmail_reading', 'gmail_sending')`,
+    ),
+    check(
+      "founder_preview_qualifications_application_revision_check",
+      sql`${table.applicationRevision} ~ '^[a-f0-9]{40}$'`,
+    ),
+    check(
+      "founder_preview_qualifications_runtime_revision_check",
+      sql`length(trim(${table.runtimeRevision})) > 0`,
+    ),
+    check(
+      "founder_preview_qualifications_evidence_digest_check",
+      sql`${table.evidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_preview_qualifications_time_check",
+      sql`${table.observedAt} < ${table.expiresAt}`,
+    ),
+    uniqueIndex("founder_preview_qualifications_evidence_idx").on(
+      table.stage,
+      table.cohort,
+      table.applicationRevision,
+      table.runtimeRevision,
+      table.capability,
+      table.evidenceDigest,
+    ),
+    index("founder_preview_qualifications_candidate_idx").on(
+      table.stage,
+      table.cohort,
+      table.applicationRevision,
+      table.runtimeRevision,
+      table.capability,
+      table.observedAt,
+    ),
+  ],
+);
+
+export const founderTrustedPreviewInvitations = pgTable(
+  "founder_trusted_preview_invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cohortOwnerUserId: uuid("cohort_owner_user_id")
+      .notNull()
+      .references(() => users.id),
+    stageDecisionId: uuid("stage_decision_id")
+      .notNull()
+      .references(() => founderReleaseDecisions.id),
+    cohortSlot: integer("cohort_slot").notNull(),
+    invitationDigest: text("invitation_digest").notNull(),
+    invitedClerkSubjectDigest: text("invited_clerk_subject_digest").notNull(),
+    serviceBusinessEvidenceDigest: text("service_business_evidence_digest").notNull(),
+    status: text("status").notNull().default("invited"),
+    participantUserId: uuid("participant_user_id").references(() => users.id),
+    participantOperatorId: uuid("participant_operator_id").references(() => operators.id),
+    admissionDecisionId: uuid("admission_decision_id").references(() => founderReleaseDecisions.id),
+    invitedAt: timestamp("invited_at", { withTimezone: true }).notNull(),
+    admittedAt: timestamp("admitted_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "founder_trusted_preview_invitations_slot_check",
+      sql`${table.cohortSlot} BETWEEN 1 AND 3`,
+    ),
+    check(
+      "founder_trusted_preview_invitations_digest_check",
+      sql`${table.invitationDigest} ~ '^sha256:[a-f0-9]{64}$' AND ${table.invitedClerkSubjectDigest} ~ '^sha256:[a-f0-9]{64}$' AND ${table.serviceBusinessEvidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_trusted_preview_invitations_state_check",
+      sql`(${table.status} = 'invited' AND ${table.participantUserId} IS NULL AND ${table.participantOperatorId} IS NULL AND ${table.admissionDecisionId} IS NULL AND ${table.admittedAt} IS NULL AND ${table.revokedAt} IS NULL) OR (${table.status} = 'admitted' AND ${table.participantUserId} IS NOT NULL AND ${table.participantOperatorId} IS NOT NULL AND ${table.admissionDecisionId} IS NOT NULL AND ${table.admittedAt} IS NOT NULL AND ${table.revokedAt} IS NULL) OR (${table.status} = 'revoked' AND ${table.participantUserId} IS NULL AND ${table.participantOperatorId} IS NULL AND ${table.admissionDecisionId} IS NULL AND ${table.admittedAt} IS NULL AND ${table.revokedAt} IS NOT NULL)`,
+    ),
+    check(
+      "founder_trusted_preview_invitations_owner_participant_check",
+      sql`${table.participantUserId} IS NULL OR ${table.participantUserId} <> ${table.cohortOwnerUserId}`,
+    ),
+    uniqueIndex("founder_trusted_preview_invitations_slot_idx")
+      .on(table.cohortSlot)
+      .where(sql`${table.status} <> 'revoked'`),
+    uniqueIndex("founder_trusted_preview_invitations_digest_idx").on(table.invitationDigest),
+    uniqueIndex("founder_trusted_preview_invitations_clerk_subject_idx")
+      .on(table.invitedClerkSubjectDigest)
+      .where(sql`${table.status} <> 'revoked'`),
+    uniqueIndex("founder_trusted_preview_invitations_participant_idx").on(table.participantUserId),
+    uniqueIndex("founder_trusted_preview_invitations_operator_idx").on(table.participantOperatorId),
+    index("founder_trusted_preview_invitations_owner_status_idx").on(
+      table.cohortOwnerUserId,
+      table.status,
+      table.cohortSlot,
+    ),
+  ],
+);
+
+export const founderCheckoutCorrelations = pgTable(
+  "founder_checkout_correlations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    correlationDigest: text("correlation_digest").notNull(),
+    generation: integer("generation").notNull().default(1),
+    status: text("status").notNull().default("pending"),
+    providerCheckoutId: text("provider_checkout_id"),
+    providerSubscriptionId: text("provider_subscription_id"),
+    providerOrderId: text("provider_order_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    paymentDetectedAt: timestamp("payment_detected_at", { withTimezone: true }),
+    reconciliationDueAt: timestamp("reconciliation_due_at", { withTimezone: true }),
+    refundRequestedAt: timestamp("refund_requested_at", { withTimezone: true }),
+    refundLeaseToken: uuid("refund_lease_token"),
+    refundLeaseExpiresAt: timestamp("refund_lease_expires_at", { withTimezone: true }),
+    refundAttemptCount: integer("refund_attempt_count").notNull().default(0),
+    refundLastErrorCode: text("refund_last_error_code"),
+    refundedAt: timestamp("refunded_at", { withTimezone: true }),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    closureReason: text("closure_reason"),
+  },
+  (table) => [
+    uniqueIndex("founder_checkout_correlations_digest_idx").on(table.correlationDigest),
+    uniqueIndex("founder_checkout_correlations_user_generation_idx").on(
+      table.userId,
+      table.generation,
+    ),
+    uniqueIndex("founder_checkout_correlations_subscription_idx").on(table.providerSubscriptionId),
+    uniqueIndex("founder_checkout_correlations_order_idx").on(table.providerOrderId),
+    check(
+      "founder_checkout_correlations_digest_check",
+      sql`${table.correlationDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check("founder_checkout_correlations_generation_check", sql`${table.generation} >= 1`),
+    check(
+      "founder_checkout_correlations_status_check",
+      sql`${table.status} IN ('pending', 'consumed', 'refund_pending', 'closed')`,
+    ),
+    check(
+      "founder_checkout_correlations_consumed_check",
+      sql`(${table.status} = 'pending' AND ${table.consumedAt} IS NULL AND ${table.closedAt} IS NULL AND ${table.closureReason} IS NULL) OR (${table.status} IN ('consumed', 'refund_pending') AND ${table.consumedAt} IS NOT NULL AND ${table.closedAt} IS NULL AND ${table.closureReason} IS NULL) OR (${table.status} = 'closed' AND ${table.consumedAt} IS NOT NULL AND ${table.closedAt} IS NOT NULL AND ${table.closureReason} IS NOT NULL)`,
+    ),
+    check(
+      "founder_checkout_correlations_payment_check",
+      sql`(${table.paymentDetectedAt} IS NULL AND ${table.reconciliationDueAt} IS NULL AND ${table.providerSubscriptionId} IS NULL AND ${table.providerOrderId} IS NULL) OR (${table.paymentDetectedAt} IS NOT NULL AND ${table.reconciliationDueAt} = ${table.paymentDetectedAt} + interval '1 hour' AND ${table.providerSubscriptionId} IS NOT NULL AND ${table.providerOrderId} IS NOT NULL)`,
+    ),
+    check(
+      "founder_checkout_correlations_refund_check",
+      sql`(${table.refundRequestedAt} IS NULL AND ${table.refundLeaseToken} IS NULL AND ${table.refundLeaseExpiresAt} IS NULL AND ${table.refundedAt} IS NULL AND ${table.refundAttemptCount} = 0) OR (${table.refundRequestedAt} IS NOT NULL AND ${table.refundAttemptCount} > 0 AND (${table.refundedAt} IS NULL OR ${table.refundedAt} >= ${table.refundRequestedAt}))`,
+    ),
+    check(
+      "founder_checkout_correlations_refund_lease_check",
+      sql`(${table.refundLeaseToken} IS NULL AND ${table.refundLeaseExpiresAt} IS NULL) OR (${table.status} = 'refund_pending' AND ${table.refundLeaseToken} IS NOT NULL AND ${table.refundLeaseExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "founder_checkout_correlations_closed_check",
+      sql`${table.status} <> 'closed' OR (${table.closureReason} IN ('payment_without_access_refunded', 'payment_without_access_refunded_superseded') AND ${table.refundedAt} IS NOT NULL)`,
+    ),
+    check(
+      "founder_checkout_correlations_expiry_check",
+      sql`${table.expiresAt} > ${table.createdAt}`,
+    ),
+    index("founder_checkout_correlations_user_status_idx").on(table.userId, table.status),
+    index("founder_checkout_correlations_reconciliation_due_idx").on(
+      table.status,
+      table.reconciliationDueAt,
+    ),
+  ],
+);
+
+export const founderCommerceEvents = pgTable(
+  "founder_commerce_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    providerEventId: text("provider_event_id").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    checkoutCorrelationId: uuid("checkout_correlation_id")
+      .notNull()
+      .references(() => founderCheckoutCorrelations.id),
+    providerSubscriptionId: text("provider_subscription_id").notNull(),
+    providerOrderId: text("provider_order_id").notNull(),
+    eventType: text("event_type").notNull(),
+    payloadDigest: text("payload_digest").notNull(),
+    signatureVerified: boolean("signature_verified").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+    applicationStatus: text("application_status").notNull().default("pending"),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+    lastErrorCode: text("last_error_code"),
+  },
+  (table) => [
+    uniqueIndex("founder_commerce_events_provider_event_id_idx").on(table.providerEventId),
+    check(
+      "founder_commerce_events_payload_digest_check",
+      sql`${table.payloadDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_commerce_events_signature_verified_check",
+      sql`${table.signatureVerified} = true`,
+    ),
+    check(
+      "founder_commerce_events_application_check",
+      sql`(${table.applicationStatus} = 'pending' AND ${table.appliedAt} IS NULL) OR (${table.applicationStatus} IN ('applied', 'ignored') AND ${table.appliedAt} IS NOT NULL AND ${table.lastErrorCode} IS NULL)`,
+    ),
+    index("founder_commerce_events_user_occurred_idx").on(table.userId, table.occurredAt),
+  ],
+);
+
+export const founderProductEntitlements = pgTable(
+  "founder_product_entitlements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    sourceEventId: uuid("source_event_id")
+      .notNull()
+      .references(() => founderCommerceEvents.id),
+    providerSubscriptionId: text("provider_subscription_id").notNull(),
+    status: founderProductEntitlementStatusEnum("status").notNull(),
+    reconciledProviderStatus: text("reconciled_provider_status").notNull(),
+    providerStateUpdatedAt: timestamp("provider_state_updated_at", {
+      withTimezone: true,
+    }).notNull(),
+    reconciledAt: timestamp("reconciled_at", { withTimezone: true }).notNull(),
+    retirementDueAt: timestamp("retirement_due_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("founder_product_entitlements_user_idx").on(table.userId),
+    check(
+      "founder_product_entitlements_provider_status_check",
+      sql`${table.reconciledProviderStatus} IN ('active', 'past_due', 'unpaid', 'cancelled', 'expired', 'refunded')`,
+    ),
+    check(
+      "founder_product_entitlements_retirement_due_check",
+      sql`(${table.status} = 'verified' AND ${table.retirementDueAt} IS NULL) OR (${table.status} IN ('past_due', 'unpaid', 'cancelled', 'expired', 'refunded') AND ${table.retirementDueAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const founderRecoveryArchives = pgTable(
+  "founder_recovery_archives",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    applicationRevision: text("application_revision"),
+    runtimeRevision: text("runtime_revision"),
+    status: founderRecoveryArchiveStatusEnum("status").notNull(),
+    formatVersion: integer("format_version"),
+    storageObjectKey: text("storage_object_key"),
+    recoveryCredentialObjectKey: text("recovery_credential_object_key"),
+    ciphertextDigest: text("ciphertext_digest"),
+    recoveryCredentialDigest: text("recovery_credential_digest"),
+    stateDigest: text("state_digest"),
+    restorableVerified: boolean("restorable_verified").notNull(),
+    restoreVerifiedAt: timestamp("restore_verified_at", { withTimezone: true }),
+    failureCode: text("failure_code"),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "founder_recovery_archives_outcome_check",
+      sql`(${table.status} = 'pending' AND ${table.ciphertextDigest} IS NULL AND ${table.recoveryCredentialDigest} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NULL AND ((${table.storageObjectKey} IS NULL AND ${table.recoveryCredentialObjectKey} IS NULL) OR (${table.storageObjectKey} IS NOT NULL AND ${table.recoveryCredentialObjectKey} IS NOT NULL))) OR (${table.status} = 'verified' AND ${table.storageObjectKey} IS NOT NULL AND ${table.ciphertextDigest} IS NOT NULL AND ${table.recoveryCredentialDigest} IS NOT NULL AND ${table.restorableVerified} = true AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NULL) OR (${table.status} = 'failed' AND ${table.recoveryCredentialDigest} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NOT NULL AND ${table.deletedAt} IS NULL) OR (${table.status} = 'deleted' AND ${table.storageObjectKey} IS NULL AND ${table.recoveryCredentialDigest} IS NULL AND ${table.restorableVerified} = false AND ${table.failureCode} IS NULL AND ${table.deletedAt} IS NOT NULL)`,
+    ),
+    check(
+      "founder_recovery_archives_ciphertext_digest_check",
+      sql`${table.ciphertextDigest} IS NULL OR ${table.ciphertextDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_recovery_archives_credential_digest_check",
+      sql`${table.recoveryCredentialDigest} IS NULL OR ${table.recoveryCredentialDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_recovery_archives_state_digest_check",
+      sql`${table.stateDigest} IS NULL OR ${table.stateDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_recovery_archives_application_revision_check",
+      sql`${table.applicationRevision} IS NULL OR ${table.applicationRevision} ~ '^[a-f0-9]{40}$'`,
+    ),
+    check(
+      "founder_recovery_archives_runtime_revision_check",
+      sql`${table.runtimeRevision} IS NULL OR length(trim(${table.runtimeRevision})) > 0`,
+    ),
+    check(
+      "founder_recovery_archives_v1_verification_check",
+      sql`${table.formatVersion} IS NULL OR (${table.formatVersion} = 1 AND ${table.stateDigest} IS NOT NULL AND ${table.restoreVerifiedAt} IS NOT NULL AND ((${table.status} = 'verified' AND ${table.recoveryCredentialObjectKey} IS NOT NULL AND ${table.restorableVerified} = true) OR (${table.status} = 'deleted' AND ${table.recoveryCredentialObjectKey} IS NULL AND ${table.restorableVerified} = false)))`,
+    ),
+    check("founder_recovery_archives_expiry_check", sql`${table.expiresAt} > ${table.observedAt}`),
+    index("founder_recovery_archives_user_observed_idx").on(table.userId, table.observedAt),
+  ],
+);
+
+export const founderRecoveryArchiveDeletionReceipts = pgTable(
+  "founder_recovery_archive_deletion_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    archiveId: uuid("archive_id")
+      .notNull()
+      .references(() => founderRecoveryArchives.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: text("status").notNull().default("pending"),
+    archiveProviderConfirmed: boolean("archive_provider_confirmed").notNull().default(false),
+    recoveryCredentialsConfirmed: boolean("recovery_credentials_confirmed")
+      .notNull()
+      .default(false),
+    attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    failureCode: text("failure_code"),
+  },
+  (table) => [
+    uniqueIndex("founder_recovery_archive_deletions_archive_idx").on(table.archiveId),
+    uniqueIndex("founder_recovery_archive_deletions_key_idx").on(table.idempotencyKey),
+    check(
+      "founder_recovery_archive_deletions_status_check",
+      sql`${table.status} IN ('pending', 'completed')`,
+    ),
+    check(
+      "founder_recovery_archive_deletions_outcome_check",
+      sql`(${table.status} = 'pending' AND ${table.archiveProviderConfirmed} = false AND ${table.recoveryCredentialsConfirmed} = false AND ${table.completedAt} IS NULL) OR (${table.status} = 'completed' AND ${table.archiveProviderConfirmed} = true AND ${table.recoveryCredentialsConfirmed} = true AND ${table.completedAt} IS NOT NULL AND ${table.failureCode} IS NULL)`,
+    ),
+  ],
+);
+
+export const founderProductContractScenarioExecutions = pgTable(
+  "founder_product_contract_scenario_executions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: text("run_id").notNull(),
+    // Contract execution history is candidate evidence. It intentionally outlives
+    // disposable lifecycle users so a failed attempt cannot be erased by cleanup.
+    userId: uuid("user_id").notNull(),
+    scenarioId: founderProductContractScenarioEnum("scenario_id").notNull(),
+    sourceRevision: text("source_revision").notNull(),
+    status: text("status").notNull().default("in_progress"),
+    attempts: integer("attempts").notNull().default(1),
+    resourcesBefore: integer("resources_before").notNull(),
+    resourcesAfter: integer("resources_after").notNull(),
+    cleanupVerified: boolean("cleanup_verified").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("founder_product_contract_executions_run_scenario_idx").on(
+      table.runId,
+      table.userId,
+      table.scenarioId,
+    ),
+    check(
+      "founder_product_contract_executions_revision_check",
+      sql`${table.sourceRevision} ~ '^[a-f0-9]{40}$'`,
+    ),
+    check(
+      "founder_product_contract_executions_outcome_check",
+      sql`(${table.status} = 'in_progress' AND ${table.attempts} = 1 AND ${table.cleanupVerified} = false AND ${table.resourcesBefore} = 0 AND ${table.resourcesAfter} = 0) OR (${table.status} = 'failed' AND ${table.attempts} >= 1 AND ${table.cleanupVerified} = false AND ${table.resourcesBefore} >= 0 AND ${table.resourcesAfter} = 0) OR (${table.status} = 'passed' AND ${table.attempts} = 1 AND ${table.cleanupVerified} = true AND ${table.resourcesBefore} >= 0 AND ${table.resourcesAfter} = 0)`,
+    ),
+  ],
+);
+
+export const founderInfrastructureRetirements = pgTable(
+  "founder_infrastructure_retirements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    runnerId: uuid("runner_id")
+      .notNull()
+      .references(() => runners.id),
+    recoveryArchiveId: uuid("recovery_archive_id").references(() => founderRecoveryArchives.id),
+    idempotencyKey: text("idempotency_key").notNull(),
+    providerResourceId: text("provider_resource_id").notNull(),
+    providerFirewallId: text("provider_firewall_id").notNull(),
+    providerOperationTag: text("provider_operation_tag"),
+    providerResourceName: text("provider_resource_name"),
+    providerRegion: text("provider_region"),
+    providerSizeSlug: text("provider_size_slug"),
+    providerFirewallName: text("provider_firewall_name"),
+    providerResourceCreatedAt: timestamp("provider_resource_created_at", { withTimezone: true }),
+    hardDestructionDueAt: timestamp("hard_destruction_due_at", { withTimezone: true }),
+    status: founderInfrastructureRetirementStatusEnum("status").notNull(),
+    resourcesBefore: integer("resources_before").notNull(),
+    resourcesAfter: integer("resources_after"),
+    providerDropletState: text("provider_droplet_state").notNull().default("unknown"),
+    providerFirewallState: text("provider_firewall_state").notNull().default("unknown"),
+    providerObservedAt: timestamp("provider_observed_at", { withTimezone: true }),
+    workStoppedAt: timestamp("work_stopped_at", { withTimezone: true }),
+    credentialsDisabledAt: timestamp("credentials_disabled_at", { withTimezone: true }),
+    archiveOutcome: text("archive_outcome").notNull().default("pending"),
+    archiveFailureCode: text("archive_failure_code"),
+    firewallDeletedAt: timestamp("firewall_deleted_at", { withTimezone: true }),
+    dropletDeletedAt: timestamp("droplet_deleted_at", { withTimezone: true }),
+    absenceVerifiedAt: timestamp("absence_verified_at", { withTimezone: true }),
+    billableRuntimeSeconds: integer("billable_runtime_seconds"),
+    failureCode: text("failure_code"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    leaseToken: text("lease_token").notNull(),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("founder_infrastructure_retirements_idempotency_idx").on(table.idempotencyKey),
+    uniqueIndex("founder_infrastructure_retirements_runner_idx").on(table.runnerId),
+    check(
+      "founder_infrastructure_retirements_resources_check",
+      sql`${table.resourcesBefore} >= 0 AND (${table.resourcesAfter} IS NULL OR ${table.resourcesAfter} >= 0)`,
+    ),
+    check(
+      "founder_infrastructure_retirements_provider_state_check",
+      sql`${table.providerDropletState} IN ('unknown', 'present', 'absent') AND ${table.providerFirewallState} IN ('unknown', 'present', 'absent')`,
+    ),
+    check(
+      "founder_infrastructure_retirements_archive_outcome_check",
+      sql`(${table.archiveOutcome} = 'pending' AND ${table.archiveFailureCode} IS NULL) OR (${table.archiveOutcome} = 'verified' AND ${table.archiveFailureCode} IS NULL) OR (${table.archiveOutcome} = 'failed' AND ${table.archiveFailureCode} IS NOT NULL)`,
+    ),
+    check(
+      "founder_infrastructure_retirements_billable_runtime_check",
+      sql`${table.billableRuntimeSeconds} IS NULL OR ${table.billableRuntimeSeconds} >= 0`,
+    ),
+    check(
+      "founder_infrastructure_retirements_lease_token_check",
+      sql`length(trim(${table.leaseToken})) > 0`,
+    ),
+    check(
+      "founder_infrastructure_retirements_completed_check",
+      sql`${table.status} <> 'completed' OR (${table.providerOperationTag} IS NOT NULL AND ${table.providerResourceName} IS NOT NULL AND ${table.providerRegion} IS NOT NULL AND ${table.providerSizeSlug} IS NOT NULL AND ${table.providerFirewallName} IS NOT NULL AND ${table.providerResourceCreatedAt} IS NOT NULL AND ${table.hardDestructionDueAt} IS NOT NULL AND ${table.resourcesAfter} = 0 AND ${table.providerDropletState} = 'absent' AND ${table.providerFirewallState} = 'absent' AND ${table.providerObservedAt} IS NOT NULL AND ${table.workStoppedAt} IS NOT NULL AND ${table.credentialsDisabledAt} IS NOT NULL AND ${table.archiveOutcome} <> 'pending' AND ${table.firewallDeletedAt} IS NOT NULL AND ${table.dropletDeletedAt} IS NOT NULL AND ${table.absenceVerifiedAt} IS NOT NULL AND ${table.billableRuntimeSeconds} IS NOT NULL AND ${table.failureCode} IS NULL)`,
+    ),
+    index("founder_infrastructure_retirements_user_status_idx").on(table.userId, table.status),
   ],
 );
 

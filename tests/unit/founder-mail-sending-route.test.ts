@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { GET, POST } from "@/app/api/operator/mail-sending/route";
 
 describe("Mail Sending route boundary", () => {
-  it("keeps the capability response authenticated and uncached", async () => {
+  it("keeps Gmail sending hidden during Owner Preview", async () => {
     const response = await GET(
       new Request("http://localhost/api/operator/mail-sending"),
       undefined,
@@ -13,9 +13,11 @@ describe("Mail Sending route boundary", () => {
         isMailSendingReleased: () => true,
       },
     );
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(409);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    await expect(response.json()).resolves.toEqual({ connection: null, offerAvailable: true });
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "owner_preview_capability_unavailable" },
+    });
   });
 
   it("fails closed before reading connection state when release evidence is absent", async () => {
@@ -35,7 +37,7 @@ describe("Mail Sending route boundary", () => {
     expect(response.status).toBe(409);
     expect(response.headers.get("cache-control")).toBe("no-store");
     await expect(response.json()).resolves.toMatchObject({
-      error: { code: "mail_sending_not_released" },
+      error: { code: "owner_preview_capability_unavailable" },
     });
     expect(getConnection).not.toHaveBeenCalled();
     expect(getOffer).not.toHaveBeenCalled();

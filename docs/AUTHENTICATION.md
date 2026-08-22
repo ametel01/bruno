@@ -70,7 +70,14 @@ BRUNO_OPERATOR_PASSWORD=replace-with-strong-operator-password
 Operator mode is explicit and fails closed when the password is absent or blank. It does not enable
 Clerk pages, sessions, or automatic legacy-user claiming. The production cutover replaces this mode
 with `clerk`; the operator password and Basic-auth code are removed only after hosted Clerk and
-ownership acceptance passes.
+ownership acceptance passes. Both `operator` and `clerk` production modes enforce persisted Release
+Decision and Recovery Archive access boundaries; only explicit development mode uses the local
+bypass. Authentication alone is not admission: the first qualified Owner Preview entry binds one
+internal user as the Bruno.Ai Owner, later Owner candidates fail closed, and runtime preparation
+never creates an Owner Preview decision without the Owner's explicit entry action. Trusted Preview
+additionally requires Clerk, one of three identity-bound invitations issued under the current
+exact-revision cohort decision, and a participant-specific admission decision. A Clerk session
+without that invitation authority cannot open a Founder workspace.
 
 ## Clerk mode
 

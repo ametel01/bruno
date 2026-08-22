@@ -1,21 +1,10 @@
 import "server-only";
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { chmod, lstat, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { and, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type * as schema from "@/src/server/db/schema";
-import {
-  getFounderOperatorForUser,
-  type FounderOperatorDto,
-  type FounderOperatorRuntimeDto,
-  type FounderOperatorRuntimeSafetyState,
-  type FounderOperatorRuntimeTransportState,
-  ensureFounderOperatorForUser,
-} from "@/src/server/operators/founder-operator";
-import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { operatorPreparations, operatorRuntimes, operators } from "@/src/server/db/schema";
 import {
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
@@ -24,6 +13,20 @@ import {
   AGENT_LAUNCH_SPEC_VERSION,
   type NativeAgentLaunchSpec,
 } from "@/src/server/agents/agent-launch-spec";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
+import { operatorPreparations, operatorRuntimes, operators } from "@/src/server/db/schema";
+import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
+import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
+import { persistFounderOwnerPreviewHoldInTransaction } from "@/src/server/founder-product-contract/release-stage-hold";
+import {
+  ensureFounderOperatorForUser,
+  type FounderOperatorDto,
+  type FounderOperatorRuntimeDto,
+  type FounderOperatorRuntimeSafetyState,
+  type FounderOperatorRuntimeTransportState,
+  getFounderOperatorForUser,
+} from "@/src/server/operators/founder-operator";
 
 type OperatorRuntimeTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -72,6 +75,7 @@ export type FounderOperatorRuntimeDependencies = {
   randomUUID?: () => string;
   adapter?: FounderOperatorRuntimeAdapter;
   stateRoot?: string;
+  env?: Record<string, string | undefined>;
 };
 
 export type FounderOperatorRuntimePreparationResult = {
@@ -155,7 +159,11 @@ export async function prepareFounderOperatorRuntimeForUser(
         );
       }
 
-      return { kind: "claimed" as const, runtime: claimed };
+      return {
+        kind: "claimed" as const,
+        runtime: claimed,
+        admittedRuntimeRevision: runtime.configRevision,
+      };
     });
 
     if (claim.kind !== "claimed") {
@@ -229,6 +237,7 @@ export async function prepareFounderOperatorRuntimeForUser(
                 leaseExpiresAt: null,
                 recoveryMessage: result.message,
                 failureCode: result.code,
+                configRevision: claim.admittedRuntimeRevision ?? configRevision,
                 updatedAt: completedAt,
               },
         )
@@ -253,6 +262,33 @@ export async function prepareFounderOperatorRuntimeForUser(
           updatedAt: completedAt,
         })
         .where(eq(operatorPreparations.operatorId, operator.id));
+
+      if (!result.ok && updated.configRevision) {
+        const applicationRevision = readFounderApplicationRevision({
+          env: dependencies.env,
+        });
+        if (applicationRevision) {
+          await persistFounderOwnerPreviewHoldInTransaction(tx, {
+            userId,
+            operatorId: operator.id,
+            applicationRevision,
+            runtimeRevision: updated.configRevision,
+            affectedCapabilities: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+            evidenceDigests: [
+              runtimeFailureEvidenceDigest({
+                userId,
+                operatorId: operator.id,
+                applicationRevision,
+                runtimeRevision: updated.configRevision,
+                attemptedRuntimeRevision: configRevision,
+                failureCode: result.code,
+                observedAt: completedAt,
+              }),
+            ],
+            decidedAt: completedAt,
+          });
+        }
+      }
 
       const [row] = await tx
         .select({
@@ -285,6 +321,32 @@ export async function prepareFounderOperatorRuntimeForUser(
       await connection.close();
     }
   }
+}
+
+function runtimeFailureEvidenceDigest(input: {
+  userId: string;
+  operatorId: string;
+  applicationRevision: string;
+  runtimeRevision: string;
+  attemptedRuntimeRevision: string;
+  failureCode: FounderOperatorRuntimeFailureCode;
+  observedAt: Date;
+}): `sha256:${string}` {
+  const digest = createHash("sha256")
+    .update(
+      JSON.stringify({
+        schemaVersion: "bruno.owner-preview-runtime-failure.v1",
+        userId: input.userId,
+        operatorId: input.operatorId,
+        applicationRevision: input.applicationRevision,
+        runtimeRevision: input.runtimeRevision,
+        attemptedRuntimeRevision: input.attemptedRuntimeRevision,
+        failureCode: input.failureCode,
+        observedAt: input.observedAt.toISOString(),
+      }),
+    )
+    .digest("hex");
+  return `sha256:${digest}`;
 }
 
 export async function getFounderOperatorRuntimeForUser(
