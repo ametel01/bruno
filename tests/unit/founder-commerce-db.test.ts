@@ -146,6 +146,31 @@ describe("persisted Founder commerce authority", () => {
     expect(await connection.db.select().from(founderProductEntitlements)).toEqual([]);
   });
 
+  it("applies a newer Order refund when the Subscription timestamp does not change", async () => {
+    const payment = await record(webhook("payment", "2026-08-23T00:01:00.000Z"));
+    expect(await reconcile(payment.receiptId)).toBe("applied");
+
+    order = {
+      ...order,
+      status: "refunded",
+      refundedAmount: order.total,
+      updatedAt: "2026-08-23T00:04:00.000Z",
+    };
+    const refund = await record(webhook("order-refund", order.updatedAt, null));
+    expect(
+      await reconcileFounderCommerceReceipt({
+        receiptId: refund.receiptId,
+        now: new Date(order.updatedAt),
+        provider,
+        createConnection: () => connection,
+      }),
+    ).toBe("applied");
+    expect((await connection.db.select().from(founderProductEntitlements))[0]).toMatchObject({
+      status: "refunded",
+      providerStateUpdatedAt: new Date(order.updatedAt),
+    });
+  });
+
   it("refunds once after one hour, terminally fences late success, and requires fresh checkout", async () => {
     const receipt = await record(webhook("timeout", "2026-08-23T00:00:00.000Z"));
     const retirementProvider = {
