@@ -41,7 +41,7 @@ describe("Founder Relationships route", () => {
       { status: 403 },
     );
     mocks.requireWorkspaceAccess.mockImplementation(async (_userId, requirement) =>
-      requirement === "forbidden" ? blocked : null,
+      Array.isArray(requirement) && requirement.includes("gmail_reading") ? blocked : null,
     );
     const { POST } = await import("@/app/api/operator/relationships/route");
 
@@ -49,7 +49,7 @@ describe("Founder Relationships route", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.requireWorkspaceAccess).toHaveBeenNthCalledWith(1, USER_ID, "workspace_with_mail");
-    expect(mocks.requireWorkspaceAccess).toHaveBeenNthCalledWith(2, USER_ID, "forbidden");
+    expect(mocks.requireWorkspaceAccess).toHaveBeenNthCalledWith(2, USER_ID, ["gmail_reading"]);
     expect(mocks.ingestEvidence).not.toHaveBeenCalled();
   });
 

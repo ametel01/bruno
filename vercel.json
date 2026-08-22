@@ -38,6 +38,10 @@
     {
       "path": "/api/internal/operator/commerce",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/internal/operator/external-beta",
+      "schedule": "* * * * *"
     }
   ]
 }

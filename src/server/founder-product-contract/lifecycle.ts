@@ -4,6 +4,17 @@ import { founderReleaseDecisions } from "@/src/server/db/schema";
 import type { DigitalOceanOwnedSetProvider } from "@/src/server/runners/digitalocean-provider";
 import { expireFounderRecoveryArchivesForUser } from "./archive-expiry";
 import { founderProductContractDigest } from "./digest";
+import {
+  admitFounderToExternalBeta,
+  FOUNDER_EXTERNAL_BETA_ACCESS_MS,
+  FOUNDER_EXTERNAL_BETA_COMPACT_VERSION,
+  FOUNDER_EXTERNAL_BETA_INVITATION_MS,
+  FOUNDER_EXTERNAL_BETA_RETIREMENT_MS,
+  getFounderExternalBetaStatusForUser,
+  issueFounderExternalBetaInvitation,
+} from "./external-beta-admission";
+import { assessFounderExternalBetaPromotionEvidenceForCohort } from "./external-beta-promotion";
+import { reconcileFounderExternalBetaRetirements } from "./external-beta-retirement";
 import { reconcileFounderCommerceEvent } from "./entitlement";
 import { executeFounderInfrastructureRetirement } from "./infrastructure-retirement";
 import { persistFounderExternalBetaQualificationsInTransaction } from "./external-beta-manifest";
@@ -26,6 +37,7 @@ import type { FounderRecoveryArchiveProvider } from "./recovery-archive-provider
 
 export type FounderProductContractLifecycleAction =
   | "release_stage_admission"
+  | "external_beta_cohort_lifecycle"
   | "product_entitlement_lifecycle"
   | "recovery_archive_lifecycle"
   | "infrastructure_retirement";
@@ -82,6 +94,19 @@ export type FounderLifecycleOutcome = {
     capacityBoundary: "Uses only your connected provider accounts";
     safeWorkCheckpointsPreserved: true;
   };
+  externalBetaCohort?: {
+    invitationExpiresAt: string;
+    accessExpiresAt: string;
+    retirementDueAt: string;
+    copiedAccountDenied: true;
+    wrongWorkspaceDenied: true;
+    payment: "Free, no card, no renewal, and no automatic paid conversion";
+    exactCapabilities: readonly string[];
+    promotionEligible: false;
+    founderAcceptanceEligible: false;
+    newCohortRequired: true;
+    retirementCompleted: true;
+  };
 };
 
 type LifecycleInput = {
@@ -90,6 +115,11 @@ type LifecycleInput = {
   userId: string;
   now: Date;
   commerceEvent?: FounderCommerceEvent;
+  externalBetaContract?: {
+    cohortOwnerUserId: string;
+    participantUserId: string;
+    invitedClerkSubject: string;
+  };
 };
 
 type LifecycleDependencies = {
@@ -144,6 +174,16 @@ export async function executeFounderProductContractLifecycleAction(
             () => input.now,
           )
         : null;
+    if (input.action === "external_beta_cohort_lifecycle") {
+      if (!input.externalBetaContract) {
+        throw new Error("External Beta contract fixture identity is required.");
+      }
+      return executeFounderExternalBetaContractLifecycle(
+        input,
+        input.externalBetaContract,
+        dependencies,
+      );
+    }
     return await connection.db.transaction(async (tx) => {
       const { operatorId, runtimeRevision } =
         await requireReadyFounderOperatorAuthorityInTransaction(tx, input.userId);
@@ -255,6 +295,8 @@ export async function executeFounderProductContractLifecycleAction(
           cleanup.observedAt = resumeAt.toISOString();
           break;
         }
+        case "external_beta_cohort_lifecycle":
+          throw new Error("External Beta must use its complete cohort lifecycle path.");
         case "product_entitlement_lifecycle": {
           await requireReleaseDecision(
             tx,
@@ -311,6 +353,186 @@ export async function executeFounderProductContractLifecycleAction(
   } finally {
     if (ownsConnection) await connection.close();
   }
+}
+
+async function executeFounderExternalBetaContractLifecycle(
+  input: LifecycleInput,
+  contract: NonNullable<LifecycleInput["externalBetaContract"]>,
+  dependencies: LifecycleDependencies,
+): Promise<FounderLifecycleOutcome> {
+  const cohort = `external-beta-contract:${input.runId}`;
+  const workspaceReference = `workspace:${input.runId}`;
+  const invitationToken = "B".repeat(43);
+  const environment = {
+    BRUNO_AUTH_MODE: "clerk",
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_founder_contract_external_beta",
+    CLERK_SECRET_KEY: "sk_test_founder_contract_external_beta",
+    NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+    VERCEL_GIT_COMMIT_SHA: dependencies.applicationRevision,
+  };
+  const invitation = await issueFounderExternalBetaInvitation(
+    {
+      cohortOwnerUserId: contract.cohortOwnerUserId,
+      invitedClerkSubject: contract.invitedClerkSubject,
+      namedFounder: "Founder Product Contract participant",
+      workspaceReference,
+      independenceEvidenceDigest: founderProductContractDigest(
+        `external-beta-independent:${input.runId}`,
+      ),
+    },
+    {
+      applicationRevision: dependencies.applicationRevision,
+      env: environment,
+      now: () => input.now,
+      createInvitationToken: () => invitationToken,
+    },
+  );
+  if (
+    invitation.expiresAt !==
+    new Date(input.now.valueOf() + FOUNDER_EXTERNAL_BETA_INVITATION_MS).toISOString()
+  ) {
+    throw new Error("External Beta invitation did not retain the exact seven-day boundary.");
+  }
+
+  const compact = {
+    version: FOUNDER_EXTERNAL_BETA_COMPACT_VERSION,
+    instabilityAccepted: true,
+    capabilityBoundaryAccepted: true,
+    reactiveSupportAccepted: true,
+    companyDataHandlingAccepted: true,
+    feedbackBoundaryAccepted: true,
+    withdrawalExportDeletionAccepted: true,
+    freeNonconvertingBoundaryAccepted: true,
+  } as const;
+  let copiedAccountDenied = false;
+  try {
+    await admitFounderToExternalBeta(
+      input.userId,
+      { invitationToken, workspaceReference, compact },
+      {
+        applicationRevision: dependencies.applicationRevision,
+        createProvider: () => dependencies.providers,
+        env: environment,
+        now: () => input.now,
+      },
+    );
+  } catch {
+    copiedAccountDenied = true;
+  }
+  let wrongWorkspaceDenied = false;
+  try {
+    await admitFounderToExternalBeta(
+      contract.participantUserId,
+      { invitationToken, workspaceReference: `${workspaceReference}:copied`, compact },
+      {
+        applicationRevision: dependencies.applicationRevision,
+        createProvider: () => dependencies.providers,
+        env: environment,
+        now: () => input.now,
+      },
+    );
+  } catch {
+    wrongWorkspaceDenied = true;
+  }
+  if (!copiedAccountDenied || !wrongWorkspaceDenied) {
+    throw new Error("External Beta invitation isolation was not enforced.");
+  }
+
+  const admitted = await admitFounderToExternalBeta(
+    contract.participantUserId,
+    { invitationToken, workspaceReference, compact },
+    {
+      applicationRevision: dependencies.applicationRevision,
+      createProvider: () => dependencies.providers,
+      env: environment,
+      now: () => input.now,
+    },
+  );
+  const accessExpiresAt = new Date(input.now.valueOf() + FOUNDER_EXTERNAL_BETA_ACCESS_MS);
+  const retirementDueAt = new Date(accessExpiresAt.valueOf() + FOUNDER_EXTERNAL_BETA_RETIREMENT_MS);
+  if (
+    admitted.accessExpiresAt !== accessExpiresAt.toISOString() ||
+    admitted.retirementDueAt !== retirementDueAt.toISOString()
+  ) {
+    throw new Error("External Beta admission did not retain its exact nonextendable boundaries.");
+  }
+  const active = await getFounderExternalBetaStatusForUser(contract.participantUserId, input.now, {
+    applicationRevision: dependencies.applicationRevision,
+  });
+  if (
+    active.state !== "active" ||
+    active.payment !== "Free, no card, no renewal, and no automatic paid conversion" ||
+    active.availableCapabilities.length !== FOUNDER_EXTERNAL_BETA_CAPABILITIES.length ||
+    !active.withdrawalAvailable ||
+    !active.exportAvailable ||
+    !active.deletionAvailable
+  ) {
+    throw new Error("External Beta visible Compact boundaries were incomplete.");
+  }
+
+  const retirement = await reconcileFounderExternalBetaRetirements({
+    applicationRevision: dependencies.applicationRevision,
+    now: accessExpiresAt,
+    providers: dependencies.providers,
+  });
+  if (retirement.expired !== 1 || retirement.retired !== 1 || retirement.failed !== 0) {
+    throw new Error("External Beta exact-expiry Infrastructure Retirement was not verified.");
+  }
+  const expired = await getFounderExternalBetaStatusForUser(
+    contract.participantUserId,
+    accessExpiresAt,
+    {
+      applicationRevision: dependencies.applicationRevision,
+    },
+  );
+  if (
+    expired.state !== "expired" ||
+    expired.workStoppedAt !== accessExpiresAt.toISOString() ||
+    expired.remainingSeconds !== 0 ||
+    expired.withdrawalAvailable
+  ) {
+    throw new Error("External Beta did not stop work at the exact access boundary.");
+  }
+  const promotion = await assessFounderExternalBetaPromotionEvidenceForCohort({
+    value: null,
+    cohort,
+    applicationRevision: dependencies.applicationRevision,
+    observedAt: accessExpiresAt,
+  });
+  if (
+    promotion.promotionEligible ||
+    promotion.founderAcceptanceEligible ||
+    !promotion.newCohortRequired ||
+    promotion.classification !== "product_hardening"
+  ) {
+    throw new Error("External Beta denied promotion did not require a new invited cohort.");
+  }
+
+  return {
+    action: input.action,
+    status: "passed",
+    observedAt: input.now.toISOString(),
+    providerCalls: dependencies.providers.calls(),
+    cleanup: {
+      resourcesBefore: 1,
+      resourcesAfter: 0,
+      verified: true,
+      observedAt: input.now.toISOString(),
+    },
+    externalBetaCohort: {
+      invitationExpiresAt: invitation.expiresAt,
+      accessExpiresAt: admitted.accessExpiresAt,
+      retirementDueAt: admitted.retirementDueAt,
+      copiedAccountDenied: true,
+      wrongWorkspaceDenied: true,
+      payment: active.payment,
+      exactCapabilities: active.availableCapabilities,
+      promotionEligible: false,
+      founderAcceptanceEligible: false,
+      newCohortRequired: true,
+      retirementCompleted: true,
+    },
+  };
 }
 
 function contractExternalBetaQualifications(input: {

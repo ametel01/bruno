@@ -301,7 +301,7 @@ export function FounderPrivacyCenter({
             </p>
           </div>
           <div>
-            <h3>Delete retained data</h3>
+            <h3 id="bruno-data-deletion">Delete retained data</h3>
             <p>{privacy.deletionBoundary}</p>
             <button
               className={styles.danger}
@@ -345,10 +345,10 @@ export function FounderPrivacyCenter({
         </div>
       </section>
 
-      <section className={styles.section} aria-labelledby="export-title">
+      <section className={styles.section} aria-labelledby="founder-data-export">
         <div className={styles.sectionHeading}>
           <p className={styles.kicker}>Founder Data Export</p>
-          <h2 id="export-title">Take your retained Bruno records with you</h2>
+          <h2 id="founder-data-export">Take your retained Bruno records with you</h2>
         </div>
         <div className={styles.dataControls}>
           <div>

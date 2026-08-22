@@ -63,6 +63,7 @@ export const founderRecoveryArchiveStatusEnum = pgEnum("founder_recovery_archive
 ]);
 export const founderProductContractScenarioEnum = pgEnum("founder_product_contract_scenario", [
   "release_stage_admission",
+  "external_beta_cohort_lifecycle",
   "product_entitlement_lifecycle",
   "recovery_archive_lifecycle",
   "infrastructure_retirement",
@@ -870,6 +871,7 @@ export const founderReleaseDecisions = pgTable(
     calendarQualificationExpiresAt: timestamp("calendar_qualification_expires_at", {
       withTimezone: true,
     }),
+    externalBetaCohort: text("external_beta_cohort"),
     affectedCapabilities: jsonb("affected_capabilities")
       .$type<readonly string[]>()
       .notNull()
@@ -910,6 +912,14 @@ export const founderReleaseDecisions = pgTable(
     check(
       "founder_release_decisions_trusted_preview_qualification_expiry_check",
       sql`${table.stage} <> 'trusted_preview' OR ${table.outcome} NOT IN ('enter', 'resume') OR (${table.openAiQualificationExpiresAt} IS NOT NULL AND ${table.calendarQualificationExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "founder_release_decisions_external_beta_cohort_check",
+      sql`(${table.stage} = 'external_beta' AND ${table.externalBetaCohort} ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$') OR (${table.stage} <> 'external_beta' AND ${table.externalBetaCohort} IS NULL)`,
+    ),
+    check(
+      "founder_release_decisions_external_beta_manifest_check",
+      sql`${table.stage} <> 'external_beta' OR (jsonb_array_length(${table.capabilityManifest}) = 5 AND ${table.capabilityManifest} @> '["openai", "anthropic", "calendar_reading", "gmail_reading", "gmail_sending"]'::jsonb)`,
     ),
     index("founder_release_decisions_user_stage_idx").on(
       table.userId,
@@ -1034,6 +1044,85 @@ export const founderTrustedPreviewInvitations = pgTable(
       table.cohortOwnerUserId,
       table.status,
       table.cohortSlot,
+    ),
+  ],
+);
+
+export const founderExternalBetaInvitations = pgTable(
+  "founder_external_beta_invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cohortOwnerUserId: uuid("cohort_owner_user_id")
+      .notNull()
+      .references(() => users.id),
+    stageDecisionId: uuid("stage_decision_id")
+      .notNull()
+      .references(() => founderReleaseDecisions.id),
+    cohort: text("cohort").notNull(),
+    cohortSlot: integer("cohort_slot").notNull(),
+    invitationDigest: text("invitation_digest").notNull(),
+    invitedClerkSubjectDigest: text("invited_clerk_subject_digest").notNull(),
+    namedFounderDigest: text("named_founder_digest").notNull(),
+    workspaceDigest: text("workspace_digest").notNull(),
+    independenceEvidenceDigest: text("independence_evidence_digest").notNull(),
+    status: text("status").notNull().default("invited"),
+    participantUserId: uuid("participant_user_id").references(() => users.id),
+    participantOperatorId: uuid("participant_operator_id").references(() => operators.id),
+    admissionDecisionId: uuid("admission_decision_id").references(() => founderReleaseDecisions.id),
+    betaCompactDigest: text("beta_compact_digest"),
+    invitedAt: timestamp("invited_at", { withTimezone: true }).notNull(),
+    invitationExpiresAt: timestamp("invitation_expires_at", { withTimezone: true }).notNull(),
+    admittedAt: timestamp("admitted_at", { withTimezone: true }),
+    accessExpiresAt: timestamp("access_expires_at", { withTimezone: true }),
+    retirementDueAt: timestamp("retirement_due_at", { withTimezone: true }),
+    expiredAt: timestamp("expired_at", { withTimezone: true }),
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+    paymentMethodCollected: boolean("payment_method_collected").notNull().default(false),
+    automaticPaidConversion: boolean("automatic_paid_conversion").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "founder_external_beta_invitations_cohort_check",
+      sql`${table.cohort} ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' AND ${table.cohortSlot} BETWEEN 1 AND 10`,
+    ),
+    check(
+      "founder_external_beta_invitations_digest_check",
+      sql`${table.invitationDigest} ~ '^sha256:[a-f0-9]{64}$' AND ${table.invitedClerkSubjectDigest} ~ '^sha256:[a-f0-9]{64}$' AND ${table.namedFounderDigest} ~ '^sha256:[a-f0-9]{64}$' AND ${table.workspaceDigest} ~ '^sha256:[a-f0-9]{64}$' AND ${table.independenceEvidenceDigest} ~ '^sha256:[a-f0-9]{64}$' AND (${table.betaCompactDigest} IS NULL OR ${table.betaCompactDigest} ~ '^sha256:[a-f0-9]{64}$')`,
+    ),
+    check(
+      "founder_external_beta_invitations_exact_windows_check",
+      sql`${table.invitationExpiresAt} = ${table.invitedAt} + interval '7 days' AND (${table.admittedAt} IS NULL OR (${table.accessExpiresAt} = ${table.admittedAt} + interval '14 days' AND ${table.retirementDueAt} = ${table.accessExpiresAt} + interval '1 hour'))`,
+    ),
+    check(
+      "founder_external_beta_invitations_free_nonconverting_check",
+      sql`${table.paymentMethodCollected} = false AND ${table.automaticPaidConversion} = false`,
+    ),
+    check(
+      "founder_external_beta_invitations_state_check",
+      sql`(${table.status} = 'invited' AND ${table.participantUserId} IS NULL AND ${table.participantOperatorId} IS NULL AND ${table.admissionDecisionId} IS NULL AND ${table.betaCompactDigest} IS NULL AND ${table.admittedAt} IS NULL AND ${table.accessExpiresAt} IS NULL AND ${table.retirementDueAt} IS NULL AND ${table.expiredAt} IS NULL AND ${table.withdrawnAt} IS NULL) OR (${table.status} = 'admitted' AND ${table.participantUserId} IS NOT NULL AND ${table.participantOperatorId} IS NOT NULL AND ${table.admissionDecisionId} IS NOT NULL AND ${table.betaCompactDigest} IS NOT NULL AND ${table.admittedAt} IS NOT NULL AND ${table.accessExpiresAt} IS NOT NULL AND ${table.retirementDueAt} IS NOT NULL AND ${table.expiredAt} IS NULL AND ${table.withdrawnAt} IS NULL) OR (${table.status} = 'expired' AND ${table.participantUserId} IS NOT NULL AND ${table.participantOperatorId} IS NOT NULL AND ${table.admissionDecisionId} IS NOT NULL AND ${table.betaCompactDigest} IS NOT NULL AND ${table.admittedAt} IS NOT NULL AND ${table.accessExpiresAt} IS NOT NULL AND ${table.retirementDueAt} IS NOT NULL AND ${table.expiredAt} = ${table.accessExpiresAt} AND ${table.withdrawnAt} IS NULL) OR (${table.status} = 'withdrawn' AND ${table.participantUserId} IS NOT NULL AND ${table.participantOperatorId} IS NOT NULL AND ${table.admissionDecisionId} IS NOT NULL AND ${table.betaCompactDigest} IS NOT NULL AND ${table.admittedAt} IS NOT NULL AND ${table.accessExpiresAt} IS NOT NULL AND ${table.retirementDueAt} IS NOT NULL AND ${table.expiredAt} IS NULL AND ${table.withdrawnAt} IS NOT NULL)`,
+    ),
+    uniqueIndex("founder_external_beta_invitations_slot_idx").on(
+      table.stageDecisionId,
+      table.cohortSlot,
+    ),
+    uniqueIndex("founder_external_beta_invitations_digest_idx").on(table.invitationDigest),
+    uniqueIndex("founder_external_beta_invitations_clerk_subject_idx").on(
+      table.invitedClerkSubjectDigest,
+    ),
+    uniqueIndex("founder_external_beta_invitations_workspace_idx").on(table.workspaceDigest),
+    uniqueIndex("founder_external_beta_invitations_participant_idx").on(table.participantUserId),
+    uniqueIndex("founder_external_beta_invitations_operator_idx").on(table.participantOperatorId),
+    index("founder_external_beta_invitations_cohort_status_idx").on(
+      table.cohort,
+      table.status,
+      table.cohortSlot,
+    ),
+    index("founder_external_beta_invitations_expiry_idx").on(
+      table.status,
+      table.accessExpiresAt,
+      table.retirementDueAt,
     ),
   ],
 );

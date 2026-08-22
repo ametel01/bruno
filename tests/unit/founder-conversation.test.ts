@@ -216,7 +216,7 @@ describe("Founder Conversation application seam", () => {
         requestId: "request-held",
         now: () => now,
         requireOwnerPreviewAccess: async (_tx, input) => {
-          expect(input.requiredCapabilities).toEqual(["openai"]);
+          expect(input.requiredCapabilities).toBe("ai_provider");
           throw new FounderReleaseStageAccessError();
         },
         adapter: {

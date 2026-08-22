@@ -267,7 +267,7 @@ describe("Founder Relationship Records", () => {
     ).rejects.toMatchObject({ code: "relationship_not_found", status: 404 });
   });
 
-  it("checks source capability inside the write transaction and forbids Mail evidence", async () => {
+  it("checks Gmail capability inside the Mail-evidence write transaction", async () => {
     const owner = await ownerIds(connection, OWNER_ID);
     const competingConnection = createDatabaseConnection();
     const requireReleaseStageAccess = vi.fn(async (_tx, input) => {
@@ -275,7 +275,10 @@ describe("Founder Relationship Records", () => {
         sql`select pg_try_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${OWNER_ID}`}, 0)) as acquired`,
       );
       expect(rows[0]?.acquired).toBe(false);
-      if (input.requiredCapabilities === "forbidden") {
+      if (
+        Array.isArray(input.requiredCapabilities) &&
+        input.requiredCapabilities.includes("gmail_reading")
+      ) {
         throw new FounderReleaseStageAccessError();
       }
     });
@@ -297,7 +300,7 @@ describe("Founder Relationship Records", () => {
       expect.objectContaining({
         userId: OWNER_ID,
         applicationRevision: "a".repeat(40),
-        requiredCapabilities: "forbidden",
+        requiredCapabilities: ["gmail_reading"],
       }),
     );
     await expect(connection.db.select().from(operatorRelationshipEvidence)).resolves.toEqual([]);

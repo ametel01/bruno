@@ -1,5 +1,10 @@
 import "server-only";
 
+import {
+  FOUNDER_EXTERNAL_BETA_CAPABILITIES,
+  type FounderExternalBetaCapability,
+  founderExternalBetaCapabilityLabel,
+} from "@/src/shared/founder-external-beta";
 import { evaluateFounderAnthropicRelease } from "@/src/server/operators/founder-anthropic-release";
 import { evaluateFounderGoogleMailSendingRelease } from "@/src/server/operators/founder-google-mail-sending-release";
 import {
@@ -11,15 +16,11 @@ import { evaluateFounderOpenAiRelease } from "@/src/server/operators/founder-ope
 export const FOUNDER_EXTERNAL_BETA_QUALIFICATIONS_SCHEMA = "bruno.external-beta-qualifications.v1";
 export const FOUNDER_EXTERNAL_BETA_QUALIFICATION_SCHEMA = "bruno.preview-qualification.v1";
 export const FOUNDER_EXTERNAL_BETA_QUALIFICATION_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1_000;
-export const FOUNDER_EXTERNAL_BETA_CAPABILITIES = [
-  "openai",
-  "anthropic",
-  "calendar_reading",
-  "gmail_reading",
-  "gmail_sending",
-] as const;
-
-export type FounderExternalBetaCapability = (typeof FOUNDER_EXTERNAL_BETA_CAPABILITIES)[number];
+export {
+  FOUNDER_EXTERNAL_BETA_CAPABILITIES,
+  type FounderExternalBetaCapability,
+  founderExternalBetaCapabilityLabel,
+};
 export type FounderExternalBetaQualification = {
   schemaVersion: typeof FOUNDER_EXTERNAL_BETA_QUALIFICATION_SCHEMA;
   outcome: "passed";
@@ -222,20 +223,8 @@ function requireReleasedEvidenceDigest(
   return decision.evidence.evidenceDigest;
 }
 
-export function founderExternalBetaCapabilityLabel(
-  capability: FounderExternalBetaCapability,
-): string {
-  return capabilityLabel(capability);
-}
-
 function capabilityLabel(capability: FounderExternalBetaCapability): string {
-  return {
-    openai: "OpenAI",
-    anthropic: "Anthropic",
-    calendar_reading: "Calendar reading",
-    gmail_reading: "Gmail reading",
-    gmail_sending: "one-to-one Gmail sending",
-  }[capability];
+  return founderExternalBetaCapabilityLabel(capability);
 }
 
 function isCohort(value: string): boolean {

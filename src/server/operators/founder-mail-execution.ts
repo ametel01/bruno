@@ -142,7 +142,7 @@ export async function executeFounderApprovedGmailActionForUser(
         userId,
         now: preflightAt,
         applicationRevision: readFounderApplicationRevision({ env: dependencies.env }) ?? "",
-        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
       });
       const [action] = await tx
         .select()
@@ -275,7 +275,7 @@ export async function executeFounderApprovedGmailActionForUser(
         userId,
         now: checkedAt,
         applicationRevision: readFounderApplicationRevision({ env: dependencies.env }) ?? "",
-        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
       });
       await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id, checkedAt);
       const check = await recheckFounderProposedActionForExecution(
@@ -661,7 +661,7 @@ async function assertFounderMailSubmissionStillReady(
       userId,
       now: checkedAt,
       applicationRevision: readFounderApplicationRevision({ env: environment }) ?? "",
-      requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+      requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
     });
     const [action] = await tx
       .select()

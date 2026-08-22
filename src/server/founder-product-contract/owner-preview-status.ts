@@ -3,7 +3,7 @@ import type { FounderOwnerPreviewAccess } from "./release-stage-access";
 type FounderPreviewStatusBase = {
   state: "waiting" | "active" | "limited";
   availableCapabilities: readonly string[];
-  evidenceClassification: "Learning Round";
+  evidenceClassification: "Learning Round" | "Product hardening";
   automaticPromotion: false;
 };
 
@@ -17,6 +17,11 @@ export type FounderOwnerPreviewStatus =
       supportBoundary: "Attended onboarding and observation";
       cohortSlot?: 1 | 2 | 3;
       founderAcceptanceEligible: false;
+    })
+  | (FounderPreviewStatusBase & {
+      stage: "External Beta";
+      supportBoundary: "Self-serve with reactive support";
+      founderAcceptanceEligible: false;
     });
 
 export function projectFounderOwnerPreviewStatus(
@@ -24,8 +29,26 @@ export function projectFounderOwnerPreviewStatus(
 ): FounderOwnerPreviewStatus {
   const availableCapabilities = [
     ...(access.availableCapabilities.includes("openai") ? ["OpenAI"] : []),
+    ...(access.availableCapabilities.includes("anthropic") ? ["Anthropic"] : []),
     ...(access.availableCapabilities.includes("calendar_reading") ? ["Calendar reading"] : []),
+    ...(access.availableCapabilities.includes("gmail_reading") ? ["Gmail reading"] : []),
+    ...(access.availableCapabilities.includes("gmail_sending") ? ["one-to-one Gmail sending"] : []),
   ];
+  if (access.stage === "external_beta") {
+    return {
+      stage: "External Beta",
+      state: !access.admitted
+        ? "waiting"
+        : availableCapabilities.length === 5
+          ? "active"
+          : "limited",
+      availableCapabilities,
+      supportBoundary: "Self-serve with reactive support",
+      evidenceClassification: "Product hardening",
+      automaticPromotion: false,
+      founderAcceptanceEligible: false,
+    };
+  }
   if (access.stage === "trusted_preview") {
     return {
       stage: "Trusted Preview",

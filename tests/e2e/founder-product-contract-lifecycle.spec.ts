@@ -11,6 +11,7 @@ import {
   assertPersistedFounderLifecycleAuthority,
   createFounderProductContractFixture,
   deleteFounderProductContractFixture,
+  prepareFounderExternalBetaContractFixture,
   readFounderScenarioExecutions,
   signedFounderCommerceEvent,
   withPinnedFounderDevelopmentUser,
@@ -52,11 +53,19 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
 
         for (const id of [
           "release_stage_admission",
+          "external_beta_cohort_lifecycle",
           "product_entitlement_lifecycle",
           "recovery_archive_lifecycle",
           "infrastructure_retirement",
         ] as const) {
           await runFounderProductContractScenario(harness, id, async ({ application, clock }) => {
+            if (id === "external_beta_cohort_lifecycle") {
+              await prepareFounderExternalBetaContractFixture(fixture, {
+                runId,
+                applicationRevision: sourceRevision,
+                now: clock.now(),
+              });
+            }
             if (id === "product_entitlement_lifecycle") {
               admittedCommerceEvent ??= signedFounderCommerceEvent(
                 runId,
@@ -89,10 +98,20 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                       providerFailure: "archive.create",
                     }
                   : {}),
+                ...(id === "external_beta_cohort_lifecycle"
+                  ? {
+                      externalBetaContract: {
+                        cohortOwnerUserId: fixture.externalBetaOwnerUserId,
+                        participantUserId: fixture.externalBetaParticipantUserId,
+                        invitedClerkSubject: `clerk:${fixture.externalBetaParticipantUserId}`,
+                      },
+                    }
+                  : {}),
               },
             });
-            expect(response.status).toBe(200);
-            const body = (await response.json()) as {
+            const responseBody = await response.json();
+            expect(response.status, JSON.stringify(responseBody)).toBe(200);
+            const body = responseBody as {
               outcome: {
                 providerCalls: string[];
                 externalBetaManifest?: {
@@ -101,6 +120,19 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                   providerChoice: string;
                   capacityBoundary: string;
                   safeWorkCheckpointsPreserved: boolean;
+                };
+                externalBetaCohort?: {
+                  invitationExpiresAt: string;
+                  accessExpiresAt: string;
+                  retirementDueAt: string;
+                  copiedAccountDenied: boolean;
+                  wrongWorkspaceDenied: boolean;
+                  payment: string;
+                  exactCapabilities: string[];
+                  promotionEligible: boolean;
+                  founderAcceptanceEligible: boolean;
+                  newCohortRequired: boolean;
+                  retirementCompleted: boolean;
                 };
                 cleanup: {
                   resourcesBefore: number;
@@ -188,6 +220,43 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                 },
               });
             }
+            if (id === "external_beta_cohort_lifecycle") {
+              expect(body.outcome.providerCalls).toEqual(
+                expect.arrayContaining([
+                  "archive.create",
+                  "archive.restore",
+                  "digitalOcean.observe_owned_resources",
+                  "digitalOcean.delete_firewall",
+                  "digitalOcean.delete_droplet",
+                  "digitalOcean.observe_owned_resources_absent",
+                ]),
+              );
+              expect(body.outcome.externalBetaCohort).toEqual({
+                invitationExpiresAt: new Date(
+                  clock.now().valueOf() + 7 * 24 * 60 * 60 * 1_000,
+                ).toISOString(),
+                accessExpiresAt: new Date(
+                  clock.now().valueOf() + 14 * 24 * 60 * 60 * 1_000,
+                ).toISOString(),
+                retirementDueAt: new Date(
+                  clock.now().valueOf() + 14 * 24 * 60 * 60 * 1_000 + 60 * 60 * 1_000,
+                ).toISOString(),
+                copiedAccountDenied: true,
+                wrongWorkspaceDenied: true,
+                payment: "Free, no card, no renewal, and no automatic paid conversion",
+                exactCapabilities: [
+                  "openai",
+                  "anthropic",
+                  "calendar_reading",
+                  "gmail_reading",
+                  "gmail_sending",
+                ],
+                promotionEligible: false,
+                founderAcceptanceEligible: false,
+                newCohortRequired: true,
+                retirementCompleted: true,
+              });
+            }
             clock.advance(id === "release_stage_admission" ? 3 : 1);
             return { status: "passed", ...body.outcome.cleanup };
           });
@@ -209,6 +278,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
   }
 
   expect(await readFounderScenarioExecutions(runId, fixture.userId)).toEqual([
+    expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
