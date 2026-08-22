@@ -437,6 +437,7 @@ async function prepareInfrastructureRetirement(
         userId: input.userId,
         operatorId,
         now: input.now,
+        pendingIntentPolicy: "supersede_for_retirement",
       });
       archiveNeedsExecution = true;
       await tx.insert(founderInfrastructureRetirements).values({

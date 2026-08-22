@@ -175,6 +175,60 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     ]);
   });
 
+  it("lets Infrastructure Retirement supersede an in-flight daily archive", async () => {
+    let releaseDailyUpload: (() => void) | undefined;
+    let markDailyUploadStarted: (() => void) | undefined;
+    const dailyUploadStarted = new Promise<void>((resolve) => {
+      markDailyUploadStarted = resolve;
+    });
+    const dailyUploadReleased = new Promise<void>((resolve) => {
+      releaseDailyUpload = resolve;
+    });
+    const dailyArchive = createDurableRecoveryArchive(
+      { action: "release_stage_admission", userId: USER_ID, now: START },
+      {
+        createRecoveryArchive: async (input) => {
+          markDailyUploadStarted?.();
+          await dailyUploadReleased;
+          return provider.createRecoveryArchive(input);
+        },
+      },
+      connection,
+    );
+    await dailyUploadStarted;
+
+    const retirementArchiveId = await connection.db.transaction((tx) =>
+      persistFounderRecoveryArchiveIntentInTransaction(tx, {
+        userId: USER_ID,
+        operatorId: OPERATOR_ID,
+        now: new Date(START.valueOf() + 1_000),
+        pendingIntentPolicy: "supersede_for_retirement",
+      }),
+    );
+    releaseDailyUpload?.();
+
+    await expect(dailyArchive).rejects.toThrow("Recovery Archive intent is no longer pending.");
+    const archives = await connection.db
+      .select()
+      .from(founderRecoveryArchives)
+      .orderBy(founderRecoveryArchives.observedAt);
+    expect(archives).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        failureCode: "archive_create_superseded_by_retirement",
+        storageObjectKey: expect.stringMatching(/\.age$/),
+        recoveryCredentialObjectKey: expect.stringMatching(/\.key$/),
+      }),
+      expect.objectContaining({
+        id: retirementArchiveId,
+        status: "pending",
+        failureCode: null,
+        storageObjectKey: `founder-recovery/${USER_ID}/${retirementArchiveId}.age`,
+        recoveryCredentialObjectKey: `founder-recovery/${USER_ID}/${retirementArchiveId}.key`,
+      }),
+    ]);
+  });
+
   it("persists deterministic deletion identities with every new archive intent", async () => {
     const archiveId = await connection.db.transaction((tx) =>
       persistFounderRecoveryArchiveIntentInTransaction(tx, {

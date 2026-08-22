@@ -143,34 +143,51 @@ export async function createDurableRecoveryArchive(
 
 export async function persistFounderRecoveryArchiveIntentInTransaction(
   tx: RecoveryArchiveTransaction,
-  input: { userId: string; operatorId: string; now: Date },
+  input: {
+    userId: string;
+    operatorId: string;
+    now: Date;
+    pendingIntentPolicy?: "reject_recent" | "supersede_for_retirement";
+  },
 ): Promise<string> {
   const archiveWindowStart = new Date(input.now.valueOf() - DAILY_ARCHIVE_WINDOW_MS);
-  const [pending] = await tx
-    .select({ id: founderRecoveryArchives.id })
-    .from(founderRecoveryArchives)
-    .where(
-      and(
-        eq(founderRecoveryArchives.userId, input.userId),
-        eq(founderRecoveryArchives.status, "pending"),
-        gt(founderRecoveryArchives.observedAt, archiveWindowStart),
-      ),
-    )
-    .limit(1)
-    .for("update");
-  if (pending) throw new Error("Recovery Archive creation is already in progress.");
+  if (input.pendingIntentPolicy === "supersede_for_retirement") {
+    await tx
+      .update(founderRecoveryArchives)
+      .set({ status: "failed", failureCode: "archive_create_superseded_by_retirement" })
+      .where(
+        and(
+          eq(founderRecoveryArchives.userId, input.userId),
+          eq(founderRecoveryArchives.status, "pending"),
+        ),
+      );
+  } else {
+    const [pending] = await tx
+      .select({ id: founderRecoveryArchives.id })
+      .from(founderRecoveryArchives)
+      .where(
+        and(
+          eq(founderRecoveryArchives.userId, input.userId),
+          eq(founderRecoveryArchives.status, "pending"),
+          gt(founderRecoveryArchives.observedAt, archiveWindowStart),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    if (pending) throw new Error("Recovery Archive creation is already in progress.");
 
-  await tx
-    .update(founderRecoveryArchives)
-    .set({ status: "failed", failureCode: "archive_create_abandoned" })
-    .where(
-      and(
-        eq(founderRecoveryArchives.userId, input.userId),
-        eq(founderRecoveryArchives.status, "pending"),
-        isNotNull(founderRecoveryArchives.storageObjectKey),
-        lte(founderRecoveryArchives.observedAt, archiveWindowStart),
-      ),
-    );
+    await tx
+      .update(founderRecoveryArchives)
+      .set({ status: "failed", failureCode: "archive_create_abandoned" })
+      .where(
+        and(
+          eq(founderRecoveryArchives.userId, input.userId),
+          eq(founderRecoveryArchives.status, "pending"),
+          isNotNull(founderRecoveryArchives.storageObjectKey),
+          lte(founderRecoveryArchives.observedAt, archiveWindowStart),
+        ),
+      );
+  }
 
   const archiveId = randomUUID();
   const objectIdentity = founderRecoveryArchiveObjectIdentity(input.userId, archiveId);
