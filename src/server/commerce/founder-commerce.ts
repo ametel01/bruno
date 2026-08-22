@@ -319,7 +319,9 @@ export async function reconcileFounderCommerceReceipt(input: {
         .where(eq(founderProductEntitlements.userId, receipt.userId))
         .limit(1)
         .for("update");
-      const providerStateUpdatedAt = new Date(subscription.updatedAt);
+      const providerStateUpdatedAt = new Date(
+        Math.max(new Date(subscription.updatedAt).valueOf(), new Date(order.updatedAt).valueOf()),
+      );
       if (
         current?.providerSubscriptionId === subscription.subscriptionId &&
         current.providerStateUpdatedAt >= providerStateUpdatedAt
