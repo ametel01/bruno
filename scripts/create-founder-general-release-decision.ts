@@ -101,21 +101,50 @@ export function parseFounderModeratedSummary(
   ) {
     throw new Error("Moderated Founder summary is invalid.");
   }
-  return value as FounderModeratedSummary;
+  return {
+    schemaVersion: FOUNDER_MODERATED_SUMMARY_SCHEMA,
+    evidenceDigest: value.evidenceDigest as `sha256:${string}`,
+    observedAt: value.observedAt as string,
+    participants: {
+      total: participants.total as number,
+      desktopFirst: participants.desktopFirst as number,
+      phoneFirst: participants.phoneFirst as number,
+      crossDeviceDayTwo: participants.crossDeviceDayTwo as number,
+      independentActivationLeadRecovery: participants.independentActivationLeadRecovery as number,
+      firstBriefWithin15MinutesActiveFounderTime:
+        participants.firstBriefWithin15MinutesActiveFounderTime as number,
+      fullComprehension: participants.fullComprehension as number,
+    },
+    criticalFailures: {
+      permissionOrSafety: criticalFailures.permissionOrSafety as number,
+      unintendedExternalEffects: criticalFailures.unintendedExternalEffects as number,
+      unsafeMisunderstandings: criticalFailures.unsafeMisunderstandings as number,
+      technicalConfigurationRequirements:
+        criticalFailures.technicalConfigurationRequirements as number,
+      founderCredentialHandling: criticalFailures.founderCredentialHandling as number,
+    },
+    retention: {
+      releaseEvidenceDays: 90,
+      recordingDays: 30,
+      deidentifiedMetricMonths: 24,
+      controlsApplied: true,
+    },
+  };
 }
 
 export function parseFounderProviderDecisionSummary(
   raw: string | undefined,
 ): FounderProviderDecisionSummary | null {
   if (!raw?.trim()) return null;
-  const value = parseRecord(raw, "Founder provider decision summary");
+  const value = tryParseRecord(raw);
   if (
+    !value ||
     value.schemaVersion !== FOUNDER_PROVIDER_DECISION_SUMMARY_SCHEMA ||
     !isGitRevision(value.sourceRevision) ||
     !isEvidenceDigest(value.evidenceDigest) ||
     !isRecord(value.providers)
   ) {
-    throw new Error("Founder provider decision summary is invalid.");
+    return null;
   }
   for (const provider of [
     "openai",
@@ -133,7 +162,7 @@ export function parseFounderProviderDecisionSummary(
       !isExactInstant(decision.expiresAt) ||
       !isEvidenceDigest(decision.evidenceDigest)
     ) {
-      throw new Error("Founder provider decision summary is invalid.");
+      return null;
     }
   }
   const providers = value.providers;
@@ -290,13 +319,19 @@ export function buildFounderInitialGeneralReleaseDecision(input: {
 }
 
 function parseRecord(raw: string, label: string): Record<string, unknown> {
+  const value = tryParseRecord(raw);
+  if (value) return value;
+  throw new Error(`${label} is invalid.`);
+}
+
+function tryParseRecord(raw: string): Record<string, unknown> | null {
   try {
     const value = JSON.parse(raw) as unknown;
-    if (isRecord(value)) return value;
+    return isRecord(value) ? value : null;
   } catch {
-    // The stable error below deliberately excludes the supplied evidence.
+    // A stable null deliberately excludes the supplied evidence.
+    return null;
   }
-  throw new Error(`${label} is invalid.`);
 }
 
 function sanitizeProviderDecision(value: unknown): ProviderDecision {

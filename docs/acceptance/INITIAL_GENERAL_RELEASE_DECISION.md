@@ -36,7 +36,8 @@ The exact-release workflow now emits
 Each provider record carries only its released outcome, source revision, qualification and expiry
 instants, and sanitized evidence digest. Hidden, missing, malformed, expired, stale, future-dated,
 or revision-mismatched evidence denies the decision. No capability may borrow another capability's
-digest, including OpenAI and Anthropic. A malformed summary fails without echoing supplied content.
+digest, including OpenAI and Anthropic. A missing or malformed provider summary produces a denied
+artifact without echoing supplied content.
 
 Releasing both AI providers does not require a Founder to connect both. After release, Provider
 Routing may use OpenAI only, Anthropic only, or both according to the Ready accounts that Founder
