@@ -9,6 +9,7 @@ import {
   operatorRuntimes,
   operators,
 } from "@/src/server/db/schema";
+import { readFounderApplicationRevision } from "./application-revision";
 import type { FounderProductContractTransaction } from "./operator-authority";
 import {
   FOUNDER_OWNER_PREVIEW_CAPABILITIES,
@@ -58,7 +59,7 @@ export async function getFounderOwnerPreviewAccessForUser(
     return await getFounderOwnerPreviewAccessInTransaction(connection.db, {
       userId,
       now,
-      applicationRevision: resolveApplicationRevision(dependencies),
+      applicationRevision: readFounderApplicationRevision(dependencies) ?? "",
     });
   } finally {
     if (ownsConnection) await connection.close();
@@ -83,7 +84,7 @@ export async function requireFounderOwnerPreviewAccessForUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
-    const applicationRevision = resolveApplicationRevision(dependencies);
+    const applicationRevision = readFounderApplicationRevision(dependencies) ?? "";
     const access = await connection.db.transaction(async (tx) => {
       await reconcileFounderOwnerPreviewQualificationExpiryInTransaction(tx, {
         userId,
@@ -257,18 +258,6 @@ function qualificationIsCurrent(
       ? decision.openAiQualificationExpiresAt
       : decision.calendarQualificationExpiresAt;
   return expiresAt !== null && expiresAt > now;
-}
-
-function resolveApplicationRevision(dependencies: {
-  applicationRevision?: string;
-  env?: Record<string, string | undefined>;
-}): string {
-  return (
-    dependencies.applicationRevision ??
-    dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
-    process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
-    ""
-  );
 }
 
 function requirementsAvailable(

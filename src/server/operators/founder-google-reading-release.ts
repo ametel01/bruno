@@ -1,6 +1,7 @@
 import "server-only";
 
 import { timingSafeEqual } from "node:crypto";
+import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 
 export const FOUNDER_GOOGLE_CONNECTED_ACCEPTANCE_SCHEMA =
   "bruno.founder-google-connected-acceptance.v1";
@@ -100,8 +101,8 @@ function evaluateRelease(
   }
   if (!isRecord(value)) return { released: false, reason: "connected_acceptance_invalid" };
 
-  const revision = environment.VERCEL_GIT_COMMIT_SHA?.trim();
-  if (!revision || !isGitRevision(revision)) {
+  const revision = readFounderApplicationRevision({ env: environment });
+  if (!revision) {
     return { released: false, reason: "operator_release_identity_missing" };
   }
   if (
@@ -163,10 +164,6 @@ function allRequiredGatesPassed(value: unknown, capability: GoogleReadingCapabil
 
 function isEvidenceDigest(value: unknown): value is `sha256:${string}` {
   return typeof value === "string" && /^sha256:[a-f0-9]{64}$/.test(value);
-}
-
-function isGitRevision(value: unknown): value is string {
-  return typeof value === "string" && /^[a-f0-9]{40}$/.test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

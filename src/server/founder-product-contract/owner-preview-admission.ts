@@ -6,6 +6,7 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import { founderRecoveryArchives, founderReleaseDecisions, users } from "@/src/server/db/schema";
 import { evaluateFounderGoogleCalendarRelease } from "@/src/server/operators/founder-google-reading-release";
 import { evaluateFounderOpenAiRelease } from "@/src/server/operators/founder-openai-release";
+import { requireFounderApplicationRevision } from "./application-revision";
 import { founderProductContractDigest } from "./digest";
 import { createEncryptedFounderRecoveryArchiveProvider } from "./encrypted-recovery-archive-provider";
 import {
@@ -51,11 +52,10 @@ export async function admitFounderOperatorToOwnerPreview(
   const clock = dependencies.now ?? (() => new Date());
   const now = clock();
   const environment = dependencies.env ?? process.env;
-  const applicationRevision =
-    dependencies.applicationRevision ?? environment.VERCEL_GIT_COMMIT_SHA?.trim() ?? "";
-  if (!/^[a-f0-9]{40}$/.test(applicationRevision)) {
-    throw new Error("Owner Preview application revision is unavailable.");
-  }
+  const applicationRevision = requireFounderApplicationRevision(
+    { applicationRevision: dependencies.applicationRevision, env: environment },
+    "Owner Preview application revision is unavailable.",
+  );
   const openAIQualification = evaluateFounderOpenAiRelease(environment, now);
   if (!openAIQualification.released) {
     throw new Error("Owner Preview OpenAI qualification is unavailable.");

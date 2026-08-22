@@ -1,9 +1,12 @@
 import { FounderOperatorPreparation } from "@/app/operator/_components/founder-operator-preparation";
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
-import { requireExecutingFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
+import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
-import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
+import {
+  getFounderRecoveryArchiveStatusForUser,
+  unavailableFounderRecoveryArchiveStatus,
+} from "@/src/server/founder-product-contract/recovery-archive";
 import {
   getFounderOwnerPreviewAccessForUser,
   hasFounderOwnerPreviewCapabilities,
@@ -41,12 +44,14 @@ export default async function FounderOperatorPage() {
   }
 
   const operator = await getFounderOperatorForUser(applicationUser.userId);
-  const applicationRevision = requireExecutingFounderApplicationRevision();
+  const applicationRevision = readFounderApplicationRevision();
   const [onboarding, recoveryArchive, ownerPreviewAccess] = await Promise.all([
     operator ? getFounderOnboardingForUser(applicationUser.userId) : Promise.resolve(undefined),
-    getFounderRecoveryArchiveStatusForUser(applicationUser.userId, new Date(), {
-      applicationRevision,
-    }),
+    applicationRevision
+      ? getFounderRecoveryArchiveStatusForUser(applicationUser.userId, new Date(), {
+          applicationRevision,
+        })
+      : Promise.resolve(unavailableFounderRecoveryArchiveStatus()),
     requiresFounderReleaseStageAuthority(resolveAuthMode(process.env).mode)
       ? getFounderOwnerPreviewAccessForUser(applicationUser.userId, new Date())
       : Promise.resolve({

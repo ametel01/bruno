@@ -1,6 +1,6 @@
 import type { AuthModeDecision } from "@/src/auth/auth-mode";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
-import { readExecutingFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
+import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 import { admitFounderOperatorToOwnerPreview } from "@/src/server/founder-product-contract/owner-preview-admission";
 import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
 import { getFounderRecoveryArchiveStatusForUser } from "@/src/server/founder-product-contract/recovery-archive";
@@ -52,7 +52,7 @@ export async function GET(
     applicationUser.userId,
   );
   const applicationRevision = (
-    dependencies.readApplicationRevision ?? readExecutingFounderApplicationRevision
+    dependencies.readApplicationRevision ?? readFounderApplicationRevision
   )();
   if (!applicationRevision) {
     return Response.json(

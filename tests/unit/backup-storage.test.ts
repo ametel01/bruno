@@ -35,6 +35,7 @@ describe("backup object storage boundary", () => {
       ok: true,
       storageUri: "s3://bruno-backups/agents/agent-1/backup.json",
       byteLength: body.byteLength,
+      versionId: "null",
     });
 
     const downloaded = await storage.download({ key: "agents/agent-1/backup.json" });
@@ -219,6 +220,7 @@ describe("backup object storage boundary", () => {
       ok: true,
       storageUri: "s3://bruno-backups/agents/agent-1/backup.json",
       byteLength: 15,
+      versionId: "null",
     });
 
     const downloaded = await storage.download({ key: "agents/agent-1/backup.json" });
@@ -263,6 +265,34 @@ describe("backup object storage boundary", () => {
     expect(serializedRequests).not.toContain("backup-secret-key");
     expect(JSON.stringify([downloaded])).not.toContain("backup-access-key");
     expect(JSON.stringify([downloaded])).not.toContain("backup-secret-key");
+  });
+
+  it("captures and permanently deletes the exact S3 object version", async () => {
+    const requests: Request[] = [];
+    const versionId = "3/L 4+published=version";
+    const storage = new S3CompatibleBackupObjectStorage(COMPLETE_ENV_CONFIG, {
+      fetchImplementation: async (input) => {
+        const request = input instanceof Request ? input : new Request(input);
+        requests.push(request);
+        return request.method === "PUT"
+          ? new Response(null, { status: 200, headers: { "x-amz-version-id": versionId } })
+          : new Response(null, { status: 204 });
+      },
+    });
+
+    const uploaded = await storage.upload({
+      key: "founder-recovery/user/archive.age",
+      body: new Uint8Array([1]),
+    });
+    expect(uploaded).toMatchObject({ ok: true, versionId });
+    await expect(
+      storage.deleteVersion({ key: "founder-recovery/user/archive.age", versionId }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(requests).toHaveLength(2);
+    const deletionUrl = new URL(requests[1]?.url ?? "");
+    expect(deletionUrl.searchParams.get("versionId")).toBe(versionId);
+    expect(requests[1]?.headers.get("authorization")).toContain("backup-access-key");
   });
 
   it("rejects versioned buckets because object DELETE cannot prove permanent absence", async () => {
@@ -322,6 +352,7 @@ describe("backup object storage boundary", () => {
       storage.upload({ key: "agents/agent-1/backup.json", body: new Uint8Array([1]) }),
       storage.download({ key: "agents/agent-1/backup.json" }),
       storage.delete({ key: "agents/agent-1/backup.json" }),
+      storage.deleteVersion({ key: "agents/agent-1/backup.json", versionId: "version/1" }),
       storage.exists({ key: "agents/agent-1/backup.json" }),
       storage.verifyDeletionSafety(),
     ]);
@@ -331,7 +362,7 @@ describe("backup object storage boundary", () => {
     ]);
 
     expect(result).not.toBe("unbounded");
-    expect(requests).toHaveLength(5);
+    expect(requests).toHaveLength(6);
     expect(requests.every((request) => request.signal.aborted)).toBe(true);
   });
 

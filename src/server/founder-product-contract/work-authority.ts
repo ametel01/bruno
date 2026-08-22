@@ -1,10 +1,11 @@
 import "server-only";
 
-import { createDatabaseConnection } from "@/src/server/db/client";
 import type { DatabaseConnection } from "@/src/server/db/client";
+import { createDatabaseConnection } from "@/src/server/db/client";
+import { readFounderApplicationRevision } from "./application-revision";
 import {
-  lockFounderProductContractLifecycleInTransaction,
   type FounderProductContractTransaction,
+  lockFounderProductContractLifecycleInTransaction,
 } from "./operator-authority";
 import type { FounderOwnerPreviewCapability } from "./preview-qualification";
 import {
@@ -67,11 +68,7 @@ export async function withFounderOwnerPreviewWorkAuthority<T>(
 ): Promise<T> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
-  const applicationRevision =
-    dependencies.applicationRevision ??
-    dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
-    process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
-    "";
+  const applicationRevision = readFounderApplicationRevision(dependencies) ?? "";
 
   try {
     await preflightFounderOwnerPreviewWorkAuthority(

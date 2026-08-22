@@ -1341,6 +1341,8 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         underlyingStorage.download(input),
       delete: (input: Parameters<typeof underlyingStorage.delete>[0]) =>
         underlyingStorage.delete(input),
+      deleteVersion: (input: Parameters<typeof underlyingStorage.deleteVersion>[0]) =>
+        underlyingStorage.deleteVersion(input),
       exists: (input: Parameters<typeof underlyingStorage.exists>[0]) =>
         underlyingStorage.exists(input),
       verifyDeletionSafety: () => underlyingStorage.verifyDeletionSafety(),

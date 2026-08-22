@@ -210,16 +210,30 @@ describe("encrypted Founder Recovery Archive provider", () => {
     ).resolves.toMatchObject({ ok: false });
   });
 
-  it("fails publication when bucket versioning changes during archive upload", async () => {
+  it("permanently removes published object versions when bucket versioning changes", async () => {
     const underlyingStorage = new FakeBackupObjectStorage("founder-recovery-test");
     let safetyChecks = 0;
+    let versionNumber = 0;
+    const retainedVersions = new Map<string, Set<string>>();
     const storage = {
-      upload: (input: Parameters<typeof underlyingStorage.upload>[0]) =>
-        underlyingStorage.upload(input),
+      async upload(input: Parameters<typeof underlyingStorage.upload>[0]) {
+        const result = await underlyingStorage.upload(input);
+        if (!result.ok) return result;
+        versionNumber += 1;
+        const versionId = `version/${versionNumber}+published`;
+        retainedVersions.set(input.key, new Set([versionId]));
+        return { ...result, versionId };
+      },
       download: (input: Parameters<typeof underlyingStorage.download>[0]) =>
         underlyingStorage.download(input),
-      delete: (input: Parameters<typeof underlyingStorage.delete>[0]) =>
-        underlyingStorage.delete(input),
+      async delete(_input: Parameters<typeof underlyingStorage.delete>[0]) {
+        // A key-only DELETE in a versioned bucket creates a marker and retains every object version.
+        return { ok: true } as const;
+      },
+      async deleteVersion(input: { key: string; versionId: string }) {
+        retainedVersions.get(input.key)?.delete(input.versionId);
+        return { ok: true } as const;
+      },
       exists: (input: Parameters<typeof underlyingStorage.exists>[0]) =>
         underlyingStorage.exists(input),
       async verifyDeletionSafety() {
@@ -248,7 +262,10 @@ describe("encrypted Founder Recovery Archive provider", () => {
         state: durableState(),
       }),
     ).rejects.toThrow("cannot prove permanent object deletion");
-    expect(safetyChecks).toBe(2);
+    expect(safetyChecks).toBe(3);
+    expect(
+      [...retainedVersions.values()].reduce((count, versions) => count + versions.size, 0),
+    ).toBe(0);
   });
 
   it("fails deletion when bucket versioning changes during the deletion attempt", async () => {
@@ -261,6 +278,8 @@ describe("encrypted Founder Recovery Archive provider", () => {
         underlyingStorage.download(input),
       delete: (input: Parameters<typeof underlyingStorage.delete>[0]) =>
         underlyingStorage.delete(input),
+      deleteVersion: (input: Parameters<typeof underlyingStorage.deleteVersion>[0]) =>
+        underlyingStorage.deleteVersion(input),
       exists: (input: Parameters<typeof underlyingStorage.exists>[0]) =>
         underlyingStorage.exists(input),
       async verifyDeletionSafety() {

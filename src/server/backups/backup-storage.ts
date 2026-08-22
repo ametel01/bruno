@@ -11,7 +11,7 @@ export type BackupStorageFailure = {
 };
 
 export type BackupStorageUploadResult =
-  | { ok: true; storageUri: string; byteLength: number }
+  | { ok: true; storageUri: string; byteLength: number; versionId: string }
   | BackupStorageFailure;
 
 export type BackupStorageDownloadResult =
@@ -31,6 +31,7 @@ export type BackupObjectStorage = {
 
 export type DeletableBackupObjectStorage = BackupObjectStorage & {
   delete(input: BackupStorageDownloadInput): Promise<BackupStorageDeleteResult>;
+  deleteVersion(input: BackupStorageVersionDeleteInput): Promise<BackupStorageDeleteResult>;
   exists(input: BackupStorageDownloadInput): Promise<BackupStoragePresenceResult>;
   verifyDeletionSafety(): Promise<BackupStorageDeletionSafetyResult>;
 };
@@ -43,6 +44,10 @@ export type BackupStorageUploadInput = {
 
 export type BackupStorageDownloadInput = {
   key: string;
+};
+
+export type BackupStorageVersionDeleteInput = BackupStorageDownloadInput & {
+  versionId: string;
 };
 
 export type S3CompatibleBackupStorageConfig = {
@@ -157,6 +162,7 @@ export class FakeBackupObjectStorage implements DeletableBackupObjectStorage {
       ok: true,
       storageUri: buildBackupStorageUri(this.bucket, keyResult.key),
       byteLength: input.body.byteLength,
+      versionId: "null",
     };
   }
 
@@ -184,6 +190,15 @@ export class FakeBackupObjectStorage implements DeletableBackupObjectStorage {
   async delete(input: BackupStorageDownloadInput): Promise<BackupStorageDeleteResult> {
     const keyResult = validateBackupArtifactKey(input.key);
     if (!keyResult.ok) return backupStorageFailure("delete");
+    this.artifacts.delete(keyResult.key);
+    return { ok: true };
+  }
+
+  async deleteVersion(input: BackupStorageVersionDeleteInput): Promise<BackupStorageDeleteResult> {
+    const keyResult = validateBackupArtifactKey(input.key);
+    if (!keyResult.ok || !isValidBackupObjectVersionId(input.versionId)) {
+      return backupStorageFailure("delete");
+    }
     this.artifacts.delete(keyResult.key);
     return { ok: true };
   }
@@ -232,9 +247,12 @@ export class S3CompatibleBackupObjectStorage implements DeletableBackupObjectSto
     });
 
     try {
-      const response = await this.executeRequest(request, async (value) => value);
+      const response = await this.executeRequest(request, async (value) => ({
+        ok: value.ok,
+        versionId: value.headers.get("x-amz-version-id") ?? "null",
+      }));
 
-      if (!response.ok) {
+      if (!response.ok || !isValidBackupObjectVersionId(response.versionId)) {
         return backupStorageFailure("upload");
       }
 
@@ -242,6 +260,7 @@ export class S3CompatibleBackupObjectStorage implements DeletableBackupObjectSto
         ok: true,
         storageUri: buildBackupStorageUri(this.config.bucket, keyResult.key),
         byteLength: body.byteLength,
+        versionId: response.versionId,
       };
     } catch {
       return backupStorageFailure("upload");
@@ -289,6 +308,28 @@ export class S3CompatibleBackupObjectStorage implements DeletableBackupObjectSto
     try {
       const response = await this.executeRequest(
         this.createSignedRequest({ method: "DELETE", key: keyResult.key, body: new Uint8Array() }),
+        async (value) => value,
+      );
+      return response.ok ? { ok: true } : backupStorageFailure("delete");
+    } catch {
+      return backupStorageFailure("delete");
+    }
+  }
+
+  async deleteVersion(input: BackupStorageVersionDeleteInput): Promise<BackupStorageDeleteResult> {
+    const keyResult = validateBackupArtifactKey(input.key);
+    if (!keyResult.ok || !isValidBackupObjectVersionId(input.versionId)) {
+      return backupStorageFailure("delete");
+    }
+    try {
+      const query = `versionId=${encodeS3QueryValue(input.versionId)}`;
+      const response = await this.executeRequest(
+        this.createSignedRequest({
+          method: "DELETE",
+          key: keyResult.key,
+          query,
+          body: new Uint8Array(),
+        }),
         async (value) => value,
       );
       return response.ok ? { ok: true } : backupStorageFailure("delete");
@@ -519,6 +560,17 @@ function hasControlCharacter(value: string): boolean {
   }
 
   return false;
+}
+
+function isValidBackupObjectVersionId(value: string): boolean {
+  return value.length > 0 && value.length <= 1024 && !hasControlCharacter(value);
+}
+
+function encodeS3QueryValue(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
 }
 
 function isLoopbackHttp(url: URL): boolean {

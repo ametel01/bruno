@@ -15,6 +15,7 @@ import {
   operatorPrimaryCommunicationsSuites,
   operatorProposedActions,
 } from "@/src/server/db/schema";
+import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
   requireFounderOwnerPreviewAccessForUser,
@@ -140,7 +141,7 @@ export async function executeFounderApprovedGmailActionForUser(
       )(tx, {
         userId,
         now: preflightAt,
-        applicationRevision: resolveApplicationRevision(dependencies.env),
+        applicationRevision: readFounderApplicationRevision({ env: dependencies.env }) ?? "",
         requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
       });
       const [action] = await tx
@@ -273,7 +274,7 @@ export async function executeFounderApprovedGmailActionForUser(
       )(tx, {
         userId,
         now: checkedAt,
-        applicationRevision: resolveApplicationRevision(dependencies.env),
+        applicationRevision: readFounderApplicationRevision({ env: dependencies.env }) ?? "",
         requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
       });
       await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id, checkedAt);
@@ -659,7 +660,7 @@ async function assertFounderMailSubmissionStillReady(
     await (requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction)(tx, {
       userId,
       now: checkedAt,
-      applicationRevision: resolveApplicationRevision(environment),
+      applicationRevision: readFounderApplicationRevision({ env: environment }) ?? "",
       requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
     });
     const [action] = await tx
@@ -694,14 +695,6 @@ async function assertFounderMailSubmissionStillReady(
         "The approval changed before submission.",
       );
   });
-}
-
-function resolveApplicationRevision(
-  environment: Record<string, string | undefined> | undefined,
-): string {
-  return (
-    environment?.VERCEL_GIT_COMMIT_SHA?.trim() ?? process.env.VERCEL_GIT_COMMIT_SHA?.trim() ?? ""
-  );
 }
 
 async function finalizeExecution(

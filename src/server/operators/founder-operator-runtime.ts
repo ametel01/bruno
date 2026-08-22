@@ -5,17 +5,6 @@ import { chmod, lstat, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { and, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type * as schema from "@/src/server/db/schema";
-import {
-  getFounderOperatorForUser,
-  type FounderOperatorDto,
-  type FounderOperatorRuntimeDto,
-  type FounderOperatorRuntimeSafetyState,
-  type FounderOperatorRuntimeTransportState,
-  ensureFounderOperatorForUser,
-} from "@/src/server/operators/founder-operator";
-import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { operatorPreparations, operatorRuntimes, operators } from "@/src/server/db/schema";
 import {
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
@@ -24,8 +13,20 @@ import {
   AGENT_LAUNCH_SPEC_VERSION,
   type NativeAgentLaunchSpec,
 } from "@/src/server/agents/agent-launch-spec";
-import { persistFounderOwnerPreviewHoldInTransaction } from "@/src/server/founder-product-contract/release-stage-hold";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
+import { operatorPreparations, operatorRuntimes, operators } from "@/src/server/db/schema";
+import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
+import { persistFounderOwnerPreviewHoldInTransaction } from "@/src/server/founder-product-contract/release-stage-hold";
+import {
+  ensureFounderOperatorForUser,
+  type FounderOperatorDto,
+  type FounderOperatorRuntimeDto,
+  type FounderOperatorRuntimeSafetyState,
+  type FounderOperatorRuntimeTransportState,
+  getFounderOperatorForUser,
+} from "@/src/server/operators/founder-operator";
 
 type OperatorRuntimeTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -263,11 +264,10 @@ export async function prepareFounderOperatorRuntimeForUser(
         .where(eq(operatorPreparations.operatorId, operator.id));
 
       if (!result.ok && updated.configRevision) {
-        const applicationRevision =
-          dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
-          process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
-          "";
-        if (/^[a-f0-9]{40}$/.test(applicationRevision)) {
+        const applicationRevision = readFounderApplicationRevision({
+          env: dependencies.env,
+        });
+        if (applicationRevision) {
           await persistFounderOwnerPreviewHoldInTransaction(tx, {
             userId,
             operatorId: operator.id,

@@ -8,12 +8,12 @@ import {
 } from "@/src/server/backups/backup-storage";
 import {
   DIGITALOCEAN_PROVIDER,
-  FakeDigitalOceanProvider,
+  type DigitalOceanOwnedSetDeleteResult,
   type DigitalOceanOwnedSetExpectation,
+  type DigitalOceanOwnedSetObservation,
   type DigitalOceanOwnedSetProvider,
   type DigitalOceanOwnedSetResult,
-  type DigitalOceanOwnedSetObservation,
-  type DigitalOceanOwnedSetDeleteResult,
+  FakeDigitalOceanProvider,
 } from "@/src/server/runners/digitalocean-provider";
 import { digitalOceanRunnerFirewallName } from "@/src/server/runners/runner-provisioning";
 import { EncryptedFounderRecoveryArchiveProvider } from "./encrypted-recovery-archive-provider";
@@ -131,6 +131,7 @@ function corruptingRecoveryArchiveStorage(
     },
     download: (input) => storage.download(input),
     delete: (input) => storage.delete(input),
+    deleteVersion: (input) => storage.deleteVersion(input),
     exists: (input) => storage.exists(input),
     verifyDeletionSafety: () => storage.verifyDeletionSafety(),
   };

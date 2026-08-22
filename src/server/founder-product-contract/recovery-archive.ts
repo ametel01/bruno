@@ -69,6 +69,18 @@ export type FounderRecoveryArchiveStatusDto = {
   } | null;
 };
 
+export function unavailableFounderRecoveryArchiveStatus(): FounderRecoveryArchiveStatusDto {
+  return {
+    state: "unavailable",
+    lastVerifiedAt: null,
+    restoreVerifiedAt: null,
+    nextArchiveDueAt: null,
+    retentionEndsAt: null,
+    latestAttempt: null,
+    deletion: null,
+  };
+}
+
 export async function createDurableRecoveryArchive(
   input: ArchiveLifecycleInput,
   providers: FounderRecoveryArchiveProvider,

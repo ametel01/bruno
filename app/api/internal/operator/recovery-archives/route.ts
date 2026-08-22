@@ -1,5 +1,5 @@
 import { isAuthorizedCronRequest, readCronSecretConfig } from "@/src/server/env";
-import { readExecutingFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
+import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 import { createEncryptedFounderRecoveryArchiveProvider } from "@/src/server/founder-product-contract/encrypted-recovery-archive-provider";
 import { reconcileFounderRecoveryArchives } from "@/src/server/founder-product-contract/recovery-archive";
 import type { FounderRecoveryArchiveProvider } from "@/src/server/founder-product-contract/recovery-archive-provider";
@@ -40,7 +40,7 @@ export async function GET(
     return errorResponse(400, "recovery_archive_request_invalid");
   }
   const applicationRevision = (
-    dependencies.readApplicationRevision ?? readExecutingFounderApplicationRevision
+    dependencies.readApplicationRevision ?? readFounderApplicationRevision
   )();
   if (!applicationRevision) {
     return errorResponse(503, "recovery_archive_configuration_invalid");

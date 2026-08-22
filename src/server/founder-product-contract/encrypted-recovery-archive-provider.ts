@@ -119,23 +119,26 @@ export class EncryptedFounderRecoveryArchiveProvider implements FounderRecoveryA
     );
     const ciphertextDigest = digest(archiveBody);
     const recoveryCredentialDigest = digest(credentialBody);
+    const publishedVersions: { key: string; versionId: string }[] = [];
 
     try {
       this.onOperation("archive.store");
-      await requireUpload(
+      const archiveVersionId = await requireUpload(
         this.storage,
         archiveObjectKey,
         archiveBody,
         ARCHIVE_CONTENT_TYPE,
         "Recovery Archive ciphertext could not be stored.",
       );
-      await requireUpload(
+      publishedVersions.push({ key: archiveObjectKey, versionId: archiveVersionId });
+      const credentialVersionId = await requireUpload(
         this.storage,
         credentialObjectKey,
         credentialBody,
         CREDENTIAL_CONTENT_TYPE,
         "Recovery Archive credential could not be stored.",
       );
+      publishedVersions.push({ key: credentialObjectKey, versionId: credentialVersionId });
       const restored = await this.verifyRecoveryArchive({
         archiveId: input.archiveIntentId,
         userId: input.userId,
@@ -164,10 +167,7 @@ export class EncryptedFounderRecoveryArchiveProvider implements FounderRecoveryA
         ),
       };
     } catch (error) {
-      await Promise.allSettled([
-        this.storage.delete({ key: archiveObjectKey }),
-        this.storage.delete({ key: credentialObjectKey }),
-      ]);
+      await cleanupRejectedPublishedVersions(this.storage, publishedVersions);
       throw error;
     } finally {
       dataKey.fill(0);
@@ -454,9 +454,10 @@ async function requireUpload(
   body: Uint8Array,
   contentType: string,
   message: string,
-) {
+): Promise<string> {
   const result = await storage.upload({ key, body, contentType });
   if (!result.ok) throw new Error(message);
+  return result.versionId;
 }
 
 async function requirePermanentDeletionSafety(
@@ -466,6 +467,20 @@ async function requirePermanentDeletionSafety(
   if (!safety.ok || safety.versioning !== "disabled") {
     throw new Error("Recovery Archive storage cannot prove permanent object deletion.");
   }
+}
+
+async function cleanupRejectedPublishedVersions(
+  storage: DeletableBackupObjectStorage,
+  publishedVersions: readonly { key: string; versionId: string }[],
+): Promise<void> {
+  const safety = await storage.verifyDeletionSafety();
+  await Promise.allSettled(
+    publishedVersions.map((published) =>
+      safety.ok && safety.versioning === "disabled"
+        ? storage.delete({ key: published.key })
+        : storage.deleteVersion(published),
+    ),
+  );
 }
 
 function archiveAdditionalData(input: {
