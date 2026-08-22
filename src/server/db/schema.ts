@@ -911,6 +911,68 @@ export const founderReleaseDecisions = pgTable(
   ],
 );
 
+export const founderPreviewQualifications = pgTable(
+  "founder_preview_qualifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    stage: founderReleaseStageEnum("stage").notNull(),
+    cohort: text("cohort").notNull(),
+    capability: text("capability").notNull(),
+    applicationRevision: text("application_revision").notNull(),
+    runtimeRevision: text("runtime_revision").notNull(),
+    evidenceDigest: text("evidence_digest").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "founder_preview_qualifications_external_beta_stage_check",
+      sql`${table.stage} = 'external_beta'`,
+    ),
+    check(
+      "founder_preview_qualifications_cohort_check",
+      sql`${table.cohort} ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'`,
+    ),
+    check(
+      "founder_preview_qualifications_capability_check",
+      sql`${table.capability} IN ('openai', 'anthropic', 'calendar_reading', 'gmail_reading', 'gmail_sending')`,
+    ),
+    check(
+      "founder_preview_qualifications_application_revision_check",
+      sql`${table.applicationRevision} ~ '^[a-f0-9]{40}$'`,
+    ),
+    check(
+      "founder_preview_qualifications_runtime_revision_check",
+      sql`length(trim(${table.runtimeRevision})) > 0`,
+    ),
+    check(
+      "founder_preview_qualifications_evidence_digest_check",
+      sql`${table.evidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_preview_qualifications_time_check",
+      sql`${table.observedAt} < ${table.expiresAt}`,
+    ),
+    uniqueIndex("founder_preview_qualifications_evidence_idx").on(
+      table.stage,
+      table.cohort,
+      table.applicationRevision,
+      table.runtimeRevision,
+      table.capability,
+      table.evidenceDigest,
+    ),
+    index("founder_preview_qualifications_candidate_idx").on(
+      table.stage,
+      table.cohort,
+      table.applicationRevision,
+      table.runtimeRevision,
+      table.capability,
+      table.observedAt,
+    ),
+  ],
+);
+
 export const founderCheckoutCorrelations = pgTable(
   "founder_checkout_correlations",
   {

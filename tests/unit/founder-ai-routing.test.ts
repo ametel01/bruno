@@ -7,6 +7,11 @@ import {
   selectFounderAiProvider,
   selectFounderAiProviderAtCheckpoint,
 } from "@/src/server/operators/founder-ai-routing";
+import {
+  selectFounderExternalBetaAiProvider,
+  selectFounderExternalBetaAiProviderAtCheckpoint,
+} from "@/src/server/founder-product-contract/external-beta-routing";
+import type { FounderExternalBetaManifest } from "@/src/server/founder-product-contract/external-beta-manifest";
 
 const NOW = new Date("2026-08-19T02:00:00.000Z");
 const MULTI_PROVIDER_POLICY = {
@@ -153,4 +158,94 @@ describe("Founder AI compatibility routing", () => {
       }),
     ).toMatchObject({ provider: "anthropic" });
   });
+
+  it("lets an admitted External Beta Founder connect either or both qualified providers", () => {
+    const authority = { admitted: true, manifest: externalBetaManifest(["openai", "anthropic"]) };
+    expect(
+      selectFounderExternalBetaAiProvider([candidate("openai")], authority, {
+        now: NOW,
+        policy: MULTI_PROVIDER_POLICY,
+      }),
+    ).toMatchObject({ provider: "openai" });
+    expect(
+      selectFounderExternalBetaAiProvider([candidate("anthropic")], authority, {
+        now: NOW,
+        policy: MULTI_PROVIDER_POLICY,
+      }),
+    ).toMatchObject({ provider: "anthropic" });
+    expect(
+      selectFounderExternalBetaAiProvider(
+        [candidate("openai"), candidate("anthropic")],
+        authority,
+        { now: NOW, policy: MULTI_PROVIDER_POLICY },
+      ),
+    ).toMatchObject({ provider: "openai" });
+  });
+
+  it("routes only explicitly connected and currently qualified External Beta providers", () => {
+    expect(
+      selectFounderExternalBetaAiProvider(
+        [candidate("openai"), candidate("anthropic")],
+        { admitted: true, manifest: externalBetaManifest(["anthropic"]) },
+        { now: NOW, policy: MULTI_PROVIDER_POLICY },
+      ),
+    ).toMatchObject({ provider: "anthropic" });
+    expect(
+      selectFounderExternalBetaAiProvider(
+        [],
+        { admitted: true, manifest: externalBetaManifest(["openai", "anthropic"]) },
+        { now: NOW, policy: MULTI_PROVIDER_POLICY },
+      ),
+    ).toBeNull();
+    expect(
+      selectFounderExternalBetaAiProvider(
+        [candidate("openai"), candidate("anthropic")],
+        { admitted: false, manifest: externalBetaManifest(["openai", "anthropic"]) },
+        { now: NOW, policy: MULTI_PROVIDER_POLICY },
+      ),
+    ).toBeNull();
+  });
+
+  it("changes provider only at a Safe Work Checkpoint after qualification loss", () => {
+    const authority = { admitted: true, manifest: externalBetaManifest(["anthropic"]) };
+    expect(
+      selectFounderExternalBetaAiProviderAtCheckpoint(
+        [candidate("openai"), candidate("anthropic")],
+        "openai",
+        authority,
+        { now: NOW, policy: MULTI_PROVIDER_POLICY },
+      ),
+    ).toMatchObject({ provider: "anthropic" });
+    expect(
+      selectFounderExternalBetaAiProvider(
+        [candidate("openai"), candidate("anthropic")],
+        authority,
+        { now: NOW, policy: MULTI_PROVIDER_POLICY },
+      ),
+    ).toMatchObject({ provider: "anthropic" });
+  });
 });
+
+function externalBetaManifest(
+  qualifiedAiCapabilities: readonly ("openai" | "anthropic")[],
+): FounderExternalBetaManifest {
+  const qualifiedCapabilities = [
+    ...qualifiedAiCapabilities,
+    "calendar_reading",
+    "gmail_reading",
+    "gmail_sending",
+  ] as const;
+  const unavailableCapabilities = (["openai", "anthropic"] as const).filter(
+    (capability) => !qualifiedAiCapabilities.includes(capability),
+  );
+  return {
+    stage: "external_beta",
+    cohort: "external-beta-contract",
+    applicationRevision: "a".repeat(40),
+    runtimeRevision: "runtime-v1",
+    complete: unavailableCapabilities.length === 0,
+    qualifiedCapabilities,
+    unavailableCapabilities,
+    safeWorkCheckpointsPreserved: true,
+  };
+}
