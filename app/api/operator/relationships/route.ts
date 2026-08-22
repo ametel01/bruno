@@ -21,7 +21,7 @@ export async function GET(): Promise<Response> {
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
   const accessFailure = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
-    "workspace",
+    "workspace_with_mail",
   );
   if (accessFailure) return accessFailure;
   try {
@@ -37,7 +37,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
   const accessFailure = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
-    "workspace",
+    "workspace_with_mail",
   );
   if (accessFailure) return accessFailure;
   let payload: unknown;

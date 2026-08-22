@@ -12,8 +12,8 @@ import {
   operators,
 } from "@/src/server/db/schema";
 import { readFounderApplicationRevision } from "./application-revision";
-import { FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY } from "./owner-preview-release-decision";
 import type { FounderProductContractTransaction } from "./operator-authority";
+import { FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY } from "./owner-preview-release-decision";
 import {
   FOUNDER_OWNER_PREVIEW_CAPABILITIES,
   type FounderOwnerPreviewCapability,
@@ -37,6 +37,7 @@ export type FounderOwnerPreviewAccess = {
 
 export type FounderOwnerPreviewAccessRequirement =
   | "workspace"
+  | "workspace_with_mail"
   | FounderOwnerPreviewCapabilityRequirement;
 
 export function requiresFounderReleaseStageAuthority(mode: AuthModeDecision["mode"]): boolean {
@@ -93,9 +94,12 @@ export async function requireFounderOwnerPreviewAccessForUser(
   } = {},
   requirement: FounderOwnerPreviewAccessRequirement,
 ): Promise<void> {
-  if (requirement === "workspace") {
+  if (requirement === "workspace" || requirement === "workspace_with_mail") {
     const access = await getFounderOwnerPreviewAccessForUser(userId, now, dependencies);
     if (!access.admitted) throw new FounderReleaseStageAccessError(access.stage ?? "owner_preview");
+    if (requirement === "workspace_with_mail" && access.stage === "trusted_preview") {
+      throw new FounderReleaseStageAccessError("trusted_preview");
+    }
     return;
   }
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();

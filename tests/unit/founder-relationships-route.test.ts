@@ -48,8 +48,23 @@ describe("Founder Relationships route", () => {
     const response = await POST(ingestRequest("mail"));
 
     expect(response.status).toBe(403);
-    expect(mocks.requireWorkspaceAccess).toHaveBeenNthCalledWith(1, USER_ID, "workspace");
+    expect(mocks.requireWorkspaceAccess).toHaveBeenNthCalledWith(1, USER_ID, "workspace_with_mail");
     expect(mocks.requireWorkspaceAccess).toHaveBeenNthCalledWith(2, USER_ID, "forbidden");
+    expect(mocks.ingestEvidence).not.toHaveBeenCalled();
+  });
+
+  it("hides the mixed Mail relationship surface from Trusted Preview", async () => {
+    const blocked = Response.json(
+      { error: { code: "trusted_preview_access_required" } },
+      { status: 403 },
+    );
+    mocks.requireWorkspaceAccess.mockResolvedValueOnce(blocked);
+    const { GET } = await import("@/app/api/operator/relationships/route");
+
+    const response = await GET();
+
+    expect(response.status).toBe(403);
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, "workspace_with_mail");
     expect(mocks.ingestEvidence).not.toHaveBeenCalled();
   });
 

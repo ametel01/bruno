@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomBytes } from "node:crypto";
-import { and, eq, gt, lte } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lte, ne } from "drizzle-orm";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
@@ -17,9 +17,13 @@ import { founderProductContractDigest } from "./digest";
 import { createEncryptedFounderRecoveryArchiveProvider } from "./encrypted-recovery-archive-provider";
 import {
   type FounderProductContractTransaction,
+  lockFounderProductContractLifecycleInTransaction,
   requireReadyFounderOperatorAuthorityInTransaction,
 } from "./operator-authority";
-import { assessFounderOwnerPreviewPromotionEvidenceForUser } from "./owner-preview-promotion";
+import {
+  assessFounderOwnerPreviewPromotionEvidenceAgainstDecision,
+  assessFounderOwnerPreviewPromotionEvidenceForUser,
+} from "./owner-preview-promotion";
 import { createDurableRecoveryArchive } from "./recovery-archive";
 import type { FounderRecoveryArchiveProvider } from "./recovery-archive-provider";
 import { getFounderOwnerPreviewAccessInTransaction } from "./release-stage-access";
@@ -43,6 +47,7 @@ export type FounderTrustedPreviewAdmissionDependencies = {
   createProvider?: () => FounderRecoveryArchiveProvider | null;
   env?: Record<string, string | undefined>;
   now?: () => Date;
+  beforeDecisionCommit?: () => Promise<void>;
 };
 
 export async function enterFounderTrustedPreviewStage(
@@ -123,7 +128,10 @@ export async function enterFounderTrustedPreviewStage(
     if (!promotion.promotionEligible || promotion.founderAcceptanceEligible) {
       throw new Error("Owner Preview promotion evidence is incomplete.");
     }
+    await dependencies.beforeDecisionCommit?.();
     const decisionId = await connection.db.transaction(async (tx) => {
+      await lockFounderTrustedPreviewCohortInTransaction(tx);
+      await lockFounderProductContractLifecycleInTransaction(tx, cohortOwnerUserId);
       const committedAuthority = await requireReadyFounderOperatorAuthorityInTransaction(
         tx,
         cohortOwnerUserId,
@@ -135,6 +143,58 @@ export async function enterFounderTrustedPreviewStage(
         throw new Error("Trusted Preview release authority changed during the decision.");
       }
       const committedAt = clock();
+      const committedOwnerAccess = await getFounderOwnerPreviewAccessInTransaction(tx, {
+        userId: cohortOwnerUserId,
+        now: committedAt,
+        applicationRevision,
+      });
+      if (
+        !committedOwnerAccess.admitted ||
+        !FOUNDER_TRUSTED_PREVIEW_CAPABILITIES.every((capability) =>
+          committedOwnerAccess.availableCapabilities.includes(capability),
+        )
+      ) {
+        throw new Error("Owner Preview must remain qualified before Trusted Preview can enter.");
+      }
+      const [committedOwnerDecision] = await tx
+        .select({
+          id: founderReleaseDecisions.id,
+          operatorId: founderReleaseDecisions.operatorId,
+          applicationRevision: founderReleaseDecisions.applicationRevision,
+          runtimeRevision: founderReleaseDecisions.runtimeRevision,
+          decidedAt: founderReleaseDecisions.decidedAt,
+        })
+        .from(founderReleaseDecisions)
+        .where(
+          and(
+            eq(founderReleaseDecisions.userId, cohortOwnerUserId),
+            eq(founderReleaseDecisions.stage, "owner_preview"),
+            inArray(founderReleaseDecisions.outcome, ["enter", "resume"]),
+          ),
+        )
+        .orderBy(desc(founderReleaseDecisions.decidedAt))
+        .limit(1);
+      if (
+        !committedOwnerDecision ||
+        committedOwnerDecision.applicationRevision !== applicationRevision ||
+        committedOwnerDecision.runtimeRevision !== committedAuthority.runtimeRevision ||
+        committedOwnerDecision.operatorId !== committedAuthority.operatorId
+      ) {
+        throw new Error("Owner Preview promotion evidence is incomplete.");
+      }
+      const committedPromotion = assessFounderOwnerPreviewPromotionEvidenceAgainstDecision({
+        value: promotionEvidence,
+        ownerUserId: cohortOwnerUserId,
+        operatorId: committedOwnerDecision.operatorId,
+        applicationRevision,
+        runtimeRevision: committedAuthority.runtimeRevision,
+        activeDecisionId: committedOwnerDecision.id,
+        activePeriodStartedAt: committedOwnerDecision.decidedAt,
+        observedAt: committedAt,
+      });
+      if (!committedPromotion.promotionEligible || committedPromotion.founderAcceptanceEligible) {
+        throw new Error("Owner Preview promotion evidence is incomplete.");
+      }
       const committedQualifications = requireFounderTrustedPreviewQualifications(
         {
           cohortOwnerUserId,
@@ -161,7 +221,7 @@ export async function enterFounderTrustedPreviewStage(
         qualificationEvidenceDigests: committedQualifications.map(
           (qualification) => qualification.evidenceDigest,
         ),
-        promotionEvidenceDigests: promotion.evidenceDigests,
+        promotionEvidenceDigests: committedPromotion.evidenceDigests,
         identityEvidenceDigest: founderProductContractDigest(`clerk:${identity.subject}`),
         decidedAt: committedAt,
       });
@@ -242,7 +302,8 @@ export async function issueFounderTrustedPreviewInvitation(
           slot: founderTrustedPreviewInvitations.cohortSlot,
           clerkSubjectDigest: founderTrustedPreviewInvitations.invitedClerkSubjectDigest,
         })
-        .from(founderTrustedPreviewInvitations);
+        .from(founderTrustedPreviewInvitations)
+        .where(ne(founderTrustedPreviewInvitations.status, "revoked"));
       if (
         existingInvitations.some(
           (invitation) => invitation.clerkSubjectDigest === invitedClerkSubjectDigest,

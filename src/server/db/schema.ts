@@ -959,11 +959,13 @@ export const founderTrustedPreviewInvitations = pgTable(
       "founder_trusted_preview_invitations_owner_participant_check",
       sql`${table.participantUserId} IS NULL OR ${table.participantUserId} <> ${table.cohortOwnerUserId}`,
     ),
-    uniqueIndex("founder_trusted_preview_invitations_slot_idx").on(table.cohortSlot),
+    uniqueIndex("founder_trusted_preview_invitations_slot_idx")
+      .on(table.cohortSlot)
+      .where(sql`${table.status} <> 'revoked'`),
     uniqueIndex("founder_trusted_preview_invitations_digest_idx").on(table.invitationDigest),
-    uniqueIndex("founder_trusted_preview_invitations_clerk_subject_idx").on(
-      table.invitedClerkSubjectDigest,
-    ),
+    uniqueIndex("founder_trusted_preview_invitations_clerk_subject_idx")
+      .on(table.invitedClerkSubjectDigest)
+      .where(sql`${table.status} <> 'revoked'`),
     uniqueIndex("founder_trusted_preview_invitations_participant_idx").on(table.participantUserId),
     uniqueIndex("founder_trusted_preview_invitations_operator_idx").on(table.participantOperatorId),
     index("founder_trusted_preview_invitations_owner_status_idx").on(

@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { FounderMailConnectionDto } from "@/src/server/operators/founder-mail-connection";
-import type { FounderOnboardingDto } from "@/src/server/operators/founder-onboarding";
-import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
-import type { FounderRecoveryArchiveStatusDto } from "@/src/server/founder-product-contract/recovery-archive";
 import type { FounderInfrastructureRetirementStatusDto } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import {
   type FounderOwnerPreviewStatus,
   projectFounderOwnerPreviewStatus,
 } from "@/src/server/founder-product-contract/owner-preview-status";
+import type { FounderRecoveryArchiveStatusDto } from "@/src/server/founder-product-contract/recovery-archive";
+import type { FounderMailConnectionDto } from "@/src/server/operators/founder-mail-connection";
+import type { FounderOnboardingDto } from "@/src/server/operators/founder-onboarding";
+import type { FounderOperatorDto } from "@/src/server/operators/founder-operator";
 import {
   DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
   type FounderTimezoneOption,
@@ -599,7 +599,9 @@ export function FounderOperatorPreparation({
 
       {!activated && workspaceAvailable ? <FounderLimitedOperation /> : null}
 
-      {workspaceAvailable ? <FounderRelationships /> : null}
+      {workspaceAvailable && previewStatus.stage !== "Trusted Preview" ? (
+        <FounderRelationships />
+      ) : null}
 
       {initialRecoveryArchive ? (
         <section className={styles.card} aria-labelledby="protected-recovery-title">

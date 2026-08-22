@@ -4310,6 +4310,7 @@
             }
           ],
           "isUnique": true,
+          "where": "\"founder_trusted_preview_invitations\".\"status\" <> 'revoked'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -4340,6 +4341,7 @@
             }
           ],
           "isUnique": true,
+          "where": "\"founder_trusted_preview_invitations\".\"status\" <> 'revoked'",
           "concurrently": false,
           "method": "btree",
           "with": {}
