@@ -7,11 +7,11 @@ import {
   founderTrustedPreviewInvitations,
 } from "@/src/server/db/schema";
 import { founderProductContractDigest } from "./digest";
-import { FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY } from "./owner-preview-release-decision";
 import {
   type FounderProductContractTransaction,
   lockFounderProductContractLifecycleInTransaction,
 } from "./operator-authority";
+import { FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY } from "./owner-preview-release-decision";
 import { FOUNDER_TRUSTED_PREVIEW_CAPABILITIES } from "./trusted-preview-qualification";
 
 export const FOUNDER_TRUSTED_PREVIEW_COHORT_LOCK_KEY = "founder_trusted_preview_cohort:v1" as const;
@@ -248,7 +248,12 @@ export async function persistFounderTrustedPreviewStageHoldInTransaction(
   await tx
     .update(founderTrustedPreviewInvitations)
     .set({ status: "revoked", revokedAt: decidedAt })
-    .where(eq(founderTrustedPreviewInvitations.status, "invited"));
+    .where(
+      and(
+        eq(founderTrustedPreviewInvitations.cohortOwnerUserId, input.cohortOwnerUserId),
+        eq(founderTrustedPreviewInvitations.status, "invited"),
+      ),
+    );
   return hold.id;
 }
 
@@ -256,6 +261,10 @@ export async function reconcileFounderTrustedPreviewQualificationExpiryInTransac
   tx: FounderProductContractTransaction,
   input: { cohortOwnerUserId: string; applicationRevision: string; now: Date },
 ): Promise<string | null> {
+  // Keep this lock for the enclosing work-authority transaction even when qualification is
+  // current, so a concurrent Hold cannot commit between the access check and protected work.
+  await lockFounderTrustedPreviewCohortInTransaction(tx);
+  await lockFounderProductContractLifecycleInTransaction(tx, input.cohortOwnerUserId);
   const latestDecision = await getLatestFounderTrustedPreviewStageDecisionInTransaction(
     tx,
     input.cohortOwnerUserId,

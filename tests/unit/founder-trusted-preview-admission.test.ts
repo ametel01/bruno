@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
 import { buildTestOpenAiConnectedAcceptanceRelease } from "@/scripts/founder-openai-test-release";
@@ -16,14 +16,18 @@ import {
 } from "@/src/server/db/schema";
 import { EncryptedFounderRecoveryArchiveProvider } from "@/src/server/founder-product-contract/encrypted-recovery-archive-provider";
 import { FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY } from "@/src/server/founder-product-contract/owner-preview-release-decision";
-import { getFounderOwnerPreviewAccessForUser } from "@/src/server/founder-product-contract/release-stage-access";
 import { createDurableRecoveryArchive } from "@/src/server/founder-product-contract/recovery-archive";
+import { getFounderOwnerPreviewAccessForUser } from "@/src/server/founder-product-contract/release-stage-access";
 import {
   admitFounderToTrustedPreview,
   enterFounderTrustedPreviewStage,
   issueFounderTrustedPreviewInvitation,
 } from "@/src/server/founder-product-contract/trusted-preview-admission";
-import { persistFounderTrustedPreviewStageHoldInTransaction } from "@/src/server/founder-product-contract/trusted-preview-release-decision";
+import {
+  FOUNDER_TRUSTED_PREVIEW_COHORT_LOCK_KEY,
+  persistFounderTrustedPreviewStageHoldInTransaction,
+} from "@/src/server/founder-product-contract/trusted-preview-release-decision";
+import { withFounderOwnerPreviewWorkAuthority } from "@/src/server/founder-product-contract/work-authority";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003760";
 const OWNER_OPERATOR_ID = "00000000-0000-4000-8000-000000003761";
@@ -353,6 +357,57 @@ describe("Trusted Preview admission authority", () => {
       availableCapabilities: ["openai", "calendar_reading"],
       stage: "trusted_preview",
     });
+  });
+
+  it("retains the cohort lock through authorized participant work", async () => {
+    const invitationToken = "L".repeat(43);
+    await issueFounderTrustedPreviewInvitation(
+      {
+        cohortOwnerUserId: OWNER_ID,
+        invitedClerkSubject: PARTICIPANTS[0].clerk,
+        serviceBusinessEvidenceDigest: digest(40),
+      },
+      {
+        applicationRevision: APPLICATION_REVISION,
+        createConnection: () => connection,
+        createInvitationToken: () => invitationToken,
+        env: ENV,
+        now: () => START,
+      },
+    );
+    await admitFounderToTrustedPreview(PARTICIPANTS[0].userId, invitationToken, {
+      applicationRevision: APPLICATION_REVISION,
+      createConnection: () => connection,
+      createProvider: () => provider,
+      env: ENV,
+      now: () => START,
+    });
+    const competingConnection = createDatabaseConnection();
+
+    try {
+      await expect(
+        withFounderOwnerPreviewWorkAuthority(
+          {
+            userId: PARTICIPANTS[0].userId,
+            now: () => START,
+            requiredCapabilities: ["openai"],
+          },
+          {
+            applicationRevision: APPLICATION_REVISION,
+            createConnection: () => connection,
+          },
+          async () => {
+            const result = await competingConnection.db.execute<{ acquired: boolean }>(
+              sql`select pg_try_advisory_xact_lock(hashtextextended(${FOUNDER_TRUSTED_PREVIEW_COHORT_LOCK_KEY}, 0)) as acquired`,
+            );
+            expect(result[0]?.acquired).toBe(false);
+            return "committed";
+          },
+        ),
+      ).resolves.toBe("committed");
+    } finally {
+      await competingConnection.close();
+    }
   });
 });
 
