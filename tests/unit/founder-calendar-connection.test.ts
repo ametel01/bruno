@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   completeFounderGoogleCalendarAuthorizationForState,
   disconnectFounderGoogleCalendarForUser,
@@ -27,6 +27,10 @@ const KEYRING: OperatorSecretKeyring = {
   activeVersion: "test-v1",
   keys: new Map([["test-v1", Buffer.alloc(32, 7)]]),
 };
+const CURRENT_CALENDAR_ACCESS = async () => ({
+  admitted: true as const,
+  availableCapabilities: ["calendar_reading" as const],
+});
 
 describe("Founder Google Calendar connection application seam", () => {
   let connection: DatabaseConnection;
@@ -73,6 +77,7 @@ describe("Founder Google Calendar connection application seam", () => {
         adapter,
         keyring: KEYRING,
         now: () => NOW,
+        getOwnerPreviewAccess: CURRENT_CALENDAR_ACCESS,
       },
     );
 
@@ -94,6 +99,39 @@ describe("Founder Google Calendar connection application seam", () => {
     expect(await connection.db.select().from(operatorCalendarConnectionReceipts)).toHaveLength(1);
   });
 
+  it("does not exchange a previously issued authorization code after Calendar enters Hold", async () => {
+    const adapter = calendarAdapter();
+    const exchangeAuthorizationCode = vi.fn(adapter.exchangeAuthorizationCode);
+    adapter.exchangeAuthorizationCode = exchangeAuthorizationCode;
+    const started = await startFounderGoogleCalendarAuthorizationForUser(OWNER_ID, {
+      createConnection: () => connection,
+      adapter,
+      keyring: KEYRING,
+      now: () => NOW,
+      getOwnerPreviewAccess: CURRENT_CALENDAR_ACCESS,
+    });
+    const state = new URL(started.authorization?.authorizationUrl ?? "").searchParams.get("state");
+
+    const result = await completeFounderGoogleCalendarAuthorizationForState(
+      state ?? "",
+      "google-code",
+      {
+        createConnection: () => connection,
+        adapter,
+        keyring: KEYRING,
+        now: () => NOW,
+        getOwnerPreviewAccess: async () => ({ admitted: true, availableCapabilities: [] }),
+      },
+    );
+
+    expect(exchangeAuthorizationCode).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "needs_attention",
+      evidenceState: "unavailable",
+      recoveryMessage: "Google Calendar authorization paused under the current Release Decision.",
+    });
+  });
+
   it("requires explicit resource selection and accepts a live calendar with zero events as current", async () => {
     const adapter = calendarAdapter();
     const connected = await connect(adapter);
@@ -111,6 +149,7 @@ describe("Founder Google Calendar connection application seam", () => {
       adapter,
       keyring: KEYRING,
       now: () => NOW,
+      getOwnerPreviewAccess: CURRENT_CALENDAR_ACCESS,
     });
     const result = await verifyFounderGoogleCalendarForUser(OWNER_ID, {
       createConnection: () => connection,
@@ -205,6 +244,7 @@ describe("Founder Google Calendar connection application seam", () => {
       adapter,
       keyring: KEYRING,
       now: () => NOW,
+      getOwnerPreviewAccess: CURRENT_CALENDAR_ACCESS,
     });
   }
 
@@ -221,6 +261,7 @@ describe("Founder Google Calendar connection application seam", () => {
       adapter,
       keyring: KEYRING,
       now: () => NOW,
+      getOwnerPreviewAccess: CURRENT_CALENDAR_ACCESS,
     });
   }
 });

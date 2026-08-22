@@ -7,6 +7,10 @@ import type { FounderOperatorDto } from "@/src/server/operators/founder-operator
 import type { FounderRecoveryArchiveStatusDto } from "@/src/server/founder-product-contract/recovery-archive";
 import type { FounderInfrastructureRetirementStatusDto } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import {
+  type FounderOwnerPreviewStatus,
+  projectFounderOwnerPreviewStatus,
+} from "@/src/server/founder-product-contract/owner-preview-status";
+import {
   DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
   type FounderTimezoneOption,
 } from "@/src/shared/founder-timezones";
@@ -14,10 +18,7 @@ import { FounderActionInbox } from "./founder-action-inbox";
 import { FounderAiConnection } from "./founder-ai-connection";
 import { FounderCalendarConnection } from "./founder-calendar-connection";
 import { FounderConversation } from "./founder-conversation";
-import { FounderCoreOperation } from "./founder-core-operation";
 import { FounderLimitedOperation } from "./founder-limited-operation";
-import { FounderMailConnection } from "./founder-mail-connection";
-import { FounderMailSendingConnection } from "./founder-mail-sending-connection";
 import styles from "./founder-operator-preparation.module.css";
 import { FounderRelationships } from "./founder-relationships";
 
@@ -28,12 +29,13 @@ export function FounderOperatorPreparation({
   initialInfrastructureRetirement,
   ownerPreviewAdmitted = false,
   ownerPreviewWorkAllowed = ownerPreviewAdmitted,
+  ownerPreview,
   timezoneOptions = DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
   openAiReleased = false,
   calendarReadingReleased = false,
-  mailReadingReleased = false,
-  mailSendingReleased = false,
-  mailReleaseControls,
+  mailReadingReleased: _mailReadingReleased = false,
+  mailSendingReleased: _mailSendingReleased = false,
+  mailReleaseControls: _mailReleaseControls,
 }: {
   initialOperator: FounderOperatorDto | null;
   initialOnboarding?: FounderOnboardingDto;
@@ -41,6 +43,7 @@ export function FounderOperatorPreparation({
   initialInfrastructureRetirement?: FounderInfrastructureRetirementStatusDto;
   ownerPreviewAdmitted?: boolean;
   ownerPreviewWorkAllowed?: boolean;
+  ownerPreview?: FounderOwnerPreviewStatus;
   timezoneOptions?: ReadonlyArray<FounderTimezoneOption>;
   openAiReleased?: boolean;
   calendarReadingReleased?: boolean;
@@ -56,6 +59,9 @@ export function FounderOperatorPreparation({
   const [onboarding, setOnboarding] = useState(initialOnboarding);
   const [admitted, setAdmitted] = useState(ownerPreviewAdmitted);
   const [workAllowed, setWorkAllowed] = useState(ownerPreviewWorkAllowed);
+  const [previewStatus, setPreviewStatus] = useState<FounderOwnerPreviewStatus>(
+    ownerPreview ?? fallbackOwnerPreviewStatus(ownerPreviewAdmitted, ownerPreviewWorkAllowed),
+  );
   const lastOpenedStep = useRef<string | null>(null);
 
   useEffect(() => {
@@ -130,6 +136,7 @@ export function FounderOperatorPreparation({
           operator?: FounderOperatorDto;
           ownerPreviewAdmitted?: boolean;
           ownerPreviewWorkAllowed?: boolean;
+          ownerPreview?: FounderOwnerPreviewStatus;
         };
       })
       .then((body) => {
@@ -137,6 +144,7 @@ export function FounderOperatorPreparation({
           setOperator(body.operator);
           setAdmitted(body.ownerPreviewAdmitted === true);
           setWorkAllowed(body.ownerPreviewWorkAllowed === true);
+          if (body.ownerPreview) setPreviewStatus(body.ownerPreview);
         }
       })
       .catch(() => undefined);
@@ -188,12 +196,14 @@ export function FounderOperatorPreparation({
             operator: FounderOperatorDto;
             ownerPreviewAdmitted?: boolean;
             ownerPreviewWorkAllowed?: boolean;
+            ownerPreview?: FounderOwnerPreviewStatus;
           }
         | { error?: { message?: string } };
       if (preparationResponse.ok && "operator" in preparationBody) {
         setOperator(preparationBody.operator);
         setAdmitted(preparationBody.ownerPreviewAdmitted === true);
         setWorkAllowed(preparationBody.ownerPreviewWorkAllowed === true);
+        if (preparationBody.ownerPreview) setPreviewStatus(preparationBody.ownerPreview);
       }
     } catch (submissionError) {
       setError(
@@ -221,6 +231,7 @@ export function FounderOperatorPreparation({
             operator: FounderOperatorDto;
             ownerPreviewAdmitted?: boolean;
             ownerPreviewWorkAllowed?: boolean;
+            ownerPreview?: FounderOwnerPreviewStatus;
           }
         | { error?: { message?: string } };
       if (!response.ok || !("operator" in body)) {
@@ -234,11 +245,50 @@ export function FounderOperatorPreparation({
       setTimezone(body.operator.preparation.timezone ?? "");
       setAdmitted(body.ownerPreviewAdmitted === true);
       setWorkAllowed(body.ownerPreviewWorkAllowed === true);
+      if (body.ownerPreview) setPreviewStatus(body.ownerPreview);
     } catch (preparationError) {
       setError(
         preparationError instanceof Error
           ? preparationError.message
           : "We could not begin preparing your Operator.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function enterOwnerPreview() {
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/operator", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "enter_owner_preview" }),
+      });
+      const body = (await response.json()) as
+        | {
+            ownerPreviewAdmitted: boolean;
+            ownerPreviewWorkAllowed: boolean;
+            ownerPreview: FounderOwnerPreviewStatus;
+          }
+        | { error?: { message?: string } };
+      if (!response.ok || !("ownerPreview" in body)) {
+        throw new Error(
+          "error" in body
+            ? (body.error?.message ?? "Owner Preview could not be entered.")
+            : "Owner Preview could not be entered.",
+        );
+      }
+      setAdmitted(body.ownerPreviewAdmitted);
+      setWorkAllowed(body.ownerPreviewWorkAllowed);
+      setPreviewStatus(body.ownerPreview);
+    } catch (admissionError) {
+      setError(
+        admissionError instanceof Error
+          ? admissionError.message
+          : "Owner Preview could not be entered.",
       );
     } finally {
       setSaving(false);
@@ -333,12 +383,10 @@ export function FounderOperatorPreparation({
               <h3 id="onboarding-next-step-title">
                 {onboarding.activated
                   ? "Your current brief and Conversation are ready."
-                  : `Next step: ${onboardingStepLabel(onboarding.nextStep)}`}
+                  : `Next step: ${ownerPreviewOnboardingStepLabel(onboarding.nextStep)}`}
               </h3>
             </div>
-            <span className={styles.confirmed}>
-              {onboarding.operation === "core" ? "Core Operation" : "Saved"}
-            </span>
+            <span className={styles.confirmed}>Limited Operation</span>
           </div>
           <p className={styles.hint}>
             {onboarding.activated
@@ -346,13 +394,28 @@ export function FounderOperatorPreparation({
               : "This step is derived from the latest saved connection, consent, and evidence state."}
           </p>
           <p className={styles.hint}>
-            Capabilities — AI: {capabilityLabel(onboarding.capabilities.ai)}; Calendar:{" "}
-            {capabilityLabel(onboarding.capabilities.calendar)}; Mail:{" "}
-            {capabilityLabel(onboarding.capabilities.mail)}; Core:{" "}
-            {capabilityLabel(onboarding.capabilities.core)}.
+            Owner Preview capabilities — AI: {capabilityLabel(onboarding.capabilities.ai)}
+            {"; "}Calendar: {capabilityLabel(onboarding.capabilities.calendar)}.
           </p>
         </section>
       ) : null}
+
+      <section className={styles.card} aria-labelledby="owner-preview-boundary-title">
+        <div className={styles.cardHeading}>
+          <div>
+            <p className={styles.kicker}>{previewStatus.evidenceClassification}</p>
+            <h3 id="owner-preview-boundary-title">{previewStatus.stage}</h3>
+          </div>
+          <span className={styles.confirmed}>{ownerPreviewStateLabel(previewStatus.state)}</span>
+        </div>
+        <p className={styles.hint}>
+          Available now: {capabilityList(previewStatus.availableCapabilities)}.
+        </p>
+        <p className={styles.hint}>
+          Support is {previewStatus.supportBoundary.toLowerCase()}. Seven days of Owner Preview use
+          remains a Learning Round and never promotes Bruno automatically.
+        </p>
+      </section>
 
       {(runtimeReady && !admitted) || (admitted && (!runtimeReady || !workAllowed)) ? (
         <section className={styles.card} aria-labelledby="owner-preview-access-title">
@@ -371,6 +434,16 @@ export function FounderOperatorPreparation({
               ? "Your saved workspace remains available. Bruno starts work only for capabilities whose exact Release Decision, runtime, and Recovery Archive protection remain current."
               : "Bruno will open the workspace only after current qualification and a verified Recovery Archive are confirmed together. Try preparation again when protection is available."}
           </p>
+          {runtimeReady && !admitted ? (
+            <button
+              className={styles.button}
+              type="button"
+              onClick={() => void enterOwnerPreview()}
+              disabled={saving}
+            >
+              {saving ? "Checking…" : "Enter Owner Preview"}
+            </button>
+          ) : null}
         </section>
       ) : null}
 
@@ -399,14 +472,10 @@ export function FounderOperatorPreparation({
             <FounderConversation showDecisionContext={false} />
           </div>
           <div className={styles.workspaceBrief}>
-            {onboarding?.operation === "core" ? (
-              <FounderCoreOperation />
-            ) : (
-              <FounderLimitedOperation />
-            )}
+            <FounderLimitedOperation />
           </div>
           <div className={styles.workspaceNeeds}>
-            <FounderActionInbox mailSendingReleased={mailSendingReleased} />
+            <FounderActionInbox mailSendingReleased={false} />
           </div>
         </section>
       ) : null}
@@ -455,27 +524,21 @@ export function FounderOperatorPreparation({
 
       {!activated && workspaceAvailable ? <FounderConversation /> : null}
 
-      {!activated && workspaceAvailable ? (
-        <FounderActionInbox mailSendingReleased={mailSendingReleased} />
+      {!activated && workspaceAvailable ? <FounderActionInbox mailSendingReleased={false} /> : null}
+
+      {workspaceAvailable &&
+      openAiReleased &&
+      previewStatus.availableCapabilities.includes("OpenAI") ? (
+        <FounderAiConnection />
       ) : null}
 
-      {workspaceAvailable && mailSendingReleased ? <FounderMailSendingConnection /> : null}
-
-      {workspaceAvailable && openAiReleased ? <FounderAiConnection /> : null}
-
-      {workspaceAvailable && calendarReadingReleased ? <FounderCalendarConnection /> : null}
-
-      {workspaceAvailable && mailReadingReleased && mailReleaseControls ? (
-        <FounderMailConnection releaseControls={mailReleaseControls} />
+      {workspaceAvailable &&
+      calendarReadingReleased &&
+      previewStatus.availableCapabilities.includes("Calendar reading") ? (
+        <FounderCalendarConnection />
       ) : null}
 
-      {!activated && workspaceAvailable && onboarding?.operation === "core" ? (
-        <FounderCoreOperation />
-      ) : null}
-
-      {!activated && workspaceAvailable && onboarding?.operation !== "core" ? (
-        <FounderLimitedOperation />
-      ) : null}
+      {!activated && workspaceAvailable ? <FounderLimitedOperation /> : null}
 
       {workspaceAvailable ? <FounderRelationships /> : null}
 
@@ -603,6 +666,10 @@ function onboardingStepLabel(step: FounderOnboardingDto["nextStep"]): string {
   }[step];
 }
 
+function ownerPreviewOnboardingStepLabel(step: FounderOnboardingDto["nextStep"]): string {
+  return step === "mail" ? "Continue with OpenAI and Calendar" : onboardingStepLabel(step);
+}
+
 function capabilityLabel(state: FounderOnboardingDto["capabilities"]["ai"]): string {
   return {
     ready: "Ready",
@@ -634,4 +701,22 @@ function recoveryArchiveHeading(state: FounderRecoveryArchiveStatusDto["state"])
 
 function recoveryArchiveBadge(state: FounderRecoveryArchiveStatusDto["state"]): string {
   return { current: "Current", due: "Due", failed: "Attention", unavailable: "Unavailable" }[state];
+}
+
+function fallbackOwnerPreviewStatus(
+  admitted: boolean,
+  workAllowed: boolean,
+): FounderOwnerPreviewStatus {
+  return projectFounderOwnerPreviewStatus({
+    admitted,
+    availableCapabilities: admitted && workAllowed ? ["openai", "calendar_reading"] : [],
+  });
+}
+
+function ownerPreviewStateLabel(state: FounderOwnerPreviewStatus["state"]): string {
+  return { waiting: "Waiting", active: "Active", limited: "Limited" }[state];
+}
+
+function capabilityList(capabilities: readonly string[]): string {
+  return capabilities.length > 0 ? capabilities.join(" and ") : "none until admission is current";
 }

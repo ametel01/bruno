@@ -504,7 +504,7 @@ describe("Founder Operator preparation shell", () => {
     expect(html).not.toContain("WhatsApp");
   });
 
-  it("keeps Calendar and Gmail reading independently hidden until each acceptance passes", () => {
+  it("keeps Gmail reading hidden throughout Calendar-only Owner Preview", () => {
     const readyOperator: FounderOperatorDto = {
       ...OPERATOR,
       preparation: {
@@ -549,10 +549,12 @@ describe("Founder Operator preparation shell", () => {
     expect(calendarOnly).toContain("Your Calendar Connection");
     expect(calendarOnly).not.toContain("Your Mail Connection");
     expect(mailOnly).not.toContain("Your Calendar Connection");
-    expect(mailOnly).toContain("Your Mail Connection");
+    expect(mailOnly).not.toContain("Your Mail Connection");
+    expect(mailOnly).not.toMatch(/Gmail|Anthropic|Core Operation/);
+    expect(mailOnly).toContain("Support is fully attended");
   });
 
-  it("keeps Gmail sending hidden until its separate acceptance passes", () => {
+  it("keeps Gmail sending hidden even when its separate release evidence passes", () => {
     const readyOperator: FounderOperatorDto = {
       ...OPERATOR,
       preparation: {
@@ -578,7 +580,7 @@ describe("Founder Operator preparation shell", () => {
     );
 
     expect(hidden).not.toContain("Optional Mail Sending Connection");
-    expect(released).toContain("Optional Mail Sending Connection");
-    expect(released).toContain("Review send-only Gmail");
+    expect(released).not.toContain("Optional Mail Sending Connection");
+    expect(released).not.toContain("Review send-only Gmail");
   });
 });

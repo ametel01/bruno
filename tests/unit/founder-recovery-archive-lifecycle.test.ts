@@ -6,6 +6,7 @@ import { buildTestOpenAiConnectedAcceptanceRelease } from "@/scripts/founder-ope
 import { FakeBackupObjectStorage } from "@/src/server/backups/backup-storage";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  appMetadata,
   founderInfrastructureRetirements,
   founderRecoveryArchiveDeletionReceipts,
   founderRecoveryArchives,
@@ -19,6 +20,14 @@ import {
 import { expireFounderRecoveryArchivesForUser } from "@/src/server/founder-product-contract/archive-expiry";
 import { EncryptedFounderRecoveryArchiveProvider } from "@/src/server/founder-product-contract/encrypted-recovery-archive-provider";
 import { admitFounderOperatorToOwnerPreview } from "@/src/server/founder-product-contract/owner-preview-admission";
+import {
+  assessFounderOwnerPreviewPromotionEvidenceForUser,
+  FOUNDER_OWNER_PREVIEW_PROMOTION_EVIDENCE_SCHEMA,
+} from "@/src/server/founder-product-contract/owner-preview-promotion";
+import {
+  FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY,
+  persistFounderOwnerPreviewDenialInTransaction,
+} from "@/src/server/founder-product-contract/owner-preview-release-decision";
 import {
   createDurableRecoveryArchive,
   getFounderRecoveryArchiveStatusForUser,
@@ -134,6 +143,74 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       ),
     ).resolves.toBe(archiveId);
     expect(await connection.db.select().from(founderRecoveryArchives)).toHaveLength(1);
+  });
+
+  it("binds promotion classification to the latest persisted uninterrupted admission", async () => {
+    const [activeDecision] = await connection.db
+      .select({ id: founderReleaseDecisions.id })
+      .from(founderReleaseDecisions)
+      .where(eq(founderReleaseDecisions.applicationRevision, APPLICATION_REVISION));
+    if (!activeDecision) throw new Error("Expected seeded Owner Preview admission.");
+    const journeyNames = [
+      "desktop_activation",
+      "phone_activation",
+      "interruption_recovery",
+      "provider_reauthorization",
+      "provider_disconnect",
+      "founder_data_export",
+      "bruno_data_deletion",
+    ] as const;
+    const value = {
+      schemaVersion: FOUNDER_OWNER_PREVIEW_PROMOTION_EVIDENCE_SCHEMA,
+      stage: "owner_preview",
+      classification: "learning_round",
+      ownerUserId: USER_ID,
+      operatorId: OPERATOR_ID,
+      applicationRevision: APPLICATION_REVISION,
+      runtimeRevision: "runtime-v1",
+      activeDecisionId: activeDecision.id,
+      dailyBriefs: Array.from({ length: 7 }, (_, index) => ({
+        day: `2026-08-${String(index + 22).padStart(2, "0")}`,
+        occurredAt: new Date(Date.UTC(2026, 7, index + 22, 12)).toISOString(),
+        evidenceDigest: `sha256:${(index + 1).toString(16).padStart(64, "0")}`,
+      })),
+      journeys: Object.fromEntries(
+        journeyNames.map((journey, index) => [
+          journey,
+          {
+            occurredAt: new Date(START.valueOf() + (index + 1) * 1_000).toISOString(),
+            evidenceDigest: `sha256:${(index + 8).toString(16).padStart(64, "0")}`,
+          },
+        ]),
+      ),
+      unresolvedReleaseBlockers: 0,
+      unresolvedCriticalFailures: 0,
+    };
+
+    await expect(
+      assessFounderOwnerPreviewPromotionEvidenceForUser({
+        value,
+        ownerUserId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        runtimeRevision: "runtime-v1",
+        observedAt: new Date("2026-08-29T00:00:00.000Z"),
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({
+      promotionEligible: true,
+      founderAcceptanceEligible: false,
+      automaticPromotion: false,
+    });
+    await expect(
+      assessFounderOwnerPreviewPromotionEvidenceForUser({
+        value: { ...value, activeDecisionId: randomUUID() },
+        ownerUserId: USER_ID,
+        applicationRevision: APPLICATION_REVISION,
+        runtimeRevision: "runtime-v1",
+        observedAt: new Date("2026-08-29T00:00:00.000Z"),
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({ promotionEligible: false, reasons: ["candidate_mismatch"] });
   });
 
   it("keeps current verified coverage visible when a newer refresh attempt fails", async () => {
@@ -767,6 +844,46 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     ]);
   });
 
+  it("does not replace an active exact-candidate admission when a redundant entry attempt fails", async () => {
+    const applicationRevision = "1".repeat(40);
+    const environment = ownerPreviewEnvironment(applicationRevision);
+    await admitFounderOperatorToOwnerPreview(USER_ID, {
+      applicationRevision,
+      createConnection: () => connection,
+      createProvider: () => provider,
+      env: environment,
+      now: () => START,
+    });
+
+    await expect(
+      admitFounderOperatorToOwnerPreview(USER_ID, {
+        applicationRevision,
+        createConnection: () => connection,
+        createProvider: () => null,
+        env: environment,
+        now: () => new Date(START.valueOf() + 1_000),
+      }),
+    ).rejects.toThrow("Recovery Archive provider is unavailable.");
+    await expect(
+      connection.db.transaction((tx) =>
+        persistFounderOwnerPreviewDenialInTransaction(tx, {
+          userId: USER_ID,
+          operatorId: OPERATOR_ID,
+          applicationRevision,
+          runtimeRevision: "runtime-v1",
+          reason: "recovery_archive_unavailable",
+          decidedAt: new Date(START.valueOf() + 2_000),
+        }),
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      connection.db
+        .select({ outcome: founderReleaseDecisions.outcome })
+        .from(founderReleaseDecisions)
+        .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision)),
+    ).resolves.toEqual([{ outcome: "enter" }]);
+  });
+
   it("rechecks Preview Qualification after Recovery Archive I/O before committing admission", async () => {
     const applicationRevision = "7".repeat(40);
     const environment = ownerPreviewEnvironment(applicationRevision);
@@ -794,10 +911,24 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     ).rejects.toThrow("Owner Preview openai qualification is stale.");
     await expect(
       connection.db
-        .select()
+        .select({
+          outcome: founderReleaseDecisions.outcome,
+          capabilityManifest: founderReleaseDecisions.capabilityManifest,
+          evidenceDigests: founderReleaseDecisions.evidenceDigests,
+          openAiQualificationExpiresAt: founderReleaseDecisions.openAiQualificationExpiresAt,
+          calendarQualificationExpiresAt: founderReleaseDecisions.calendarQualificationExpiresAt,
+        })
         .from(founderReleaseDecisions)
         .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision)),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual([
+      {
+        outcome: "deny",
+        capabilityManifest: ["openai", "calendar_reading"],
+        evidenceDigests: expect.arrayContaining([expect.stringMatching(/^sha256:[a-f0-9]{64}$/)]),
+        openAiQualificationExpiresAt: null,
+        calendarQualificationExpiresAt: null,
+      },
+    ]);
   });
 
   it("rechecks Recovery Archive currency at the final admission commit", async () => {
@@ -823,10 +954,10 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     ).rejects.toThrow("A verified-restorable Recovery Archive is required.");
     await expect(
       connection.db
-        .select()
+        .select({ outcome: founderReleaseDecisions.outcome })
         .from(founderReleaseDecisions)
         .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision)),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual([{ outcome: "deny" }]);
   });
 
   it("does not replace missing Preview Qualification with Recovery Archive proof", async () => {
@@ -845,10 +976,35 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([]);
     await expect(
       connection.db
-        .select()
+        .select({ outcome: founderReleaseDecisions.outcome })
         .from(founderReleaseDecisions)
         .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision)),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual([{ outcome: "deny" }]);
+  });
+
+  it("denies admission when the authenticated candidate is not the mapped Bruno.Ai Owner", async () => {
+    const applicationRevision = "2".repeat(40);
+    await connection.db
+      .update(appMetadata)
+      .set({ value: "00000000-0000-4000-8000-000000003799" })
+      .where(eq(appMetadata.key, FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY));
+
+    await expect(
+      admitFounderOperatorToOwnerPreview(USER_ID, {
+        applicationRevision,
+        createConnection: () => connection,
+        createProvider: () => provider,
+        env: ownerPreviewEnvironment(applicationRevision),
+        now: () => START,
+      }),
+    ).rejects.toThrow("Owner Preview is restricted to the mapped Bruno.Ai Owner.");
+    await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([]);
+    await expect(
+      connection.db
+        .select({ outcome: founderReleaseDecisions.outcome })
+        .from(founderReleaseDecisions)
+        .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision)),
+    ).resolves.toEqual([{ outcome: "deny" }]);
   });
 
   it("admits the authenticated internal Owner in supported production operator mode", async () => {
@@ -896,6 +1052,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       "Owner Preview openai qualification does not match this Owner and candidate.",
     );
     await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([]);
+    await expect(
+      connection.db
+        .select({ outcome: founderReleaseDecisions.outcome })
+        .from(founderReleaseDecisions)
+        .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision)),
+    ).resolves.toEqual([{ outcome: "deny" }]);
   });
 
   it("requires independent evidence for each Preview capability", async () => {
@@ -915,6 +1077,12 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       }),
     ).rejects.toThrow("Owner Preview capabilities require independent qualification evidence.");
     await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([]);
+    await expect(
+      connection.db
+        .select({ outcome: founderReleaseDecisions.outcome })
+        .from(founderReleaseDecisions)
+        .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision)),
+    ).resolves.toEqual([{ outcome: "deny" }]);
   });
 
   it("refreshes with two cron intervals of verification margin", async () => {
@@ -1647,6 +1815,11 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       createdAt: START,
       updatedAt: START,
     });
+    await connection.db.insert(appMetadata).values({
+      key: FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY,
+      value: USER_ID,
+      updatedAt: START,
+    });
     await connection.db.insert(operators).values({
       id: OPERATOR_ID,
       userId: USER_ID,
@@ -1744,5 +1917,8 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     await connection.client.unsafe(
       "delete from founder_recovery_archive_deletion_receipts; delete from founder_infrastructure_retirements; delete from founder_recovery_archives; delete from founder_release_decisions; delete from runners; delete from operator_runtimes; delete from operator_preparations; delete from operators; delete from users",
     );
+    await connection.db
+      .delete(appMetadata)
+      .where(eq(appMetadata.key, FOUNDER_OWNER_PREVIEW_OWNER_METADATA_KEY));
   }
 });

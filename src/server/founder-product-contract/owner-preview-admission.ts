@@ -14,6 +14,11 @@ import {
   requireReadyFounderOperatorAuthorityInTransaction,
 } from "./operator-authority";
 import {
+  type FounderOwnerPreviewDenialReason,
+  persistFounderOwnerPreviewDenialInTransaction,
+  requireFounderOwnerPreviewOwnerMappingInTransaction,
+} from "./owner-preview-release-decision";
+import {
   FOUNDER_OWNER_PREVIEW_CAPABILITIES,
   requireFounderOwnerPreviewQualifications,
 } from "./preview-qualification";
@@ -56,20 +61,12 @@ export async function admitFounderOperatorToOwnerPreview(
     { applicationRevision: dependencies.applicationRevision, env: environment },
     "Owner Preview application revision is unavailable.",
   );
-  const openAIQualification = evaluateFounderOpenAiRelease(environment, now);
-  if (!openAIQualification.released) {
-    throw new Error("Owner Preview OpenAI qualification is unavailable.");
-  }
-  const calendarQualification = evaluateFounderGoogleCalendarRelease(environment, now);
-  if (!calendarQualification.released) {
-    throw new Error("Owner Preview Calendar qualification is unavailable.");
-  }
-  const provider = dependencies.createProvider
-    ? dependencies.createProvider()
-    : createEncryptedFounderRecoveryArchiveProvider();
-  if (!provider) throw new Error("Recovery Archive provider is unavailable.");
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+  let authority: { operatorId: string; runtimeRevision: string } | null = null;
+  let hadPriorAdmission = false;
+  let denialReason: FounderOwnerPreviewDenialReason = "admission_evidence_incomplete";
+  let denialEvidenceDigests: readonly `sha256:${string}`[] = [];
 
   try {
     const [identity] = await connection.db
@@ -84,32 +81,77 @@ export async function admitFounderOperatorToOwnerPreview(
         : identity?.subject
           ? { kind: "clerk" as const, subject: identity.subject }
           : null;
-    if (!identityEvidence) {
-      throw new Error("Owner Preview requires an authenticated production identity.");
-    }
-    const authority = await connection.db.transaction((tx) =>
+    authority = await connection.db.transaction((tx) =>
       requireReadyFounderOperatorAuthorityInTransaction(tx, userId),
     );
-    requireFounderOwnerPreviewQualifications(
+    const candidateAuthority = authority;
+    const [priorAdmission] = await connection.db
+      .select({ id: founderReleaseDecisions.id })
+      .from(founderReleaseDecisions)
+      .where(
+        and(
+          eq(founderReleaseDecisions.userId, userId),
+          eq(founderReleaseDecisions.operatorId, candidateAuthority.operatorId),
+          eq(founderReleaseDecisions.stage, "owner_preview"),
+          inArray(founderReleaseDecisions.outcome, ["enter", "resume"]),
+          eq(founderReleaseDecisions.applicationRevision, applicationRevision),
+          eq(founderReleaseDecisions.runtimeRevision, candidateAuthority.runtimeRevision),
+        ),
+      )
+      .limit(1);
+    hadPriorAdmission = Boolean(priorAdmission);
+    if (!identityEvidence) {
+      denialReason = "identity_unavailable";
+      throw new Error("Owner Preview requires an authenticated production identity.");
+    }
+    await connection.db.transaction((tx) =>
+      requireFounderOwnerPreviewOwnerMappingInTransaction(tx, userId, false),
+    );
+    const openAIQualification = evaluateFounderOpenAiRelease(environment, now);
+    if (!openAIQualification.released) {
+      denialReason = "provider_gate_unavailable";
+      throw new Error("Owner Preview OpenAI qualification is unavailable.");
+    }
+    const calendarQualification = evaluateFounderGoogleCalendarRelease(environment, now);
+    if (!calendarQualification.released) {
+      denialReason = "provider_gate_unavailable";
+      throw new Error("Owner Preview Calendar qualification is unavailable.");
+    }
+    denialReason = "preview_qualification_unavailable";
+    const initialPreviewQualifications = requireFounderOwnerPreviewQualifications(
       {
         userId,
-        operatorId: authority.operatorId,
+        operatorId: candidateAuthority.operatorId,
         applicationRevision,
-        runtimeRevision: authority.runtimeRevision,
+        runtimeRevision: candidateAuthority.runtimeRevision,
         now,
       },
       environment,
     );
+    denialEvidenceDigests = [
+      ...initialPreviewQualifications.map((qualification) => qualification.evidenceDigest),
+      openAIQualification.evidence.evidenceDigest,
+      calendarQualification.evidence.evidenceDigest,
+    ];
+    denialReason = "recovery_archive_unavailable";
+    const provider = dependencies.createProvider
+      ? dependencies.createProvider()
+      : createEncryptedFounderRecoveryArchiveProvider();
+    if (!provider) throw new Error("Recovery Archive provider is unavailable.");
     const archiveId = await createDurableRecoveryArchive(
       { action: "release_stage_admission", userId, now, applicationRevision },
       provider,
       connection,
       clock,
     );
+    denialReason = "admission_evidence_incomplete";
     await connection.db.transaction(async (tx) => {
       const { operatorId, runtimeRevision } =
         await requireReadyFounderOperatorAuthorityInTransaction(tx, userId);
-      if (operatorId !== authority.operatorId || runtimeRevision !== authority.runtimeRevision) {
+      if (
+        operatorId !== candidateAuthority.operatorId ||
+        runtimeRevision !== candidateAuthority.runtimeRevision
+      ) {
         throw new Error("Owner Preview authority changed during admission.");
       }
       const committedAt = clock();
@@ -196,6 +238,22 @@ export async function admitFounderOperatorToOwnerPreview(
       });
     });
     return { archiveId };
+  } catch (error) {
+    if (authority && !hadPriorAdmission) {
+      const reason = isOwnerMappingMismatch(error) ? "owner_mismatch" : denialReason;
+      await connection.db.transaction((tx) =>
+        persistFounderOwnerPreviewDenialInTransaction(tx, {
+          userId,
+          operatorId: authority?.operatorId ?? "",
+          applicationRevision,
+          runtimeRevision: authority?.runtimeRevision ?? "",
+          reason,
+          evidenceDigests: denialEvidenceDigests,
+          decidedAt: clock(),
+        }),
+      );
+    }
+    throw error;
   } finally {
     if (ownsConnection) await connection.close();
   }
@@ -216,6 +274,7 @@ export async function persistQualifiedFounderOwnerPreviewAdmissionInTransaction(
     throw new Error("Owner Preview qualification evidence is incomplete.");
   }
   const capabilityManifest = FOUNDER_OWNER_PREVIEW_CAPABILITIES;
+  await requireFounderOwnerPreviewOwnerMappingInTransaction(tx, input.userId, true);
   const archiveEvidenceDigest = founderProductContractDigest(
     `recovery-archive:${input.recoveryArchiveId}`,
   );
@@ -254,23 +313,43 @@ export async function persistQualifiedFounderOwnerPreviewAdmissionInTransaction(
     ) &&
     evidenceDigests.every((digest) => latestDecision.evidenceDigests.includes(digest));
   if (alreadyQualified) return;
-  if (latestDecision?.outcome === "hold") {
-    const [priorActiveDecision] = await tx
-      .select({ evidenceDigests: founderReleaseDecisions.evidenceDigests })
-      .from(founderReleaseDecisions)
-      .where(
-        and(
-          eq(founderReleaseDecisions.userId, input.userId),
-          eq(founderReleaseDecisions.operatorId, input.operatorId),
-          eq(founderReleaseDecisions.stage, "owner_preview"),
-          inArray(founderReleaseDecisions.outcome, ["enter", "resume"]),
-        ),
-      )
-      .orderBy(desc(founderReleaseDecisions.decidedAt))
-      .limit(1)
-      .for("update");
+  const [latestHold] = await tx
+    .select({ decidedAt: founderReleaseDecisions.decidedAt })
+    .from(founderReleaseDecisions)
+    .where(
+      and(
+        eq(founderReleaseDecisions.userId, input.userId),
+        eq(founderReleaseDecisions.operatorId, input.operatorId),
+        eq(founderReleaseDecisions.stage, "owner_preview"),
+        eq(founderReleaseDecisions.outcome, "hold"),
+      ),
+    )
+    .orderBy(desc(founderReleaseDecisions.decidedAt))
+    .limit(1)
+    .for("update");
+  const [priorActiveDecision] = await tx
+    .select({
+      evidenceDigests: founderReleaseDecisions.evidenceDigests,
+      decidedAt: founderReleaseDecisions.decidedAt,
+    })
+    .from(founderReleaseDecisions)
+    .where(
+      and(
+        eq(founderReleaseDecisions.userId, input.userId),
+        eq(founderReleaseDecisions.operatorId, input.operatorId),
+        eq(founderReleaseDecisions.stage, "owner_preview"),
+        inArray(founderReleaseDecisions.outcome, ["enter", "resume"]),
+      ),
+    )
+    .orderBy(desc(founderReleaseDecisions.decidedAt))
+    .limit(1)
+    .for("update");
+  const held = Boolean(
+    latestHold && (!priorActiveDecision || latestHold.decidedAt > priorActiveDecision.decidedAt),
+  );
+  if (held) {
     if (
-      input.qualificationObservedAt <= latestDecision.decidedAt ||
+      input.qualificationObservedAt <= (latestHold?.decidedAt ?? input.now) ||
       input.freshQualificationEvidenceDigests.length === 0 ||
       !priorActiveDecision ||
       input.freshQualificationEvidenceDigests.some((digest) =>
@@ -280,18 +359,29 @@ export async function persistQualifiedFounderOwnerPreviewAdmissionInTransaction(
       throw new Error("Release Hold requires fresh Preview Qualification evidence.");
     }
   }
+  const decidedAt =
+    latestDecision && input.now <= latestDecision.decidedAt
+      ? new Date(latestDecision.decidedAt.valueOf() + 1)
+      : input.now;
   await tx.insert(founderReleaseDecisions).values({
     userId: input.userId,
     operatorId: input.operatorId,
     stage: "owner_preview",
-    outcome: latestDecision?.outcome === "hold" ? "resume" : "enter",
+    outcome: held ? "resume" : "enter",
     applicationRevision: input.applicationRevision,
     runtimeRevision: input.runtimeRevision,
     capabilityManifest,
     openAiQualificationExpiresAt: input.qualificationExpiresAt.openai,
     calendarQualificationExpiresAt: input.qualificationExpiresAt.calendar_reading,
     evidenceDigests,
-    decidedAt: input.now,
-    createdAt: input.now,
+    decidedAt,
+    createdAt: decidedAt,
   });
+}
+
+function isOwnerMappingMismatch(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message === "Owner Preview is restricted to the mapped Bruno.Ai Owner."
+  );
 }

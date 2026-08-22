@@ -89,6 +89,7 @@ export async function deleteFounderProductContractFixture(
     await sql`delete from operator_preparations where operator_id = ${fixture.operatorId}`;
     await sql`delete from operators where id = ${fixture.operatorId}`;
     await sql`delete from users where id = ${fixture.userId}`;
+    await sql`delete from app_metadata where key = 'founder_owner_preview_owner_user_id:v1' and value = ${fixture.userId}`;
   });
 }
 
@@ -99,6 +100,7 @@ export async function assertPersistedFounderLifecycleAuthority(
     const [authority] = await sql<
       {
         release_decisions: number;
+        release_decision_outcomes: string[];
         scenario_executions: number;
         commerce_events: number;
         terminal_entitlements: number;
@@ -116,6 +118,7 @@ export async function assertPersistedFounderLifecycleAuthority(
       }[]
     >`select
       (select count(*)::int from founder_release_decisions where user_id = ${fixture.userId}) as release_decisions,
+      (select array_agg(outcome order by decided_at) from founder_release_decisions where user_id = ${fixture.userId}) as release_decision_outcomes,
       (select count(*)::int from founder_product_contract_scenario_executions where user_id = ${fixture.userId}) as scenario_executions,
       (select count(*)::int from founder_commerce_events where user_id = ${fixture.userId}) as commerce_events,
       (select count(*)::int from founder_product_entitlements where user_id = ${fixture.userId} and status = 'cancelled' and retirement_due_at is not null) as terminal_entitlements,
@@ -131,12 +134,13 @@ export async function assertPersistedFounderLifecycleAuthority(
       (select count(*)::int from runners where user_id = ${fixture.userId} and deleted_at is null) as active_runners,
       (select external_action_pause from operators where id = ${fixture.operatorId}) as paused`;
     expect(authority).toMatchObject({
-      release_decisions: 1,
+      release_decisions: 3,
+      release_decision_outcomes: ["enter", "hold", "resume"],
       scenario_executions: 4,
       commerce_events: 2,
       terminal_entitlements: 1,
       consumed_correlations: 1,
-      safe_release_decisions: 1,
+      safe_release_decisions: 3,
       archives: 2,
       failed_archives: 1,
       deleted_archives: 1,
@@ -161,6 +165,15 @@ export async function readFounderScenarioExecutions(runId: string, userId: strin
           cleanup_verified: boolean;
         }[]
       >`select scenario_id, status, attempts, cleanup_verified from founder_product_contract_scenario_executions where run_id = ${runId} and user_id = ${userId} order by scenario_id`,
+  );
+}
+
+export async function readFounderReleaseDecisions(userId: string) {
+  return withFounderProductContractDatabase(
+    (sql) =>
+      sql<
+        { outcome: string; application_revision: string; runtime_revision: string }[]
+      >`select outcome, application_revision, runtime_revision from founder_release_decisions where user_id = ${userId} order by decided_at`,
   );
 }
 

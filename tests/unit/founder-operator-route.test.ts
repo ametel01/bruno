@@ -148,6 +148,14 @@ describe("Founder Operator route", () => {
       infrastructureRetirement: { state: "unavailable" },
       ownerPreviewAdmitted: true,
       ownerPreviewWorkAllowed: true,
+      ownerPreview: {
+        stage: "Owner Preview",
+        state: "active",
+        availableCapabilities: ["OpenAI", "Calendar reading"],
+        supportBoundary: "Fully attended",
+        evidenceClassification: "Learning Round",
+        automaticPromotion: false,
+      },
       recoveryArchive: expect.objectContaining({
         state: "current",
         restoreVerifiedAt: "2026-08-22T00:00:00.000Z",
@@ -261,7 +269,7 @@ describe("Founder Operator route", () => {
     expect(await invalid.json()).toMatchObject({ error: { code: "validation_failed" } });
   });
 
-  it("starts idempotent runtime preparation without exposing infrastructure phases", async () => {
+  it("prepares the runtime without automatically entering Owner Preview", async () => {
     const { POST } = await import("@/app/api/operator/route");
     const response = await POST(
       new Request("http://localhost/api/operator", {
@@ -271,6 +279,7 @@ describe("Founder Operator route", () => {
       undefined,
       {
         admitOwnerPreview: mocks.admitOwnerPreview,
+        getOwnerPreviewAccess: mocks.getOwnerPreviewAccess,
         prepareRuntime: mocks.prepareRuntime,
       },
     );
@@ -280,29 +289,49 @@ describe("Founder Operator route", () => {
       runtime: { status: "ready", transportState: "connected", safetyState: "verified" },
     });
     expect(mocks.prepareRuntime).toHaveBeenCalledWith(USER_ID);
-    expect(mocks.admitOwnerPreview).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.admitOwnerPreview).not.toHaveBeenCalled();
   });
 
-  it("fails Owner Preview admission closed when no verified Recovery Archive can be created", async () => {
+  it("enters Owner Preview only after an explicit exact-revision decision", async () => {
     const { POST } = await import("@/app/api/operator/route");
-    mocks.admitOwnerPreview.mockRejectedValueOnce(
-      new Error("Recovery Archive storage unavailable"),
-    );
 
     const response = await POST(
       new Request("http://localhost/api/operator", {
         method: "POST",
-        body: JSON.stringify({ action: "prepare" }),
+        body: JSON.stringify({ action: "enter_owner_preview" }),
       }),
       undefined,
       {
         admitOwnerPreview: mocks.admitOwnerPreview,
+        getOwnerPreviewAccess: mocks.getOwnerPreviewAccess,
         prepareRuntime: mocks.prepareRuntime,
       },
     );
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(200);
+    expect(mocks.admitOwnerPreview).toHaveBeenCalledWith(USER_ID);
     expect(await response.json()).toMatchObject({
+      ownerPreviewAdmitted: true,
+      ownerPreview: { stage: "Owner Preview", evidenceClassification: "Learning Round" },
+    });
+  });
+
+  it("persists a fail-closed denial when explicit Owner Preview evidence is unavailable", async () => {
+    const { POST } = await import("@/app/api/operator/route");
+    mocks.admitOwnerPreview.mockRejectedValueOnce(
+      new Error("Recovery Archive storage unavailable"),
+    );
+    const response = await POST(
+      new Request("http://localhost/api/operator", {
+        method: "POST",
+        body: JSON.stringify({ action: "enter_owner_preview" }),
+      }),
+      undefined,
+      { admitOwnerPreview: mocks.admitOwnerPreview },
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
       error: { code: "owner_preview_unavailable" },
     });
   });

@@ -4,6 +4,7 @@ import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 import { getFounderInfrastructureRetirementStatusForUser } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
+import { projectFounderOwnerPreviewStatus } from "@/src/server/founder-product-contract/owner-preview-status";
 import {
   getFounderRecoveryArchiveStatusForUser,
   unavailableFounderRecoveryArchiveStatus,
@@ -79,6 +80,7 @@ export default async function FounderOperatorPage() {
           ownerPreviewAccess,
           FOUNDER_OWNER_PREVIEW_CAPABILITIES,
         )}
+        ownerPreview={projectFounderOwnerPreviewStatus(ownerPreviewAccess)}
         timezoneOptions={buildFounderTimezoneOptions()}
         openAiReleased={openAiReleased}
         calendarReadingReleased={calendarReadingReleased}

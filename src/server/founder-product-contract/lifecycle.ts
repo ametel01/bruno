@@ -11,7 +11,9 @@ import {
   requireReadyFounderOperatorAuthorityInTransaction,
 } from "./operator-authority";
 import { persistQualifiedFounderOwnerPreviewAdmissionInTransaction } from "./owner-preview-admission";
+import { persistFounderOwnerPreviewDenialInTransaction } from "./owner-preview-release-decision";
 import { FOUNDER_PREVIEW_QUALIFICATION_MAX_AGE_MS } from "./preview-qualification";
+import { persistFounderOwnerPreviewHoldInTransaction } from "./release-stage-hold";
 import { createDurableRecoveryArchive } from "./recovery-archive";
 import type { FounderRecoveryArchiveProvider } from "./recovery-archive-provider";
 
@@ -172,6 +174,52 @@ export async function executeFounderProductContractLifecycleAction(
             recoveryArchiveId: lifecycleArchiveId,
             now: input.now,
           });
+          const holdAt = new Date(input.now.valueOf() + 1);
+          await persistFounderOwnerPreviewHoldInTransaction(tx, {
+            userId: input.userId,
+            operatorId,
+            applicationRevision: dependencies.applicationRevision,
+            runtimeRevision,
+            affectedCapabilities: ["calendar_reading"],
+            evidenceDigests: [
+              founderProductContractDigest(
+                JSON.stringify({ kind: "founder_contract_release_hold", at: holdAt.toISOString() }),
+              ),
+            ],
+            decidedAt: holdAt,
+          });
+          const resumeAt = new Date(holdAt.valueOf() + 1);
+          const resumedQualificationEvidenceDigests = [
+            founderProductContractDigest(
+              JSON.stringify({ capability: "openai", qualifiedAt: resumeAt.toISOString() }),
+            ),
+            founderProductContractDigest(
+              JSON.stringify({
+                capability: "calendar_reading",
+                qualifiedAt: resumeAt.toISOString(),
+              }),
+            ),
+          ];
+          await persistQualifiedFounderOwnerPreviewAdmissionInTransaction(tx, {
+            userId: input.userId,
+            operatorId,
+            applicationRevision: dependencies.applicationRevision,
+            runtimeRevision,
+            identityKind: "clerk",
+            identitySubject: identity.subject,
+            qualificationEvidenceDigests: resumedQualificationEvidenceDigests,
+            freshQualificationEvidenceDigests: resumedQualificationEvidenceDigests,
+            qualificationObservedAt: resumeAt,
+            qualificationExpiresAt: {
+              openai: new Date(resumeAt.valueOf() + FOUNDER_PREVIEW_QUALIFICATION_MAX_AGE_MS),
+              calendar_reading: new Date(
+                resumeAt.valueOf() + FOUNDER_PREVIEW_QUALIFICATION_MAX_AGE_MS,
+              ),
+            },
+            recoveryArchiveId: lifecycleArchiveId,
+            now: resumeAt,
+          });
+          cleanup.observedAt = resumeAt.toISOString();
           break;
         }
         case "product_entitlement_lifecycle": {
@@ -200,6 +248,22 @@ export async function executeFounderProductContractLifecycleAction(
         cleanup,
       };
     });
+  } catch (error) {
+    if (input.action === "release_stage_admission") {
+      await connection.db.transaction(async (tx) => {
+        const { operatorId, runtimeRevision } =
+          await requireReadyFounderOperatorAuthorityInTransaction(tx, input.userId);
+        await persistFounderOwnerPreviewDenialInTransaction(tx, {
+          userId: input.userId,
+          operatorId,
+          applicationRevision: dependencies.applicationRevision,
+          runtimeRevision,
+          reason: "admission_evidence_incomplete",
+          decidedAt: input.now,
+        });
+      });
+    }
+    throw error;
   } finally {
     if (ownsConnection) await connection.close();
   }
