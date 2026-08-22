@@ -46,7 +46,8 @@ allowlist.
 
 The same run also emits `founder-initial-general-release-decision.json`. In ordinary CI this is an
 explicit denied decision because attended evidence is absent. A release-mode dispatch may provide
-two JSON inputs containing allowlisted counts and SHA-256 evidence digests only:
+two JSON inputs containing only allowlisted aggregate counts, exact timestamps, release outcomes,
+retention controls, and SHA-256 evidence digests:
 
 - `moderated_founder_summary_json` records the 4/4 desktop/phone cohort, cross-device day-two count,
   7-of-8 activation/action/recovery and first-brief thresholds, 8-of-8 comprehension, zero critical

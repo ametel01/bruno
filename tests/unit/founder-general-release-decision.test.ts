@@ -166,10 +166,18 @@ describe("Founder Initial General Release decision", () => {
         };
       };
     };
+    const study = moderatedSummary() as ReturnType<typeof moderatedSummary> & {
+      participants: ReturnType<typeof moderatedSummary>["participants"] & { private?: string };
+      criticalFailures: ReturnType<typeof moderatedSummary>["criticalFailures"] & {
+        transcript?: string;
+      };
+    };
     summary.private = "do-not-retain";
     summary.providers.openai.credential = "do-not-retain";
+    study.participants.private = "do-not-retain";
+    study.criticalFailures.transcript = "do-not-retain";
 
-    const decision = generalReleaseDecision(summary);
+    const decision = generalReleaseDecision(summary, study);
 
     expect(decision.outcome).toBe("approved");
     expect(JSON.stringify(decision)).not.toContain("do-not-retain");
@@ -179,23 +187,42 @@ describe("Founder Initial General Release decision", () => {
     expect(() => parseFounderModeratedSummary('{"private":"do-not-print"}')).toThrow(
       "Moderated Founder summary is invalid.",
     );
-    expect(() => parseFounderProviderDecisionSummary("not-json-do-not-print")).toThrow(
-      "Founder provider decision summary is invalid.",
-    );
+    const malformed = parseFounderProviderDecisionSummary("not-json-do-not-print");
+    expect(malformed).toBeNull();
+    const malformedDecision = buildFounderInitialGeneralReleaseDecision({
+      productContract: productContract("release"),
+      moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
+      providerSummary: malformed,
+    });
+    expect(malformedDecision).toMatchObject({
+      outcome: "denied",
+      reasons: ["provider_decision_evidence_missing"],
+    });
+    expect(JSON.stringify(malformedDecision)).not.toContain("do-not-print");
+
     const missingAnthropic = providerSummary();
     delete (missingAnthropic.providers as Partial<typeof missingAnthropic.providers>).anthropic;
-    expect(() =>
-      parseFounderProviderDecisionSummary(
-        JSON.stringify({ ...missingAnthropic, private: "do-not-print" }),
-      ),
-    ).toThrow("Founder provider decision summary is invalid.");
+    const missing = parseFounderProviderDecisionSummary(
+      JSON.stringify({ ...missingAnthropic, private: "do-not-print" }),
+    );
+    expect(missing).toBeNull();
+    expect(
+      buildFounderInitialGeneralReleaseDecision({
+        productContract: productContract("release"),
+        moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
+        providerSummary: missing,
+      }),
+    ).toMatchObject({
+      outcome: "denied",
+      reasons: ["provider_decision_evidence_missing"],
+    });
   });
 });
 
-function generalReleaseDecision(summary = providerSummary()) {
+function generalReleaseDecision(summary = providerSummary(), study = moderatedSummary()) {
   return buildFounderInitialGeneralReleaseDecision({
     productContract: productContract("release"),
-    moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
+    moderatedSummary: parseFounderModeratedSummary(JSON.stringify(study)),
     providerSummary: parseFounderProviderDecisionSummary(JSON.stringify(summary)),
   });
 }
