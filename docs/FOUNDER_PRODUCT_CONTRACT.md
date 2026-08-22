@@ -143,11 +143,15 @@ expected firewall identity before destructive provider effects; later retries ne
 deletion scope from mutable runner assignment. New work is paused and runtime credentials are
 revoked in that same transaction. Provider ambiguity, request timeout, lost deletion responses,
 duplicate execution, and partial cleanup leave the receipt in progress and retry the same frozen
-identity. A completed receipt requires authoritative absence for both resources. It records the
+identity. The registered Founder Product Contract retirement suite exercises normal completion,
+duplicate scheduling, worker interruption after a provider-side effect, ambiguous ownership,
+provider timeout, unknown deletion outcome, and partial cleanup retry. A completed receipt requires
+authoritative absence for both resources. It records the
 provider-reported Droplet creation time and the final absence observation so billable runtime
 includes powered-off, stopped, idle, or locally unassigned provider-present Droplets. Archive
 creation or expiry failure is recorded as a critical preservation failure but does not block
-infrastructure destruction or extend the hard deadline; the bounded archive outcome is recorded
+infrastructure destruction or extend the hard deadline; the bounded emergency attempt finishes or
+is recorded failed before the first destructive provider request, and its outcome is recorded
 before the Infrastructure Retirement Receipt completes. S3-compatible request and response-body
 operations use a 10-second abort deadline, including creation, restore verification, expiry, and
 deletion-safety checks. These deterministic provider results prove

@@ -18,12 +18,12 @@ import {
   users,
 } from "@/src/server/db/schema";
 import { EncryptedFounderRecoveryArchiveProvider } from "@/src/server/founder-product-contract/encrypted-recovery-archive-provider";
+import { getFounderInfrastructureRetirementStatusForUser } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import {
   executeFounderProductContractLifecycleAction,
   type FounderCommerceEvent,
   type FounderLifecycleProviderBoundary,
 } from "@/src/server/founder-product-contract/lifecycle";
-import { getFounderInfrastructureRetirementStatusForUser } from "@/src/server/founder-product-contract/infrastructure-retirement";
 
 const USER_ID = "00000000-0000-4000-8000-000000003740";
 const OPERATOR_ID = "00000000-0000-4000-8000-000000003741";
@@ -50,7 +50,7 @@ describe("Founder Infrastructure Retirement deadline", () => {
     await connection.close();
   });
 
-  it("deletes billable infrastructure before waiting for archive I/O", async () => {
+  it("attempts the bounded Recovery Archive before deleting billable infrastructure", async () => {
     let markArchiveStarted: (() => void) | undefined;
     let releaseArchive: (() => void) | undefined;
     let markDropletDeleted: (() => void) | undefined;
@@ -82,9 +82,9 @@ describe("Founder Infrastructure Retirement deadline", () => {
     await expect(
       Promise.race([
         dropletDeleted.then(() => "deleted" as const),
-        new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 1_000)),
+        new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 25)),
       ]),
-    ).resolves.toBe("deleted");
+    ).resolves.toBe("blocked");
     await expect(
       connection.db
         .select()
@@ -94,6 +94,7 @@ describe("Founder Infrastructure Retirement deadline", () => {
     releaseArchive?.();
 
     await expect(execution).resolves.toMatchObject({ cleanup: { resourcesAfter: 0 } });
+    await expect(dropletDeleted).resolves.toBeUndefined();
     await expect(
       connection.db
         .select()
@@ -107,6 +108,35 @@ describe("Founder Infrastructure Retirement deadline", () => {
         runtimeIdentity: null,
         readyAt: null,
         failureCode: "infrastructure_retired",
+      }),
+    ]);
+  });
+
+  it("records a timed-out archive attempt and destroys infrastructure within the bounded wait", async () => {
+    const providers = retirementProviders({
+      createRecoveryArchive: () => new Promise(() => undefined),
+    });
+
+    await expect(
+      executeFounderProductContractLifecycleAction(await retirementInput("archive-timeout"), {
+        providers,
+        commerceWebhookSecret: COMMERCE_SECRET,
+        applicationRevision: "a".repeat(40),
+        providerRequestTimeoutMilliseconds: 5,
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({ cleanup: { resourcesAfter: 0, verified: true } });
+    await expect(
+      connection.db
+        .select()
+        .from(founderInfrastructureRetirements)
+        .where(eq(founderInfrastructureRetirements.runnerId, RUNNER_ID)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        status: "completed",
+        archiveOutcome: "failed",
+        archiveFailureCode: "archive_create_timeout",
+        hardDestructionDueAt: NOW,
       }),
     ]);
   });
@@ -362,6 +392,64 @@ describe("Founder Infrastructure Retirement deadline", () => {
     ]);
   });
 
+  it("resumes an interrupted cleanup after the firewall disappeared without a response", async () => {
+    const first = retirementProviders();
+    first.digitalOcean.deleteFirewall = async () => {
+      throw new Error("worker interrupted after firewall deletion");
+    };
+    const input = await retirementInput("interrupted");
+    await expect(
+      executeFounderProductContractLifecycleAction(input, {
+        providers: first,
+        commerceWebhookSecret: COMMERCE_SECRET,
+        applicationRevision: "a".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).rejects.toThrow("worker interrupted");
+
+    let dropletPresent = true;
+    let firewallDeleteCalls = 0;
+    const retry = retirementProviders();
+    retry.digitalOcean = {
+      async observeOwnedSet() {
+        return {
+          ok: true,
+          value: {
+            state: dropletPresent ? "owned" : "absent",
+            droplet: dropletPresent ? "present" : "absent",
+            firewall: "absent",
+            dropletCreatedAt: dropletPresent
+              ? new Date(NOW.valueOf() - 48 * 60 * 60 * 1_000).toISOString()
+              : null,
+          },
+        };
+      },
+      async deleteFirewall() {
+        firewallDeleteCalls += 1;
+        return { ok: true, value: { state: "absent" } };
+      },
+      async deleteDroplet() {
+        dropletPresent = false;
+        return { ok: true, value: { state: "absent" } };
+      },
+    };
+    await expect(
+      executeFounderProductContractLifecycleAction(input, {
+        providers: retry,
+        commerceWebhookSecret: COMMERCE_SECRET,
+        applicationRevision: "a".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({ cleanup: { verified: true, resourcesAfter: 0 } });
+    expect(firewallDeleteCalls).toBe(0);
+    await expect(
+      connection.db
+        .select({ attempts: founderInfrastructureRetirements.attemptCount })
+        .from(founderInfrastructureRetirements)
+        .where(eq(founderInfrastructureRetirements.runnerId, RUNNER_ID)),
+    ).resolves.toEqual([{ attempts: 2 }]);
+  });
+
   it.each([
     "active",
     "online",
@@ -386,6 +474,32 @@ describe("Founder Infrastructure Retirement deadline", () => {
       .where(eq(founderInfrastructureRetirements.runnerId, RUNNER_ID));
     expect(receipt?.seconds).toBe(172_800);
     expect(receipt?.archiveOutcome).toBe("verified");
+  });
+
+  it("counts a locally unassigned provider-present Droplet until authoritative absence", async () => {
+    await connection.db
+      .update(runners)
+      .set({
+        status: "deleted",
+        provisioningStatus: "deleted",
+        deletedAt: new Date(NOW.valueOf() - 60 * 60 * 1_000),
+      })
+      .where(eq(runners.id, RUNNER_ID));
+
+    await expect(
+      executeFounderProductContractLifecycleAction(await retirementInput("locally-unassigned"), {
+        providers: retirementProviders(),
+        commerceWebhookSecret: COMMERCE_SECRET,
+        applicationRevision: "a".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({ cleanup: { resourcesBefore: 2, resourcesAfter: 0 } });
+    await expect(
+      connection.db
+        .select({ seconds: founderInfrastructureRetirements.billableRuntimeSeconds })
+        .from(founderInfrastructureRetirements)
+        .where(eq(founderInfrastructureRetirements.runnerId, RUNNER_ID)),
+    ).resolves.toEqual([{ seconds: 172_800 }]);
   });
 
   it("fences a retirement retry to the persisted archive runtime revision", async () => {

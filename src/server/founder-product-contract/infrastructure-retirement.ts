@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import {
   founderInfrastructureRetirements,
@@ -112,9 +112,13 @@ export async function executeFounderInfrastructureRetirement(
   const prepared = await prepareFounderInfrastructureRetirement(input, dependencies, connection);
   if ("cleanup" in prepared) return prepared.cleanup;
 
-  let archiveFulfillment: Promise<void> | null = null;
-
   try {
+    const archiveOutcome = await attemptBoundedRecoveryArchive(
+      input,
+      prepared,
+      dependencies,
+      connection,
+    );
     const observedResult = await runProviderStep(
       "observe_owned_resources",
       (signal) =>
@@ -134,19 +138,6 @@ export async function executeFounderInfrastructureRetirement(
       providerResourceCreatedAt,
       connection,
     );
-    archiveFulfillment = prepared.archiveNeedsExecution
-      ? fulfillRecoveryArchiveIntent(
-          { ...input, applicationRevision: dependencies.applicationRevision },
-          dependencies.providers,
-          connection,
-          prepared.recoveryArchiveId,
-          prepared.operatorId,
-          false,
-          () => input.now,
-          prepared.runtimeRevision,
-        )
-      : Promise.resolve();
-
     if (observation.firewall === "present") {
       const firewall = await runProviderStep(
         "delete_firewall",
@@ -199,8 +190,6 @@ export async function executeFounderInfrastructureRetirement(
     }
     providerResourceCreatedAt = requireProviderCostOrigin(after, providerResourceCreatedAt);
     await recordProviderObservation(input, prepared, after, providerResourceCreatedAt, connection);
-    await archiveFulfillment;
-    const archiveOutcome = await readArchiveOutcome(prepared.recoveryArchiveId, connection);
     await completeFounderInfrastructureRetirement(
       input,
       prepared,
@@ -209,20 +198,6 @@ export async function executeFounderInfrastructureRetirement(
       connection,
     );
   } catch (error) {
-    await archiveFulfillment?.catch(() => undefined);
-    if (archiveFulfillment) {
-      try {
-        await recordArchiveOutcome(
-          prepared.receiptId,
-          prepared.leaseToken,
-          await readArchiveOutcome(prepared.recoveryArchiveId, connection),
-          input.now,
-          connection,
-        );
-      } catch {
-        // The provider failure remains authoritative. A pending archive is retried with the receipt.
-      }
-    }
     await retainFounderInfrastructureRetirementFailure(input, prepared, error, connection);
     throw error;
   }
@@ -357,8 +332,6 @@ async function prepareFounderInfrastructureRetirement(
               eq(runners.userId, input.userId),
               eq(runners.kind, "digitalocean"),
               eq(runners.provider, "digitalocean"),
-              inArray(runners.status, ["active", "online", "offline", "degraded"]),
-              isNull(runners.deletedAt),
             ),
           )
           .limit(2)
@@ -493,6 +466,65 @@ async function prepareFounderInfrastructureRetirement(
       providerResourceCreatedAt: receipt.providerResourceCreatedAt,
     };
   });
+}
+
+async function attemptBoundedRecoveryArchive(
+  input: FounderInfrastructureRetirementInput,
+  work: RetirementWork,
+  dependencies: RetirementDependencies,
+  connection: DatabaseConnection,
+): Promise<{ outcome: "verified" | "failed"; failureCode: string | null }> {
+  if (work.archiveNeedsExecution) {
+    const attempt = fulfillRecoveryArchiveIntent(
+      { ...input, applicationRevision: dependencies.applicationRevision },
+      dependencies.providers,
+      connection,
+      work.recoveryArchiveId,
+      work.operatorId,
+      false,
+      () => input.now,
+      work.runtimeRevision,
+    );
+    const completed = await waitForBoundedArchiveAttempt(
+      attempt,
+      dependencies.providerRequestTimeoutMilliseconds,
+    );
+    if (!completed) {
+      await connection.db
+        .update(founderRecoveryArchives)
+        .set({ status: "failed", failureCode: "archive_create_timeout" })
+        .where(
+          and(
+            eq(founderRecoveryArchives.id, work.recoveryArchiveId),
+            eq(founderRecoveryArchives.status, "pending"),
+          ),
+        );
+      // A late publication observes the non-pending intent and enters the archive module's
+      // rejected-publication cleanup path. Its completion cannot delay infrastructure destruction.
+      void attempt.catch(() => undefined);
+    }
+  }
+  const outcome = await readArchiveOutcome(work.recoveryArchiveId, connection);
+  await recordArchiveOutcome(work.receiptId, work.leaseToken, outcome, input.now, connection);
+  return outcome;
+}
+
+async function waitForBoundedArchiveAttempt(
+  attempt: Promise<void>,
+  configuredTimeout?: number,
+): Promise<boolean> {
+  const timeout = providerRequestTimeout(configuredTimeout);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      attempt.then(() => true),
+      new Promise<false>((resolve) => {
+        timeoutId = setTimeout(() => resolve(false), timeout);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 function expectationFromRunner(
@@ -762,10 +794,7 @@ async function runProviderStep<T>(
   run: (signal: AbortSignal) => Promise<T>,
   configuredTimeout?: number,
 ): Promise<T> {
-  const timeout = configuredTimeout ?? DEFAULT_PROVIDER_REQUEST_TIMEOUT_MILLISECONDS;
-  if (!Number.isSafeInteger(timeout) || timeout <= 0) {
-    throw new Error("Infrastructure Retirement provider timeout must be a positive integer.");
-  }
+  const timeout = providerRequestTimeout(configuredTimeout);
   const controller = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -786,6 +815,14 @@ async function runProviderStep<T>(
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }
+}
+
+function providerRequestTimeout(configuredTimeout?: number): number {
+  const timeout = configuredTimeout ?? DEFAULT_PROVIDER_REQUEST_TIMEOUT_MILLISECONDS;
+  if (!Number.isSafeInteger(timeout) || timeout <= 0) {
+    throw new Error("Infrastructure Retirement provider timeout must be a positive integer.");
+  }
+  return timeout;
 }
 
 class RetirementFailure extends Error {
