@@ -645,6 +645,13 @@
       "when": 1787382546727,
       "tag": "0091_enforce_owner_preview_manifest",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1787383692445,
+      "tag": "0092_owner_preview_qualification_expiry",
+      "breakpoints": true
     }
   ]
 }

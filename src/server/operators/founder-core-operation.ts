@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import { requireFounderOwnerPreviewAccessInTransaction } from "@/src/server/founder-product-contract/release-stage-access";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import type * as schema from "@/src/server/db/schema";
 import {
   operatorAiConnections,
@@ -102,6 +104,8 @@ export type FounderCoreOperationDto = {
 export type FounderCoreOperationDependencies = {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
+  env?: Record<string, string | undefined>;
+  requireReleaseStageAccess?: typeof requireFounderOwnerPreviewAccessInTransaction;
 };
 
 export class FounderCoreOperationError extends Error {
@@ -141,6 +145,7 @@ export async function confirmFounderCoreProcessingConsentForUser(
   return withConnection(dependencies, async (connection) => {
     const at = dependencies.now?.() ?? new Date();
     return connection.db.transaction(async (tx) => {
+      await requireCoreOperationReleaseStageAccess(tx, userId, at, dependencies);
       await lockOperator(tx, operator.id);
       const pair = await readyCoreConnectionSet(tx, operator.id, at);
       if (!pair) {
@@ -240,12 +245,10 @@ export async function reconcileFounderCoreOperationForUser(
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   return withConnection(dependencies, async (connection) =>
     connection.db.transaction(async (tx) => {
+      const at = dependencies.now?.() ?? new Date();
+      await requireCoreOperationReleaseStageAccess(tx, userId, at, dependencies);
       await lockOperator(tx, operator.id);
-      const operation = await ensureCoreOperation(
-        tx,
-        operator.id,
-        dependencies.now?.() ?? new Date(),
-      );
+      const operation = await ensureCoreOperation(tx, operator.id, at);
       if (operation?.status !== "core" || !operation.processingConsentId) {
         return operation ? projectCoreOperation(tx, operation, operator.id) : null;
       }
@@ -262,7 +265,7 @@ export async function reconcileFounderCoreOperationForUser(
             .limit(1)
         : [];
       if (calendar?.evidenceState === "current" && mail?.evidenceState === "current") {
-        await ensureCoreBrief(tx, operation, dependencies.now?.() ?? new Date());
+        await ensureCoreBrief(tx, operation, at);
       }
       const [fresh] = await tx
         .select()
@@ -282,6 +285,7 @@ export async function openFounderCoreBriefForUser(
   return withConnection(dependencies, async (connection) => {
     const at = dependencies.now?.() ?? new Date();
     return connection.db.transaction(async (tx) => {
+      await requireCoreOperationReleaseStageAccess(tx, userId, at, dependencies);
       await lockOperator(tx, operator.id);
       const operation = await ensureCoreOperation(tx, operator.id, at);
       if (operation?.status !== "core") {
@@ -733,6 +737,26 @@ async function projectCoreOperation(
 async function lockOperator(tx: CoreTransaction, operatorId: string) {
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-operator:${operatorId}`}, 0))`,
+  );
+}
+
+async function requireCoreOperationReleaseStageAccess(
+  tx: CoreTransaction,
+  userId: string,
+  now: Date,
+  dependencies: FounderCoreOperationDependencies,
+): Promise<void> {
+  await (dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction)(
+    tx,
+    {
+      userId,
+      now,
+      applicationRevision:
+        dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
+        process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
+        "",
+      requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+    },
   );
 }
 

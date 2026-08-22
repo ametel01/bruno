@@ -2,7 +2,7 @@ import "server-only";
 
 const OWNER_PREVIEW_QUALIFICATIONS_SCHEMA = "bruno.owner-preview-qualifications.v1";
 const PREVIEW_QUALIFICATION_SCHEMA = "bruno.preview-qualification.v1";
-const PREVIEW_QUALIFICATION_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1_000;
+export const FOUNDER_PREVIEW_QUALIFICATION_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1_000;
 export const FOUNDER_OWNER_PREVIEW_CAPABILITIES = ["openai", "calendar_reading"] as const;
 
 export type FounderOwnerPreviewCapability = (typeof FOUNDER_OWNER_PREVIEW_CAPABILITIES)[number];
@@ -117,7 +117,7 @@ function requireCapabilityQualification(
     !expiresAt ||
     qualifiedAt > input.now ||
     expiresAt <= input.now ||
-    expiresAt.valueOf() - qualifiedAt.valueOf() > PREVIEW_QUALIFICATION_MAX_AGE_MS
+    expiresAt.valueOf() - qualifiedAt.valueOf() > FOUNDER_PREVIEW_QUALIFICATION_MAX_AGE_MS
   ) {
     throw new Error(`Owner Preview ${capability} qualification is stale.`);
   }

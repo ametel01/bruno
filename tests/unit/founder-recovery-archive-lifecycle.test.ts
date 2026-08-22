@@ -30,10 +30,12 @@ import {
   persistFounderRecoveryArchiveIntentInTransaction,
   reconcileFounderRecoveryArchives,
 } from "@/src/server/founder-product-contract/recovery-archive";
+import { prepareFounderOperatorRuntimeForUser } from "@/src/server/operators/founder-operator-runtime";
 
 const USER_ID = "00000000-0000-4000-8000-000000003730";
 const OPERATOR_ID = "00000000-0000-4000-8000-000000003731";
 const START = new Date("2026-08-22T00:00:00.000Z");
+const QUALIFICATION_EXPIRES_AT = new Date(START.valueOf() + 8 * 24 * 60 * 60 * 1_000);
 
 describe("persisted Founder Recovery Archive lifecycle", () => {
   let connection: DatabaseConnection;
@@ -153,6 +155,8 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         applicationRevision: "a".repeat(40),
         runtimeRevision: "runtime-v1",
         capabilityManifest: ["openai"],
+        openAiQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
+        calendarQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
         affectedCapabilities: ["openai"],
         evidenceDigests: [`sha256:${"b".repeat(64)}`],
         decidedAt: new Date(START.valueOf() + 30_000),
@@ -203,6 +207,160 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     ).resolves.toEqual({ admitted: true, availableCapabilities: [] });
   });
 
+  it("serializes concurrent capability Holds without losing either affected capability", async () => {
+    const heldAt = new Date(START.valueOf() + 60_000);
+    await Promise.all([
+      connection.db.transaction((tx) =>
+        persistFounderOwnerPreviewHoldInTransaction(tx, {
+          userId: USER_ID,
+          operatorId: OPERATOR_ID,
+          applicationRevision: "a".repeat(40),
+          runtimeRevision: "runtime-v1",
+          affectedCapabilities: ["openai"],
+          evidenceDigests: [`sha256:${"c".repeat(64)}`],
+          decidedAt: heldAt,
+        }),
+      ),
+      connection.db.transaction((tx) =>
+        persistFounderOwnerPreviewHoldInTransaction(tx, {
+          userId: USER_ID,
+          operatorId: OPERATOR_ID,
+          applicationRevision: "a".repeat(40),
+          runtimeRevision: "runtime-v1",
+          affectedCapabilities: ["calendar_reading"],
+          evidenceDigests: [`sha256:${"d".repeat(64)}`],
+          decidedAt: heldAt,
+        }),
+      ),
+    ]);
+    await connection.db.transaction((tx) =>
+      persistFounderOwnerPreviewHoldInTransaction(tx, {
+        userId: USER_ID,
+        operatorId: OPERATOR_ID,
+        applicationRevision: "a".repeat(40),
+        runtimeRevision: "runtime-v1",
+        affectedCapabilities: ["openai"],
+        evidenceDigests: [`sha256:${"e".repeat(64)}`],
+        decidedAt: heldAt,
+      }),
+    );
+
+    const decisions = await connection.db
+      .select()
+      .from(founderReleaseDecisions)
+      .orderBy(founderReleaseDecisions.decidedAt);
+    expect(decisions.map((decision) => decision.outcome)).toEqual([
+      "enter",
+      "hold",
+      "hold",
+      "hold",
+    ]);
+    expect(decisions.at(-1)?.affectedCapabilities).toEqual(["openai", "calendar_reading"]);
+    expect(decisions.at(-1)?.evidenceDigests).toHaveLength(3);
+    expect(decisions.at(-1)?.evidenceDigests).toEqual(
+      expect.arrayContaining([
+        `sha256:${"c".repeat(64)}`,
+        `sha256:${"d".repeat(64)}`,
+        `sha256:${"e".repeat(64)}`,
+      ]),
+    );
+  });
+
+  it("persists a capability-scoped Hold when admitted Preview Qualification expires", async () => {
+    const applicationRevision = "6".repeat(40);
+    const expiresAt = new Date(START.valueOf() + 15 * 60 * 1_000);
+    const environment = ownerPreviewEnvironment(applicationRevision);
+    const bundle = JSON.parse(environment.BRUNO_OWNER_PREVIEW_QUALIFICATIONS ?? "null");
+    bundle.qualifications[0].expiresAt = expiresAt.toISOString();
+    environment.BRUNO_OWNER_PREVIEW_QUALIFICATIONS = JSON.stringify(bundle);
+    await admitFounderOperatorToOwnerPreview(USER_ID, {
+      applicationRevision,
+      createConnection: () => connection,
+      createProvider: () => provider,
+      env: environment,
+      now: () => START,
+    });
+
+    const observedAt = new Date(expiresAt.valueOf() + 1);
+    await getFounderOwnerPreviewAccessForUser(USER_ID, observedAt, {
+      applicationRevision,
+      createConnection: () => connection,
+    });
+
+    const decisions = await connection.db
+      .select()
+      .from(founderReleaseDecisions)
+      .where(eq(founderReleaseDecisions.applicationRevision, applicationRevision))
+      .orderBy(founderReleaseDecisions.decidedAt);
+    expect(decisions.at(-1)).toMatchObject({
+      outcome: "hold",
+      affectedCapabilities: ["openai"],
+      decidedAt: observedAt,
+    });
+  });
+
+  it("records runtime recovery failure against the admitted revision", async () => {
+    await createDurableRecoveryArchive(
+      { action: "release_stage_admission", userId: USER_ID, now: START },
+      provider,
+      connection,
+      () => START,
+    );
+    const failedAt = new Date(START.valueOf() + 60_000);
+    await connection.db
+      .update(operatorRuntimes)
+      .set({ status: "needs_attention", updatedAt: failedAt })
+      .where(eq(operatorRuntimes.operatorId, OPERATOR_ID));
+
+    await prepareFounderOperatorRuntimeForUser(USER_ID, {
+      createConnection: () => connection,
+      now: () => failedAt,
+      env: { VERCEL_GIT_COMMIT_SHA: "a".repeat(40) },
+      adapter: {
+        prepare: async () => ({
+          ok: false,
+          code: "runtime_prepare_failed",
+          message: "Runtime recovery failed.",
+        }),
+        verify: async () => {
+          throw new Error("A failed preparation must not be verified.");
+        },
+      },
+    });
+
+    const [runtime] = await connection.db.select().from(operatorRuntimes);
+    expect(runtime).toMatchObject({ status: "needs_attention", configRevision: "runtime-v1" });
+    const decisions = await connection.db
+      .select()
+      .from(founderReleaseDecisions)
+      .orderBy(founderReleaseDecisions.decidedAt);
+    expect(decisions.at(-1)).toMatchObject({
+      outcome: "hold",
+      runtimeRevision: "runtime-v1",
+      affectedCapabilities: ["openai", "calendar_reading"],
+    });
+    await expect(
+      getFounderOwnerPreviewAccessForUser(USER_ID, failedAt, {
+        applicationRevision: "a".repeat(40),
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ admitted: true, availableCapabilities: [] });
+
+    const refreshAt = new Date(START.valueOf() + 23 * 60 * 60 * 1_000);
+    await expect(
+      reconcileFounderRecoveryArchives({
+        now: refreshAt,
+        provider,
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ eligible: 1, created: 1, failed: 0, deleted: 0 });
+    const archives = await connection.db
+      .select()
+      .from(founderRecoveryArchives)
+      .orderBy(founderRecoveryArchives.observedAt);
+    expect(archives.at(-1)).toMatchObject({ status: "verified", observedAt: refreshAt });
+  });
+
   it("admits a production Operator only after persisting its initial verified archive", async () => {
     const applicationRevision = "9".repeat(40);
     const environment = ownerPreviewEnvironment(applicationRevision);
@@ -248,6 +406,8 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision,
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      openAiQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
+      calendarQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
       affectedCapabilities: ["openai", "calendar_reading"],
       evidenceDigests: [`sha256:${"e".repeat(64)}`],
       decidedAt: holdAt,
@@ -445,6 +605,8 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision: "7".repeat(40),
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      openAiQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
+      calendarQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
       affectedCapabilities: ["openai"],
       evidenceDigests: [`sha256:${"6".repeat(64)}`],
       decidedAt: holdAt,
@@ -467,6 +629,8 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision: "5".repeat(40),
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      openAiQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
+      calendarQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
       evidenceDigests: [`sha256:${"4".repeat(64)}`],
       decidedAt: resumeAt,
       createdAt: resumeAt,
@@ -647,6 +811,8 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision: "e".repeat(40),
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      openAiQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
+      calendarQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
       affectedCapabilities: ["openai", "calendar_reading"],
       evidenceDigests: [`sha256:${"f".repeat(64)}`],
       decidedAt: new Date(START.valueOf() + 1_000),
@@ -659,7 +825,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         provider,
         createConnection: () => connection,
       }),
-    ).resolves.toEqual({ eligible: 0, created: 0, failed: 0, deleted: 1 });
+    ).resolves.toEqual({ eligible: 1, created: 1, failed: 0, deleted: 1 });
     await expect(
       connection.db
         .select()
@@ -857,7 +1023,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
     ).resolves.toBe(1);
   });
 
-  it("deletes expired archives after the latest release decision becomes ineligible", async () => {
+  it("replaces expired archives while every admitted capability is held", async () => {
     const archiveId = await createDurableRecoveryArchive(
       { action: "release_stage_admission", userId: USER_ID, now: START },
       provider,
@@ -872,6 +1038,8 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision: "c".repeat(40),
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      openAiQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
+      calendarQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
       affectedCapabilities: ["openai", "calendar_reading"],
       evidenceDigests: [`sha256:${"d".repeat(64)}`],
       decidedAt: new Date(START.valueOf() + 60 * 60 * 1_000),
@@ -885,7 +1053,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
         provider,
         createConnection: () => connection,
       }),
-    ).resolves.toEqual({ eligible: 0, created: 0, failed: 0, deleted: 1 });
+    ).resolves.toEqual({ eligible: 1, created: 1, failed: 0, deleted: 1 });
 
     const [deleted] = await connection.db
       .select()
@@ -991,6 +1159,8 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision: "2".repeat(40),
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      openAiQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
+      calendarQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
       evidenceDigests: [`sha256:${"3".repeat(64)}`],
       decidedAt: readmittedAt,
       createdAt: readmittedAt,
@@ -1052,6 +1222,8 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       applicationRevision: "a".repeat(40),
       runtimeRevision: "runtime-v1",
       capabilityManifest: ["openai", "calendar_reading"],
+      openAiQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
+      calendarQualificationExpiresAt: QUALIFICATION_EXPIRES_AT,
       evidenceDigests: [`sha256:${"b".repeat(64)}`],
       decidedAt: START,
       createdAt: START,

@@ -19,6 +19,7 @@ import { requireOperationalEntitlement } from "./entitlement";
 import type { FounderProductContractLifecycleAction } from "./lifecycle";
 import {
   lockFounderProductContractLifecycleInTransaction,
+  requireActiveFounderOperatorAuthorityInTransaction,
   requireReadyFounderOperatorAuthorityInTransaction,
 } from "./operator-authority";
 import {
@@ -63,10 +64,10 @@ export async function createDurableRecoveryArchive(
   clock: () => Date,
 ): Promise<string> {
   const intent = await connection.db.transaction(async (tx) => {
-    const { operatorId } = await requireReadyFounderOperatorAuthorityInTransaction(
-      tx,
-      input.userId,
-    );
+    const { operatorId, runtimeRevision } =
+      input.action === "scheduled_archive"
+        ? await requireScheduledRecoveryArchiveAuthorityInTransaction(tx, input.userId)
+        : await requireReadyFounderOperatorAuthorityInTransaction(tx, input.userId);
     if (input.action === "recovery_archive_lifecycle") {
       await requireOperationalEntitlement(tx, input.userId, input.now);
     }
@@ -90,14 +91,16 @@ export async function createDurableRecoveryArchive(
         )
         .orderBy(desc(founderRecoveryArchives.observedAt))
         .limit(1);
-      if (current) return { archiveId: current.id, operatorId, alreadyCurrent: true };
+      if (current) {
+        return { archiveId: current.id, operatorId, runtimeRevision, alreadyCurrent: true };
+      }
     }
     const archiveId = await persistFounderRecoveryArchiveIntentInTransaction(tx, {
       userId: input.userId,
       operatorId,
       now: input.now,
     });
-    return { archiveId, operatorId, alreadyCurrent: false };
+    return { archiveId, operatorId, runtimeRevision, alreadyCurrent: false };
   });
 
   if (intent.alreadyCurrent) return intent.archiveId;
@@ -110,6 +113,7 @@ export async function createDurableRecoveryArchive(
     intent.operatorId,
     true,
     clock,
+    intent.runtimeRevision,
   );
   return intent.archiveId;
 }
@@ -189,16 +193,20 @@ export async function persistFounderRecoveryArchiveIntentInTransaction(
 }
 
 export async function fulfillRecoveryArchiveIntent(
-  input: Pick<ArchiveLifecycleInput, "userId" | "now">,
+  input: Pick<ArchiveLifecycleInput, "action" | "userId" | "now">,
   providers: FounderRecoveryArchiveProvider,
   connection: DatabaseConnection,
   archiveId: string,
   operatorId: string,
   failClosed: boolean,
   clock: () => Date,
+  expectedRuntimeRevision?: string,
 ): Promise<void> {
   try {
-    const state = await loadFounderRecoveryArchiveDurableState(connection, operatorId);
+    const state = await loadFounderRecoveryArchiveDurableState(connection, operatorId, {
+      allowNonReadyCheckpoint: input.action === "scheduled_archive",
+      ...(expectedRuntimeRevision === undefined ? {} : { expectedRuntimeRevision }),
+    });
     const archive = await providers.createRecoveryArchive({
       archiveIntentId: archiveId,
       userId: input.userId,
@@ -420,14 +428,6 @@ export async function reconcileFounderRecoveryArchives(input: {
     const latestAdmittedDecisionByUser = new Map<string, (typeof decisions)[number]>();
     for (const [key, latestDecision] of latestByUserAndStage) {
       if (latestDecision.outcome === "deny") continue;
-      if (
-        latestDecision.outcome === "hold" &&
-        latestDecision.capabilityManifest.every((capability) =>
-          latestDecision.affectedCapabilities.includes(capability),
-        )
-      ) {
-        continue;
-      }
       const admission = latestAdmissionByUserAndStage.get(key);
       if (!admission) continue;
       const current = latestAdmittedDecisionByUser.get(admission.userId);
@@ -558,9 +558,64 @@ export async function getFounderRecoveryArchiveStatusForUser(
   }
 }
 
+async function requireScheduledRecoveryArchiveAuthorityInTransaction(
+  tx: RecoveryArchiveTransaction,
+  userId: string,
+): Promise<{ operatorId: string; runtimeRevision: string }> {
+  const { operatorId } = await requireActiveFounderOperatorAuthorityInTransaction(tx, userId);
+  const decisions = await tx
+    .select({
+      stage: founderReleaseDecisions.stage,
+      outcome: founderReleaseDecisions.outcome,
+      runtimeRevision: founderReleaseDecisions.runtimeRevision,
+      decidedAt: founderReleaseDecisions.decidedAt,
+    })
+    .from(founderReleaseDecisions)
+    .where(
+      and(
+        eq(founderReleaseDecisions.userId, userId),
+        eq(founderReleaseDecisions.operatorId, operatorId),
+      ),
+    )
+    .orderBy(desc(founderReleaseDecisions.decidedAt));
+  const latestByStage = new Map<string, (typeof decisions)[number]>();
+  for (const decision of decisions) {
+    if (!latestByStage.has(decision.stage)) latestByStage.set(decision.stage, decision);
+  }
+  const admissions = [...latestByStage.values()]
+    .filter((decision) => decision.outcome !== "deny")
+    .map((decision) =>
+      decisions.find(
+        (candidate) =>
+          candidate.stage === decision.stage &&
+          (candidate.outcome === "enter" || candidate.outcome === "resume"),
+      ),
+    )
+    .filter((decision): decision is (typeof decisions)[number] => Boolean(decision))
+    .sort((left, right) => right.decidedAt.valueOf() - left.decidedAt.valueOf());
+  const admission = admissions[0];
+  if (!admission) throw new Error("Scheduled Recovery Archive requires prior admission.");
+  const [retirement] = await tx
+    .select({ absenceVerifiedAt: founderInfrastructureRetirements.absenceVerifiedAt })
+    .from(founderInfrastructureRetirements)
+    .where(
+      and(
+        eq(founderInfrastructureRetirements.userId, userId),
+        eq(founderInfrastructureRetirements.status, "completed"),
+      ),
+    )
+    .orderBy(desc(founderInfrastructureRetirements.absenceVerifiedAt))
+    .limit(1);
+  if (retirement?.absenceVerifiedAt && retirement.absenceVerifiedAt >= admission.decidedAt) {
+    throw new Error("Scheduled Recovery Archive authority was retired.");
+  }
+  return { operatorId, runtimeRevision: admission.runtimeRevision };
+}
+
 async function loadFounderRecoveryArchiveDurableState(
   connection: DatabaseConnection,
   operatorId: string,
+  options: { allowNonReadyCheckpoint: boolean; expectedRuntimeRevision?: string },
 ): Promise<FounderRecoveryArchiveDurableState> {
   return connection.db.transaction(async (tx) => {
     const [row] = await tx
@@ -572,11 +627,15 @@ async function loadFounderRecoveryArchiveDurableState(
       .limit(1);
     if (
       row?.operator.status !== "active" ||
-      row.preparation.status !== "ready" ||
+      (row.preparation.status !== "ready" &&
+        !(options.allowNonReadyCheckpoint && row.preparation.status === "needs_attention")) ||
       !row.preparation.timezone ||
       !row.preparation.timezoneConfirmedAt ||
-      row.runtime.status !== "ready" ||
-      !row.runtime.configRevision
+      (row.runtime.status !== "ready" &&
+        !(options.allowNonReadyCheckpoint && row.runtime.status === "needs_attention")) ||
+      !row.runtime.configRevision ||
+      (options.expectedRuntimeRevision !== undefined &&
+        row.runtime.configRevision !== options.expectedRuntimeRevision)
     ) {
       throw new Error("Recovery Archive durable state is not eligible for restoration.");
     }

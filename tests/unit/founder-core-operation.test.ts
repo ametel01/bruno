@@ -39,6 +39,7 @@ const GOOGLE_MAIL_RELEASE_ENV = {
   ),
   VERCEL_GIT_COMMIT_SHA: GOOGLE_RELEASE_REVISION,
 };
+const BYPASS_RELEASE_STAGE_ACCESS = async () => undefined;
 
 describe("Founder Core Operation", () => {
   let connection: DatabaseConnection;
@@ -161,6 +162,7 @@ describe("Founder Core Operation", () => {
       reconcileFounderCoreOperationForUser(OWNER_ID, {
         createConnection: () => connection,
         now: () => NOW,
+        requireReleaseStageAccess: BYPASS_RELEASE_STAGE_ACCESS,
       }),
     ).resolves.toMatchObject({
       name: "Core Operation",
@@ -173,6 +175,7 @@ describe("Founder Core Operation", () => {
     const confirmed = await confirmFounderCoreProcessingConsentForUser(OWNER_ID, {
       createConnection: () => connection,
       now: () => NOW,
+      requireReleaseStageAccess: BYPASS_RELEASE_STAGE_ACCESS,
     });
     expect(confirmed).toMatchObject({
       status: "core",
@@ -184,10 +187,12 @@ describe("Founder Core Operation", () => {
     const opened = await openFounderCoreBriefForUser(OWNER_ID, {
       createConnection: () => connection,
       now: () => NOW,
+      requireReleaseStageAccess: BYPASS_RELEASE_STAGE_ACCESS,
     });
     const replayed = await openFounderCoreBriefForUser(OWNER_ID, {
       createConnection: () => connection,
       now: () => new Date(NOW.getTime() + 1000),
+      requireReleaseStageAccess: BYPASS_RELEASE_STAGE_ACCESS,
     });
     expect(replayed.activatedAt).toBe(opened.activatedAt);
     await expect(
@@ -206,6 +211,27 @@ describe("Founder Core Operation", () => {
     expect(await connection.db.select().from(operatorMorningBriefs)).toHaveLength(1);
     expect(await connection.db.select().from(operatorFounderActivations)).toHaveLength(1);
     expect(await connection.db.select().from(operatorLimitedOperations)).toHaveLength(1);
+  });
+
+  it("fails closed at every deep Core mutation seam during Owner Preview", async () => {
+    const dependencies = {
+      createConnection: () => connection,
+      now: () => NOW,
+      env: { VERCEL_GIT_COMMIT_SHA: GOOGLE_RELEASE_REVISION },
+    };
+
+    await expect(
+      reconcileFounderCoreOperationForUser(OWNER_ID, dependencies),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+    await expect(
+      confirmFounderCoreProcessingConsentForUser(OWNER_ID, dependencies),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+    await expect(openFounderCoreBriefForUser(OWNER_ID, dependencies)).rejects.toMatchObject({
+      code: "owner_preview_access_required",
+    });
+    expect(await connection.db.select().from(operatorLimitedOperations)).toEqual([]);
+    expect(await connection.db.select().from(operatorProcessingConsents)).toEqual([]);
+    expect(await connection.db.select().from(operatorMorningBriefs)).toEqual([]);
   });
 });
 

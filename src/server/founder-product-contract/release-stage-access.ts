@@ -13,6 +13,7 @@ import {
   FOUNDER_OWNER_PREVIEW_CAPABILITIES,
   type FounderOwnerPreviewCapability,
 } from "./preview-qualification";
+import { reconcileFounderOwnerPreviewQualificationExpiryInTransaction } from "./release-stage-hold";
 
 const OWNER_PREVIEW_ARCHIVE_WINDOW_MS = 24 * 60 * 60 * 1_000;
 
@@ -49,14 +50,22 @@ export async function getFounderOwnerPreviewAccessForUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
-    return await getFounderOwnerPreviewAccessInTransaction(connection.db, {
-      userId,
-      now,
-      applicationRevision:
-        dependencies.applicationRevision ??
-        dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
-        process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
-        "",
+    const applicationRevision =
+      dependencies.applicationRevision ??
+      dependencies.env?.VERCEL_GIT_COMMIT_SHA?.trim() ??
+      process.env.VERCEL_GIT_COMMIT_SHA?.trim() ??
+      "";
+    return await connection.db.transaction(async (tx) => {
+      await reconcileFounderOwnerPreviewQualificationExpiryInTransaction(tx, {
+        userId,
+        now,
+        applicationRevision,
+      });
+      return getFounderOwnerPreviewAccessInTransaction(tx, {
+        userId,
+        now,
+        applicationRevision,
+      });
     });
   } finally {
     if (ownsConnection) await connection.close();
@@ -92,6 +101,11 @@ export async function requireFounderOwnerPreviewAccessInTransaction(
     requiredCapabilities: readonly FounderOwnerPreviewCapability[];
   },
 ): Promise<void> {
+  await reconcileFounderOwnerPreviewQualificationExpiryInTransaction(tx, {
+    userId: input.userId,
+    now: input.now,
+    applicationRevision: input.applicationRevision,
+  });
   const access = await getFounderOwnerPreviewAccessInTransaction(tx, input);
   if (!requirementsAvailable(access.availableCapabilities, input.requiredCapabilities)) {
     throw new FounderReleaseStageAccessError();

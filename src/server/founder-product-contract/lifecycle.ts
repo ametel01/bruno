@@ -24,6 +24,7 @@ import {
   requireReadyFounderOperatorAuthorityInTransaction,
 } from "./operator-authority";
 import { persistQualifiedFounderOwnerPreviewAdmissionInTransaction } from "./owner-preview-admission";
+import { FOUNDER_PREVIEW_QUALIFICATION_MAX_AGE_MS } from "./preview-qualification";
 import {
   createDurableRecoveryArchive,
   fulfillRecoveryArchiveIntent,
@@ -164,6 +165,12 @@ export async function executeFounderProductContractLifecycleAction(
             qualificationEvidenceDigests,
             freshQualificationEvidenceDigests: qualificationEvidenceDigests,
             qualificationObservedAt: input.now,
+            qualificationExpiresAt: {
+              openai: new Date(input.now.valueOf() + FOUNDER_PREVIEW_QUALIFICATION_MAX_AGE_MS),
+              calendar_reading: new Date(
+                input.now.valueOf() + FOUNDER_PREVIEW_QUALIFICATION_MAX_AGE_MS,
+              ),
+            },
             recoveryArchiveId: lifecycleArchiveId,
             now: input.now,
           });

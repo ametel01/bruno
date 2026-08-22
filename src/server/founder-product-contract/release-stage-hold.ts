@@ -2,7 +2,11 @@ import "server-only";
 
 import { and, desc, eq } from "drizzle-orm";
 import { founderReleaseDecisions } from "@/src/server/db/schema";
-import type { FounderProductContractTransaction } from "./operator-authority";
+import { founderProductContractDigest } from "./digest";
+import {
+  type FounderProductContractTransaction,
+  lockFounderProductContractLifecycleInTransaction,
+} from "./operator-authority";
 import {
   FOUNDER_OWNER_PREVIEW_CAPABILITIES,
   type FounderOwnerPreviewCapability,
@@ -30,6 +34,7 @@ export async function persistFounderOwnerPreviewHoldInTransaction(
   ) {
     throw new Error("Owner Preview Hold evidence is invalid.");
   }
+  await lockFounderProductContractLifecycleInTransaction(tx, input.userId);
 
   const [latestDecision] = await tx
     .select()
@@ -47,7 +52,7 @@ export async function persistFounderOwnerPreviewHoldInTransaction(
   if (
     latestDecision.applicationRevision !== input.applicationRevision ||
     latestDecision.runtimeRevision !== input.runtimeRevision ||
-    input.decidedAt <= latestDecision.decidedAt
+    (latestDecision.outcome !== "hold" && input.decidedAt <= latestDecision.decidedAt)
   ) {
     return null;
   }
@@ -67,12 +72,27 @@ export async function persistFounderOwnerPreviewHoldInTransaction(
             input.affectedCapabilities.includes(capability),
         )
       : input.affectedCapabilities;
+  const evidenceDigests =
+    latestDecision.outcome === "hold"
+      ? [...new Set([...latestDecision.evidenceDigests, ...input.evidenceDigests])]
+      : input.evidenceDigests;
   if (
     latestDecision.outcome === "hold" &&
-    affectedCapabilities.length === latestDecision.affectedCapabilities.length
+    affectedCapabilities.length === latestDecision.affectedCapabilities.length &&
+    evidenceDigests.length === latestDecision.evidenceDigests.length
   ) {
     return latestDecision.id;
   }
+  if (
+    !latestDecision.openAiQualificationExpiresAt ||
+    !latestDecision.calendarQualificationExpiresAt
+  ) {
+    throw new Error("Owner Preview Hold requires persisted qualification expiry.");
+  }
+  const decidedAt =
+    input.decidedAt > latestDecision.decidedAt
+      ? input.decidedAt
+      : new Date(latestDecision.decidedAt.valueOf() + 1);
 
   const [hold] = await tx
     .insert(founderReleaseDecisions)
@@ -84,12 +104,65 @@ export async function persistFounderOwnerPreviewHoldInTransaction(
       applicationRevision: input.applicationRevision,
       runtimeRevision: input.runtimeRevision,
       capabilityManifest: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
+      openAiQualificationExpiresAt: latestDecision.openAiQualificationExpiresAt,
+      calendarQualificationExpiresAt: latestDecision.calendarQualificationExpiresAt,
       affectedCapabilities,
-      evidenceDigests: input.evidenceDigests,
-      decidedAt: input.decidedAt,
-      createdAt: input.decidedAt,
+      evidenceDigests,
+      decidedAt,
+      createdAt: decidedAt,
     })
     .returning({ id: founderReleaseDecisions.id });
   if (!hold) throw new Error("Owner Preview Hold could not be persisted.");
   return hold.id;
+}
+
+export async function reconcileFounderOwnerPreviewQualificationExpiryInTransaction(
+  tx: FounderProductContractTransaction,
+  input: { userId: string; applicationRevision: string; now: Date },
+): Promise<string | null> {
+  await lockFounderProductContractLifecycleInTransaction(tx, input.userId);
+  const [latestDecision] = await tx
+    .select()
+    .from(founderReleaseDecisions)
+    .where(
+      and(
+        eq(founderReleaseDecisions.userId, input.userId),
+        eq(founderReleaseDecisions.stage, "owner_preview"),
+      ),
+    )
+    .orderBy(desc(founderReleaseDecisions.decidedAt))
+    .limit(1);
+  if (
+    !latestDecision ||
+    latestDecision.outcome === "deny" ||
+    latestDecision.applicationRevision !== input.applicationRevision
+  ) {
+    return null;
+  }
+  const expirations = {
+    openai: latestDecision.openAiQualificationExpiresAt,
+    calendar_reading: latestDecision.calendarQualificationExpiresAt,
+  } as const;
+  const affectedCapabilities = FOUNDER_OWNER_PREVIEW_CAPABILITIES.filter((capability) => {
+    const expiresAt = expirations[capability];
+    return !expiresAt || expiresAt <= input.now;
+  });
+  if (affectedCapabilities.length === 0) return null;
+  return persistFounderOwnerPreviewHoldInTransaction(tx, {
+    userId: input.userId,
+    operatorId: latestDecision.operatorId,
+    applicationRevision: latestDecision.applicationRevision,
+    runtimeRevision: latestDecision.runtimeRevision,
+    affectedCapabilities,
+    evidenceDigests: affectedCapabilities.map((capability) =>
+      founderProductContractDigest(
+        JSON.stringify({
+          kind: "owner_preview_qualification_expired",
+          capability,
+          expiresAt: expirations[capability]?.toISOString() ?? null,
+        }),
+      ),
+    ),
+    decidedAt: input.now,
+  });
 }

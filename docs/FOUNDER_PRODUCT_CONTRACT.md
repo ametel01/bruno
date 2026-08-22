@@ -96,11 +96,16 @@ saved state. A later Release Hold can be lifted only by a new `resume`
 decision after fresh, independently evidenced OpenAI and Calendar qualifications revalidate the
 same Owner, stage, application, runtime, and capability boundaries after that Hold. Runtime failures
 persist the complete Owner Preview manifest and the affected capability subset
-through one canonical Hold writer. Partial Holds continue daily Recovery Archive refresh so an
-unaffected capability does not lose protection at the 24-hour boundary. Safe operation reads are
-pure projections; reconciliation writes require a current work boundary. Core Operation and Gmail
-effects remain unavailable throughout Calendar-only Owner Preview, including when retained Mail
-state exists. Provider subscription state applies bounded retirement deadlines and immediately
+through one lifecycle-serialized canonical Hold writer while preserving the admitted runtime
+revision and recording the failed attempted revision as evidence. Preview Qualification expiry is
+persisted per capability and reconciled into a scoped Hold at access boundaries; legacy decisions
+with no provable expiry migrate fail-closed. Cumulative Holds retain prior affected-capability
+evidence. Full and partial Holds continue daily Recovery Archive refresh from the last admitted
+durable checkpoint, including while runtime recovery needs attention, so protection does not lapse. Safe
+operation reads are pure projections; reconciliation writes require a current work boundary. Core
+Operation and Gmail effects remain unavailable throughout Calendar-only Owner Preview, including at
+their deep application seams and when retained Mail state exists. Provider subscription state
+applies bounded retirement deadlines and immediately
 pauses new work for unpaid, expired, and refunded entitlement. The Proposed Action claim and Gmail
 execution transactions pass
 their captured operation time into this entitlement guard, so the deadline controls the real effect

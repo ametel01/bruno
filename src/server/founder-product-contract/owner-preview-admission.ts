@@ -37,6 +37,7 @@ type QualifiedOwnerPreviewAdmissionInput = {
   qualificationEvidenceDigests: readonly `sha256:${string}`[];
   freshQualificationEvidenceDigests: readonly `sha256:${string}`[];
   qualificationObservedAt: Date;
+  qualificationExpiresAt: Readonly<Record<"openai" | "calendar_reading", Date>>;
   recoveryArchiveId: string;
   now: Date;
 };
@@ -167,6 +168,18 @@ export async function admitFounderOperatorToOwnerPreview(
             ),
           ),
         ),
+        qualificationExpiresAt: {
+          openai: new Date(
+            committedPreviewQualifications.find(
+              (qualification) => qualification.capability === "openai",
+            )?.expiresAt ?? "",
+          ),
+          calendar_reading: new Date(
+            committedPreviewQualifications.find(
+              (qualification) => qualification.capability === "calendar_reading",
+            )?.expiresAt ?? "",
+          ),
+        },
         recoveryArchiveId: archiveId,
         now: committedAt,
       });
@@ -181,7 +194,14 @@ export async function persistQualifiedFounderOwnerPreviewAdmissionInTransaction(
   tx: FounderProductContractTransaction,
   input: QualifiedOwnerPreviewAdmissionInput,
 ): Promise<void> {
-  if (!input.identitySubject.trim() || input.qualificationEvidenceDigests.length === 0) {
+  if (
+    !input.identitySubject.trim() ||
+    input.qualificationEvidenceDigests.length === 0 ||
+    Number.isNaN(input.qualificationExpiresAt.openai.valueOf()) ||
+    Number.isNaN(input.qualificationExpiresAt.calendar_reading.valueOf()) ||
+    input.qualificationExpiresAt.openai <= input.now ||
+    input.qualificationExpiresAt.calendar_reading <= input.now
+  ) {
     throw new Error("Owner Preview qualification evidence is incomplete.");
   }
   const capabilityManifest = FOUNDER_OWNER_PREVIEW_CAPABILITIES;
@@ -257,6 +277,8 @@ export async function persistQualifiedFounderOwnerPreviewAdmissionInTransaction(
     applicationRevision: input.applicationRevision,
     runtimeRevision: input.runtimeRevision,
     capabilityManifest,
+    openAiQualificationExpiresAt: input.qualificationExpiresAt.openai,
+    calendarQualificationExpiresAt: input.qualificationExpiresAt.calendar_reading,
     evidenceDigests,
     decidedAt: input.now,
     createdAt: input.now,

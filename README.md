@@ -261,7 +261,9 @@ separate wrapped recovery credential, authenticated restore check, 24-hour refre
 snapshots. The protected `/api/internal/operator/recovery-archives` cron runs hourly, creates a new
 archive two hourly schedule intervals before the current verified copy reaches 24 hours, and
 processes expiry even after a
-Release Hold or denied admission. Object identities are persisted before upload, so an interrupted
+Release Hold or denied admission. Every admitted Operator continues daily protection during full or
+partial Holds, using the last admitted durable checkpoint when runtime recovery needs attention;
+denial or completed retirement ends refresh. Object identities are persisted before upload, so an interrupted
 or partially failed creation remains discoverable for bounded cleanup. A completed Infrastructure
 Retirement stops new daily copies while the final retained archive continues to its 30-day expiry;
 a later `resume` Release Decision can start protection again for a restored Operator. Production
@@ -272,9 +274,14 @@ additionally require a verified archive observed within the last 24 hours and ev
 by that boundary to remain available. A Release Hold keeps the complete admitted manifest while
 persisting the affected capability subset, so unrelated qualified work and all safe reads remain
 available. A stale archive or non-Ready runtime pauses new work without hiding saved checkpoints.
-Runtime failure records that Hold through the canonical exact-revision writer. Owner Preview remains
-Calendar-only Limited Operation: Core Operation and Gmail effects stay unavailable even if retained
-Mail state exists. Read endpoints project existing operation state without reconciling new rows.
+Preview Qualification expiry is persisted per capability and an access-boundary reconciliation
+records a capability-scoped Hold before work can continue. Runtime recovery failure preserves the
+admitted runtime revision, records the attempted revision only in evidence, and serializes its Hold
+through the canonical exact-revision writer; cumulative Holds retain every applicable evidence
+digest. Legacy decisions without persisted expiry migrate as immediately expired and require fresh
+qualification. Owner Preview remains Calendar-only Limited Operation:
+Core Operation and Gmail effects stay unavailable even if retained Mail state exists. Their deep
+mutation seams recheck this boundary; read endpoints only project existing operation state.
 Infrastructure Retirement marks the destroyed runtime as needing attention before
 its receipt completes, so only newly provisioned and verified infrastructure can become Ready
 again. The encrypted durable state preserves an external-action pause as the complete boolean,

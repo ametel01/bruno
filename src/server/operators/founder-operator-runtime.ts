@@ -158,7 +158,11 @@ export async function prepareFounderOperatorRuntimeForUser(
         );
       }
 
-      return { kind: "claimed" as const, runtime: claimed };
+      return {
+        kind: "claimed" as const,
+        runtime: claimed,
+        admittedRuntimeRevision: runtime.configRevision,
+      };
     });
 
     if (claim.kind !== "claimed") {
@@ -232,6 +236,7 @@ export async function prepareFounderOperatorRuntimeForUser(
                 leaseExpiresAt: null,
                 recoveryMessage: result.message,
                 failureCode: result.code,
+                configRevision: claim.admittedRuntimeRevision ?? configRevision,
                 updatedAt: completedAt,
               },
         )
@@ -275,6 +280,7 @@ export async function prepareFounderOperatorRuntimeForUser(
                 operatorId: operator.id,
                 applicationRevision,
                 runtimeRevision: updated.configRevision,
+                attemptedRuntimeRevision: configRevision,
                 failureCode: result.code,
                 observedAt: completedAt,
               }),
@@ -322,6 +328,7 @@ function runtimeFailureEvidenceDigest(input: {
   operatorId: string;
   applicationRevision: string;
   runtimeRevision: string;
+  attemptedRuntimeRevision: string;
   failureCode: FounderOperatorRuntimeFailureCode;
   observedAt: Date;
 }): `sha256:${string}` {
@@ -333,6 +340,7 @@ function runtimeFailureEvidenceDigest(input: {
         operatorId: input.operatorId,
         applicationRevision: input.applicationRevision,
         runtimeRevision: input.runtimeRevision,
+        attemptedRuntimeRevision: input.attemptedRuntimeRevision,
         failureCode: input.failureCode,
         observedAt: input.observedAt.toISOString(),
       }),

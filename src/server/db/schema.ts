@@ -864,6 +864,12 @@ export const founderReleaseDecisions = pgTable(
     applicationRevision: text("application_revision").notNull(),
     runtimeRevision: text("runtime_revision").notNull(),
     capabilityManifest: jsonb("capability_manifest").$type<readonly string[]>().notNull(),
+    openAiQualificationExpiresAt: timestamp("openai_qualification_expires_at", {
+      withTimezone: true,
+    }),
+    calendarQualificationExpiresAt: timestamp("calendar_qualification_expires_at", {
+      withTimezone: true,
+    }),
     affectedCapabilities: jsonb("affected_capabilities")
       .$type<readonly string[]>()
       .notNull()
@@ -892,6 +898,10 @@ export const founderReleaseDecisions = pgTable(
     check(
       "founder_release_decisions_owner_preview_manifest_check",
       sql`${table.stage} <> 'owner_preview' OR (jsonb_array_length(${table.capabilityManifest}) = 2 AND ${table.capabilityManifest} @> '["openai", "calendar_reading"]'::jsonb)`,
+    ),
+    check(
+      "founder_release_decisions_owner_preview_qualification_expiry_check",
+      sql`${table.stage} <> 'owner_preview' OR (${table.openAiQualificationExpiresAt} IS NOT NULL AND ${table.calendarQualificationExpiresAt} IS NOT NULL)`,
     ),
     index("founder_release_decisions_user_stage_idx").on(
       table.userId,

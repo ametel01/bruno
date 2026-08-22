@@ -29,11 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Retirement independent from archive health. Founder workspace and effect-starting boundaries now
   distinguish prior admission for safe workspace reads from current protection for new work and
   effects. Holds preserve checkpoints and scope pauses to their affected capabilities, non-Ready
-  runtimes retain safe workspace reads, partial Holds continue archive refresh, and safe operation
-  reads no longer reconcile state. Calendar-only Owner Preview rejects Core and Gmail effects;
-  runtime failures use the canonical Hold writer. Retirement invalidates destroyed runtime readiness,
-  admission rechecks evidence at its final commit, and restore proof preserves the complete
-  external-action pause tuple.
+  runtimes retain safe workspace reads, every Hold continues archive refresh, and safe operation
+  reads no longer reconcile state. Calendar-only Owner Preview rejects Core and Gmail effects at
+  their deep mutation seams; qualification expiry and runtime failures use the lifecycle-serialized
+  canonical Hold writer without replacing the admitted runtime revision or dropping cumulative Hold
+  evidence. Legacy qualification expiry migrates fail-closed, and scheduled protection can archive
+  the last admitted checkpoint while runtime recovery needs attention. Retirement invalidates
+  destroyed runtime readiness, admission rechecks evidence at its final commit, and restore proof
+  preserves the complete external-action pause tuple.
 - A protected production rollout now advances versioned defaults through QStash, an Approved
   Snapshot, release-attested readiness, and the measured runner size while new cold provisioning is
   halted. It exercises dispatch, snapshot, validation, and compatible stock/full runner-size
