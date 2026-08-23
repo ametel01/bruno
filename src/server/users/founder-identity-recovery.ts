@@ -86,6 +86,13 @@ export class FounderIdentityRecoveryError extends Error {
   }
 }
 
+export class FounderIdentityRecoveryReceiptError extends Error {
+  constructor(readonly recovered: { ownerId: string; recoveredAt: string }) {
+    super("identity_recovery_receipts_unavailable");
+    this.name = "FounderIdentityRecoveryReceiptError";
+  }
+}
+
 export async function issueFounderIdentityRecoveryCredentialForUser(input: {
   userId: string;
   now: Date;
@@ -179,8 +186,13 @@ export async function recoverFounderIdentityWithCredential(input: {
   recoveryCode: string;
   signingSecret: string;
   now: Date;
+  includeRecoveryStatus?: boolean;
   createConnection?: () => DatabaseConnection;
-}): Promise<{ ownerId: string; recoveredAt: string }> {
+}): Promise<{
+  ownerId: string;
+  recoveredAt: string;
+  recovery?: FounderIdentityRecoveryStatusDto;
+}> {
   assertClerkUserId(input.replacementClerkUserId);
   assertInstant(input.now);
   const parsed = parseRecoveryCode(input.recoveryCode);
@@ -248,8 +260,39 @@ export async function recoverFounderIdentityWithCredential(input: {
       now: input.now,
       credentialId: credential.id,
       credentialDigest: credential.credentialDigest as `sha256:${string}`,
+      ...(input.includeRecoveryStatus ? { includeRecoveryStatus: true } : {}),
       createConnection: () => connection,
     });
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
+export async function recoverFounderIdentityWithCredentialAndStatus(input: {
+  replacementClerkUserId: string;
+  recoveryCode: string;
+  signingSecret: string;
+  now: Date;
+  createConnection?: () => DatabaseConnection;
+}): Promise<{
+  recovered: { ownerId: string; recoveredAt: string };
+  recovery: FounderIdentityRecoveryStatusDto;
+}> {
+  const connection = input.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !input.createConnection;
+  try {
+    const recovered = await recoverFounderIdentityWithCredential({
+      ...input,
+      includeRecoveryStatus: true,
+      createConnection: () => connection,
+    });
+    if (!recovered.recovery) {
+      throw new FounderIdentityRecoveryReceiptError(recovered);
+    }
+    return {
+      recovered: { ownerId: recovered.ownerId, recoveredAt: recovered.recoveredAt },
+      recovery: recovered.recovery,
+    };
   } finally {
     if (ownsConnection) await connection.close();
   }
@@ -375,8 +418,13 @@ export async function recoverFounderIdentity(input: {
   now: Date;
   credentialId?: string;
   credentialDigest?: `sha256:${string}`;
+  includeRecoveryStatus?: boolean;
   createConnection?: () => DatabaseConnection;
-}): Promise<{ ownerId: string; recoveredAt: string }> {
+}): Promise<{
+  ownerId: string;
+  recoveredAt: string;
+  recovery?: FounderIdentityRecoveryStatusDto;
+}> {
   assertClerkUserId(input.replacementClerkUserId);
   assertInstant(input.now);
   const payload = verifyFounderIdentityRecoveryAssertion(input.assertion, input.signingSecret);
@@ -539,14 +587,41 @@ export async function recoverFounderIdentity(input: {
         occurredAt: input.now,
         createdAt: input.now,
       });
+      const receipts = await tx
+        .select({
+          kind: founderIdentityRecoveryReceipts.kind,
+          occurredAt: founderIdentityRecoveryReceipts.occurredAt,
+        })
+        .from(founderIdentityRecoveryReceipts)
+        .where(eq(founderIdentityRecoveryReceipts.recoveryId, recovery.id))
+        .orderBy(
+          founderIdentityRecoveryReceipts.occurredAt,
+          sql`case ${founderIdentityRecoveryReceipts.kind}
+            when 'identity_loss_recorded' then 1
+            when 'recovery_denied' then 2
+            when 'identity_rebound' then 3
+          end`,
+        );
       return {
         ok: true as const,
         ownerId: recovery.userId,
         recoveredAt: input.now.toISOString(),
+        recovery: {
+          state: "recovered" as const,
+          recoveredAt: input.now.toISOString(),
+          receipts: receipts.map((receipt) => ({
+            kind: receipt.kind,
+            occurredAt: receipt.occurredAt.toISOString(),
+          })),
+        },
       };
     });
     if (!outcome.ok) throw new FounderIdentityRecoveryError(outcome.code);
-    return { ownerId: outcome.ownerId, recoveredAt: outcome.recoveredAt };
+    return {
+      ownerId: outcome.ownerId,
+      recoveredAt: outcome.recoveredAt,
+      ...(input.includeRecoveryStatus ? { recovery: outcome.recovery } : {}),
+    };
   } finally {
     if (ownsConnection) await connection.close();
   }
@@ -566,7 +641,7 @@ export async function getFounderIdentityRecoveryStatusForClerkSubject(
       .where(eq(users.clerkUserId, clerkUserId))
       .limit(1);
     if (!owner) return { state: "proof_required" };
-    return getFounderIdentityRecoveryStatusForUser(owner.id, {
+    return await getFounderIdentityRecoveryStatusForUser(owner.id, {
       createConnection: () => connection,
     });
   } finally {

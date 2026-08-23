@@ -12,6 +12,7 @@ import {
   createFounderProductContractFixture,
   deleteFounderProductContractFixture,
   prepareFounderExternalBetaContractFixture,
+  prepareFounderRevocableCalendarConnection,
   readFounderScenarioExecutions,
   signedFounderCommerceEvent,
   withPinnedFounderDevelopmentUser,
@@ -74,6 +75,12 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                 fixture.checkoutCorrelation,
                 clock.now(),
               );
+            }
+            if (id === "identity_recovery_lifecycle") {
+              await prepareFounderRevocableCalendarConnection(fixture, {
+                runId,
+                now: clock.now(),
+              });
             }
             const response = await application.request({
               method: "POST",
@@ -298,6 +305,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
               expect(body.outcome.providerCalls).toContain("clerk.authenticate");
               expect(body.outcome.providerCalls).toContain("lemonSqueezy.read_subscription");
               expect(body.outcome.providerCalls).toContain("lemonSqueezy.cancel_subscription");
+              expect(body.outcome.providerCalls).toContain("google.revoke_calendar");
               expect(body.outcome.identityRecovery).toEqual({
                 lostIdentityDenied: true,
                 takeoverDenied: true,

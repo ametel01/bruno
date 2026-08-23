@@ -506,6 +506,9 @@ function DeletionReceipt({
   busy: boolean;
 }) {
   const hasFailedRevocation = receipt.revocations.some((item) => item.status === "failed");
+  const hasExhaustedRevocation = receipt.revocations.some(
+    (item) => item.errorCode === "provider_revocation_recovery_exhausted",
+  );
   const hasFailedCommerceCancellation = receipt.commerceCancellation?.status === "failed";
   const receiptTitle =
     receipt.request.kind === "account_closure" ? "Account Closure Receipt" : "Deletion Receipt";
@@ -547,7 +550,13 @@ function DeletionReceipt({
           </ul>
         </>
       ) : null}
-      {hasFailedRevocation || hasFailedCommerceCancellation ? (
+      {hasExhaustedRevocation ? (
+        <p>
+          Recovery Exhausted. Bruno removed the retained retry credentials. Account Closure remains
+          paused until an attended provider-resolution review can confirm revocation.
+        </p>
+      ) : null}
+      {!hasExhaustedRevocation && (hasFailedRevocation || hasFailedCommerceCancellation) ? (
         <button className={styles.secondary} disabled={busy} onClick={onRetry} type="button">
           Retry Account Closure cleanup
         </button>
@@ -574,9 +583,7 @@ function identityRecoveryReceiptLabel(
 }
 
 function formatDate(value: string | null): string {
-  return value
-    ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(
-        new Date(value),
-      )
-    : "No recorded use";
+  if (!value) return "No recorded use";
+  const instant = new Date(value);
+  return `${instant.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }

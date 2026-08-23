@@ -41,7 +41,7 @@ export async function POST(
 ): Promise<Response> {
   const owner = await (dependencies.requireApplicationUser ?? requireConfiguredApplicationUser)();
   if (!owner.ok) return authenticationResponse(owner.status);
-  if (request.body !== null) return validationResponse();
+  if ((await request.text()).length !== 0) return validationResponse();
   const recentlyAuthenticated = await (
     dependencies.requireRecentAuth ??
     ((currentRequest: Request) =>

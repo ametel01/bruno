@@ -42,6 +42,7 @@ type ProviderState = {
   archiveStorage: FakeBackupObjectStorage;
   seededResourceIds: Set<string>;
   subscriptionStatus: FounderCommerceStatus;
+  revokedGoogleConnections: Set<string>;
   calls: string[];
 };
 
@@ -66,6 +67,7 @@ export function deterministicFounderLifecycleProviders(input: {
     archiveStorage: new FakeBackupObjectStorage("founder-product-contract-recovery"),
     seededResourceIds: new Set(),
     subscriptionStatus: input.subscriptionStatus,
+    revokedGoogleConnections: new Set(),
     calls: [],
   };
   state.subscriptionStatus = input.subscriptionStatus;
@@ -173,11 +175,64 @@ export async function cancelDeterministicFounderContractSubscription(input: {
     archiveStorage: new FakeBackupObjectStorage("founder-product-contract-recovery"),
     seededResourceIds: new Set<string>(),
     subscriptionStatus: "active" as const,
+    revokedGoogleConnections: new Set<string>(),
     calls: [],
   };
   registry.set(key, state);
   state.calls.push("lemonSqueezy.cancel_subscription");
   state.subscriptionStatus = "cancelled";
+}
+
+export async function revokeDeterministicFounderContractGoogleConnection(input: {
+  runId: string;
+  userId: string;
+  connectionKind: "calendar";
+  token: string;
+}): Promise<{ providerRevoked: true }> {
+  assertDeterministicGoogleBoundary(input.runId, input.token);
+  if (!globalProviders.__brunoFounderLifecycleProviders) {
+    globalProviders.__brunoFounderLifecycleProviders = new Map();
+  }
+  const registry = globalProviders.__brunoFounderLifecycleProviders;
+  const key = `${input.runId}:${input.userId}`;
+  const state = registry.get(key) ?? {
+    digitalOcean: new FakeDigitalOceanProvider(),
+    archiveStorage: new FakeBackupObjectStorage("founder-product-contract-recovery"),
+    seededResourceIds: new Set<string>(),
+    subscriptionStatus: "active" as const,
+    revokedGoogleConnections: new Set<string>(),
+    calls: [],
+  };
+  registry.set(key, state);
+  state.revokedGoogleConnections.add(input.connectionKind);
+  state.calls.push(`google.revoke_${input.connectionKind}`);
+  return { providerRevoked: true };
+}
+
+export function deterministicFounderContractGoogleConnectionRevoked(input: {
+  runId: string;
+  userId: string;
+  connectionKind: "calendar";
+}): boolean {
+  return (
+    globalProviders.__brunoFounderLifecycleProviders
+      ?.get(`${input.runId}:${input.userId}`)
+      ?.revokedGoogleConnections.has(input.connectionKind) ?? false
+  );
+}
+
+function assertDeterministicGoogleBoundary(runId: string, token: string): void {
+  const appUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? "invalid:");
+  if (
+    process.env.BRUNO_AUTH_MODE !== "development" ||
+    process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE !== "deterministic" ||
+    process.env.VERCEL_ENV ||
+    process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID !== runId ||
+    !["localhost", "127.0.0.1", "[::1]"].includes(appUrl.hostname) ||
+    token.length === 0
+  ) {
+    throw new Error("Deterministic Founder Google revocation is unavailable.");
+  }
 }
 
 function corruptingRecoveryArchiveStorage(

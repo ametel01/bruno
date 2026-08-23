@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import { users } from "@/src/server/db/schema";
 import {
+  deterministicFounderContractGoogleConnectionRevoked,
   deterministicFounderLifecycleProviders,
   type FounderLifecycleFailureOperation,
 } from "@/src/server/founder-product-contract/deterministic-providers";
@@ -223,7 +224,9 @@ async function executeIdentityRecoveryThroughPublicSeams(input: {
     { method: "POST", headers: currentIdentityHeaders },
   );
   if (credentialResponse.status !== 200) {
-    throw new Error("The recently reauthenticated recovery-code journey was unavailable.");
+    throw new Error(
+      `The recently reauthenticated recovery-code journey was unavailable (${credentialResponse.status}: ${await credentialResponse.text()}).`,
+    );
   }
   const credentialBody = (await credentialResponse.json()) as {
     credential?: { recoveryCode?: string };
@@ -361,6 +364,15 @@ async function executeIdentityRecoveryThroughPublicSeams(input: {
   });
   if (closureProviderObservation.status !== "cancelled") {
     throw new Error("Account Closure cancellation was not visible at the provider seam.");
+  }
+  if (
+    !deterministicFounderContractGoogleConnectionRevoked({
+      runId: input.input.runId,
+      userId: input.input.userId,
+      connectionKind: "calendar",
+    })
+  ) {
+    throw new Error("Account Closure Google revocation was not visible at the provider seam.");
   }
   const afterClosure = await readFounderIdentitySeparationSnapshot(connection, input.input.userId);
   if (

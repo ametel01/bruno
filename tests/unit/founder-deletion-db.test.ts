@@ -13,6 +13,7 @@ import {
 import {
   FOUNDER_ACTIVE_PURGE_WINDOW_MS,
   FOUNDER_BACKUP_EXPIRY_WINDOW_MS,
+  FOUNDER_REVOCATION_MAX_ATTEMPTS,
   FOUNDER_REVOCATION_RETRY_MS,
   getFounderDeletionReceiptForUser,
   processFounderDeletionRequests,
@@ -357,5 +358,130 @@ describe("Founder deletion lifecycle", () => {
       expect.objectContaining({ connectionKind: "mail", status: "succeeded", attemptCount: 2 }),
     ]);
     expect(retried?.stages.map((stage) => stage.stage)).toContain("revocation");
+  });
+
+  it("keeps an already-confirmed provider revocation terminal during Account Closure", async () => {
+    await connection.db.insert(operatorMailConnections).values({
+      id: "00000000-0000-4000-8000-000000003708",
+      operatorId: OPERATOR_ID,
+      providerSubjectId: "gmail-already-revoked",
+      accountLabel: "founder@example.com",
+      status: "disconnected",
+      authorizationState: "revoked",
+      revokedAt: NOW,
+      disconnectedAt: NOW,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    const revokeConnections = vi.fn(async () => [
+      { connectionKind: "mail", ok: false, errorCode: "credential_missing" },
+    ]);
+
+    const receipt = await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      { createConnection: () => connection, now: () => NOW, revokeConnections },
+    );
+
+    expect(revokeConnections).not.toHaveBeenCalled();
+    expect(receipt?.revocations).toEqual([
+      expect.objectContaining({
+        connectionKind: "mail",
+        status: "succeeded",
+        attemptCount: 0,
+        errorCode: null,
+      }),
+    ]);
+    expect(receipt?.stages).toContainEqual(
+      expect.objectContaining({
+        stage: "revocation",
+        details: { outcome: "connections_already_revoked" },
+      }),
+    );
+  });
+
+  it("bounds revocation retry custody and clears retained Google credentials on exhaustion", async () => {
+    const connectionId = "00000000-0000-4000-8000-000000003709";
+    await connection.db.insert(operatorMailConnections).values({
+      id: connectionId,
+      operatorId: OPERATOR_ID,
+      providerSubjectId: "gmail-exhausted",
+      accountLabel: "founder@example.com",
+      status: "ready",
+      authorizationState: "authorized",
+      accessTokenCiphertext: "access",
+      accessTokenIv: "access-iv",
+      accessTokenAuthTag: "access-tag",
+      refreshTokenCiphertext: "refresh",
+      refreshTokenIv: "refresh-iv",
+      refreshTokenAuthTag: "refresh-tag",
+      secretKeyVersion: "test-v1",
+      authorizedAt: NOW,
+      lastVerifiedAt: NOW,
+      lastEvidenceAt: NOW,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    const revokeConnections = vi.fn(async () => [
+      { connectionKind: "mail", ok: false, errorCode: "provider_503" },
+    ]);
+    await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        revokeConnections,
+      },
+    );
+    await processFounderDeletionRequests({
+      createConnection: () => connection,
+      now: () => new Date(NOW.valueOf() + FOUNDER_REVOCATION_RETRY_MS - 1),
+      revokeConnections,
+    });
+    expect(revokeConnections).toHaveBeenCalledTimes(1);
+
+    for (let attempt = 1; attempt < FOUNDER_REVOCATION_MAX_ATTEMPTS; attempt += 1) {
+      await retryFounderDeletionRevocationsForUser(OWNER_ID, {
+        createConnection: () => connection,
+        now: () => new Date(NOW.valueOf() + FOUNDER_REVOCATION_RETRY_MS * attempt),
+        revokeConnections,
+      });
+    }
+    const exhausted = await getFounderDeletionReceiptForUser(OWNER_ID, {
+      createConnection: () => connection,
+    });
+    expect(exhausted?.request).toMatchObject({
+      status: "failed",
+      failureCode: "account_closure_revocation_recovery_exhausted",
+    });
+    expect(exhausted?.revocations).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        attemptCount: FOUNDER_REVOCATION_MAX_ATTEMPTS,
+        nextAttemptAt: null,
+        errorCode: "provider_revocation_recovery_exhausted",
+      }),
+    ]);
+    const [cleared] = await connection.db
+      .select()
+      .from(operatorMailConnections)
+      .where(eq(operatorMailConnections.id, connectionId));
+    expect(cleared).toEqual(
+      expect.objectContaining({
+        accessTokenCiphertext: null,
+        refreshTokenCiphertext: null,
+        failureCode: "provider_revocation_recovery_exhausted",
+      }),
+    );
+
+    await processFounderDeletionRequests({
+      createConnection: () => connection,
+      now: () => new Date(NOW.valueOf() + FOUNDER_REVOCATION_RETRY_MS * 4),
+      revokeConnections,
+    });
+    expect(revokeConnections).toHaveBeenCalledTimes(FOUNDER_REVOCATION_MAX_ATTEMPTS);
   });
 });

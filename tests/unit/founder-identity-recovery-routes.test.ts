@@ -237,6 +237,33 @@ describe("Founder identity recovery routes", () => {
       },
     });
 
+    const streamedEmptyBody = await issueRecoveryCredential(
+      new Request("https://bruno.example/api/operator/identity-recovery", {
+        method: "POST",
+        body: "",
+      }),
+      undefined,
+      {
+        requireApplicationUser: async () => owner,
+        requireRecentAuth: async () => true,
+        issueCredential,
+      },
+    );
+    expect(streamedEmptyBody.status).toBe(200);
+    const browserEvidence = await issueRecoveryCredential(
+      new Request("https://bruno.example/api/operator/identity-recovery", {
+        method: "POST",
+        body: "email=founder@example.com",
+      }),
+      undefined,
+      {
+        requireApplicationUser: async () => owner,
+        requireRecentAuth: async () => true,
+        issueCredential,
+      },
+    );
+    expect(browserEvidence.status).toBe(400);
+
     const status = await getRecoveryCredential(
       new Request("https://bruno.example/api/operator/identity-recovery"),
       undefined,

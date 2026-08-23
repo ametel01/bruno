@@ -38,11 +38,15 @@ import {
   operatorRelationshipRecords,
   operators,
 } from "@/src/server/db/schema";
+import { revokeDeterministicFounderContractGoogleConnection } from "@/src/server/founder-product-contract/deterministic-providers";
 import {
   disconnectFounderAnthropicForUser,
   disconnectFounderOpenAiForUser,
 } from "@/src/server/operators/founder-ai-connection";
-import { disconnectFounderGoogleCalendarForUser } from "@/src/server/operators/founder-calendar-connection";
+import {
+  createGoogleCalendarAdapter,
+  disconnectFounderGoogleCalendarForUser,
+} from "@/src/server/operators/founder-calendar-connection";
 import { disconnectFounderGoogleMailForUser } from "@/src/server/operators/founder-mail-connection";
 import { disconnectFounderGoogleMailSendingForUser } from "@/src/server/operators/founder-mail-sending-connection";
 
@@ -53,6 +57,7 @@ type DeletionTransaction = Parameters<
 export const FOUNDER_ACTIVE_PURGE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const FOUNDER_BACKUP_EXPIRY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 export const FOUNDER_REVOCATION_RETRY_MS = 60 * 60 * 1000;
+export const FOUNDER_REVOCATION_MAX_ATTEMPTS = 3;
 
 export type FounderDeletionKind = "retained_data" | "account_closure";
 export type FounderDeletionStage =
@@ -73,7 +78,10 @@ export type FounderDeletionDependencies = {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
   randomUUID?: () => string;
-  revokeConnections?: (userId: string) => Promise<FounderDeletionRevocationResult[]>;
+  revokeConnections?: (
+    userId: string,
+    connectionKinds?: readonly string[],
+  ) => Promise<FounderDeletionRevocationResult[]>;
   cancelCommerce?: (providerSubscriptionId: string) => Promise<void>;
 };
 
@@ -554,6 +562,7 @@ async function stageAccountClosure(
           id: operatorAiConnections.id,
           provider: operatorAiConnections.provider,
           providerSubjectId: operatorAiConnections.providerSubjectId,
+          authorizationState: operatorAiConnections.authorizationState,
         })
         .from(operatorAiConnections)
         .where(eq(operatorAiConnections.operatorId, operatorId)),
@@ -562,6 +571,7 @@ async function stageAccountClosure(
           id: operatorCalendarConnections.id,
           provider: operatorCalendarConnections.provider,
           providerSubjectId: operatorCalendarConnections.providerSubjectId,
+          authorizationState: operatorCalendarConnections.authorizationState,
         })
         .from(operatorCalendarConnections)
         .where(eq(operatorCalendarConnections.operatorId, operatorId)),
@@ -570,6 +580,7 @@ async function stageAccountClosure(
           id: operatorMailConnections.id,
           provider: operatorMailConnections.provider,
           providerSubjectId: operatorMailConnections.providerSubjectId,
+          authorizationState: operatorMailConnections.authorizationState,
         })
         .from(operatorMailConnections)
         .where(eq(operatorMailConnections.operatorId, operatorId)),
@@ -578,6 +589,7 @@ async function stageAccountClosure(
           id: operatorMailSendingConnections.id,
           provider: operatorMailSendingConnections.provider,
           providerSubjectId: operatorMailSendingConnections.providerSubjectId,
+          authorizationState: operatorMailSendingConnections.authorizationState,
         })
         .from(operatorMailSendingConnections)
         .where(eq(operatorMailSendingConnections.operatorId, operatorId)),
@@ -600,12 +612,29 @@ async function stageAccountClosure(
         connectionId: item.id,
         provider: item.provider,
         providerIdentity: item.providerSubjectId,
-        status: "pending" as const,
+        status:
+          item.authorizationState === "revoked" ? ("succeeded" as const) : ("pending" as const),
         createdAt: requestedAt,
         updatedAt: requestedAt,
       })),
     )
     .onConflictDoNothing();
+  if (revocations.every((item) => item.authorizationState === "revoked")) {
+    await tx
+      .insert(operatorDeletionReceipts)
+      .values({
+        id: makeId(),
+        requestId,
+        operatorId,
+        stage: "revocation",
+        occurredAt: requestedAt,
+        details: { outcome: "connections_already_revoked" },
+        createdAt: requestedAt,
+      })
+      .onConflictDoNothing({
+        target: [operatorDeletionReceipts.requestId, operatorDeletionReceipts.stage],
+      });
+  }
 }
 
 async function attemptFounderCommerceCancellation(
@@ -707,7 +736,7 @@ async function synchronizeAccountClosureCompletionState(
         .limit(1)
         .for("update");
       if (!request) return false;
-      const [unresolvedCommerce, unresolvedRevocation] = await Promise.all([
+      const [unresolvedCommerce, unresolvedRevocation, exhaustedRevocation] = await Promise.all([
         tx
           .select({ id: operatorDeletionCommerceCancellations.id })
           .from(operatorDeletionCommerceCancellations)
@@ -728,15 +757,28 @@ async function synchronizeAccountClosureCompletionState(
             ),
           )
           .limit(1),
+        tx
+          .select({ id: operatorDeletionRevocations.id })
+          .from(operatorDeletionRevocations)
+          .where(
+            and(
+              eq(operatorDeletionRevocations.requestId, requestId),
+              eq(operatorDeletionRevocations.errorCode, "provider_revocation_recovery_exhausted"),
+            ),
+          )
+          .limit(1),
       ]);
       const unresolved = Boolean(unresolvedCommerce[0] || unresolvedRevocation[0]);
+      const recoveryExhausted = Boolean(exhaustedRevocation[0]);
       await tx
         .update(operatorDeletionRequests)
         .set(
           unresolved
             ? {
                 status: "failed",
-                failureCode: "account_closure_external_effects_unresolved",
+                failureCode: recoveryExhausted
+                  ? "account_closure_revocation_recovery_exhausted"
+                  : "account_closure_external_effects_unresolved",
                 completedAt: null,
                 updatedAt: now(),
               }
@@ -776,17 +818,47 @@ async function attemptFounderDeletionRevocations(
   requestId: string,
   dependencies: FounderDeletionDependencies,
 ): Promise<void> {
-  let results: FounderDeletionRevocationResult[] = [];
-  let revocationCallFailed = false;
-  try {
-    results = await (dependencies.revokeConnections ?? defaultRevokeConnections)(userId);
-  } catch {
-    revocationCallFailed = true;
-  }
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
   try {
+    const attemptedAt = now();
+    const unresolved = await connection.db
+      .select()
+      .from(operatorDeletionRevocations)
+      .where(
+        and(
+          eq(operatorDeletionRevocations.requestId, requestId),
+          sql`${operatorDeletionRevocations.status} <> 'succeeded'`,
+        ),
+      );
+    const newlyExhausted = unresolved.filter(
+      (row) =>
+        row.attemptCount >= FOUNDER_REVOCATION_MAX_ATTEMPTS &&
+        row.errorCode !== "provider_revocation_recovery_exhausted",
+    );
+    if (newlyExhausted.length > 0) {
+      await connection.db.transaction(async (tx) => {
+        await markFounderRevocationRecoveryExhausted(tx, newlyExhausted, attemptedAt);
+      });
+    }
+    const due = unresolved.filter(
+      (row) =>
+        row.attemptCount < FOUNDER_REVOCATION_MAX_ATTEMPTS &&
+        (!row.nextAttemptAt || row.nextAttemptAt <= attemptedAt),
+    );
+    if (due.length === 0) return;
+
+    let results: FounderDeletionRevocationResult[] = [];
+    let revocationCallFailed = false;
+    try {
+      results = await (dependencies.revokeConnections ?? defaultRevokeConnections)(
+        userId,
+        due.map((row) => row.connectionKind),
+      );
+    } catch {
+      revocationCallFailed = true;
+    }
     await connection.db.transaction(async (tx) => {
       const [requestOwner] = await tx
         .select({ operatorId: operatorDeletionRequests.operatorId })
@@ -796,137 +868,140 @@ async function attemptFounderDeletionRevocations(
       if (!requestOwner) return;
       const localRevocationMessage =
         "Access was removed locally. Provider revocation remains unconfirmed and can be retried.";
-      await tx
-        .update(operatorAiConnections)
-        .set({
-          status: "disconnected",
-          authorizationState: "revocation_unconfirmed",
-          capacityState: "unknown",
-          inferenceState: "unknown",
-          authorizationPersisted: false,
-          authorizationSessionHash: null,
-          authorizationExpiresAt: null,
-          approvedModelAssignment: null,
-          disconnectedAt: sql`coalesce(${operatorAiConnections.disconnectedAt}, now())`,
-          failureCode: "provider_revocation_unconfirmed",
-          recoveryMessage: localRevocationMessage,
-          workPausedReason: localRevocationMessage,
-          updatedAt: now(),
-        })
-        .where(
-          and(
-            eq(operatorAiConnections.operatorId, requestOwner.operatorId),
-            sql`${operatorAiConnections.status} <> 'disconnected'`,
-          ),
-        );
-      await tx
-        .update(operatorCalendarConnections)
-        .set({
-          status: "disconnected",
-          authorizationState: "revocation_unconfirmed",
-          authorizationSessionHash: null,
-          authorizationExpiresAt: null,
-          failureCode: "provider_revocation_unconfirmed",
-          recoveryMessage: localRevocationMessage,
-          disconnectedAt: sql`coalesce(${operatorCalendarConnections.disconnectedAt}, now())`,
-          updatedAt: now(),
-        })
-        .where(
-          and(
-            eq(operatorCalendarConnections.operatorId, requestOwner.operatorId),
-            sql`${operatorCalendarConnections.status} <> 'disconnected'`,
-          ),
-        );
-      await tx
-        .update(operatorMailConnections)
-        .set({
-          status: "disconnected",
-          authorizationState: "revocation_unconfirmed",
-          authorizationSessionHash: null,
-          authorizationExpiresAt: null,
-          failureCode: "provider_revocation_unconfirmed",
-          recoveryMessage: localRevocationMessage,
-          disconnectedAt: sql`coalesce(${operatorMailConnections.disconnectedAt}, now())`,
-          updatedAt: now(),
-        })
-        .where(
-          and(
-            eq(operatorMailConnections.operatorId, requestOwner.operatorId),
-            sql`${operatorMailConnections.status} <> 'disconnected'`,
-          ),
-        );
-      await tx
-        .update(operatorMailSendingConnections)
-        .set({
-          status: "disconnected",
-          authorizationState: "revocation_unconfirmed",
-          authorizationSessionHash: null,
-          authorizationExpiresAt: null,
-          failureCode: "provider_revocation_unconfirmed",
-          recoveryMessage: localRevocationMessage,
-          disconnectedAt: sql`coalesce(${operatorMailSendingConnections.disconnectedAt}, now())`,
-          updatedAt: now(),
-        })
-        .where(
-          and(
-            eq(operatorMailSendingConnections.operatorId, requestOwner.operatorId),
-            sql`${operatorMailSendingConnections.status} <> 'disconnected'`,
-          ),
-        );
-      for (const result of results) {
-        const [row] = await tx
-          .select()
-          .from(operatorDeletionRevocations)
+      const dueIds = new Set(due.map((row) => row.connectionId));
+      const aiIds = due
+        .filter((row) => row.connectionKind.startsWith("ai:"))
+        .map((row) => row.connectionId);
+      const calendarIds = due
+        .filter((row) => row.connectionKind === "calendar")
+        .map((row) => row.connectionId);
+      const mailIds = due
+        .filter((row) => row.connectionKind === "mail")
+        .map((row) => row.connectionId);
+      const sendingIds = due
+        .filter((row) => row.connectionKind === "mail_sending")
+        .map((row) => row.connectionId);
+      if (aiIds.length > 0) {
+        await tx
+          .update(operatorAiConnections)
+          .set({
+            status: "disconnected",
+            authorizationState: "revocation_unconfirmed",
+            capacityState: "unknown",
+            inferenceState: "unknown",
+            authorizationPersisted: false,
+            authorizationSessionHash: null,
+            authorizationExpiresAt: null,
+            approvedModelAssignment: null,
+            disconnectedAt: sql`coalesce(${operatorAiConnections.disconnectedAt}, now())`,
+            failureCode: "provider_revocation_unconfirmed",
+            recoveryMessage: localRevocationMessage,
+            workPausedReason: localRevocationMessage,
+            updatedAt: now(),
+          })
           .where(
             and(
-              eq(operatorDeletionRevocations.requestId, requestId),
-              eq(operatorDeletionRevocations.connectionKind, result.connectionKind),
+              eq(operatorAiConnections.operatorId, requestOwner.operatorId),
+              inArray(operatorAiConnections.id, aiIds),
+              sql`${operatorAiConnections.authorizationState} <> 'revoked'`,
             ),
-          )
-          .limit(1);
-        if (!row) continue;
-        const attemptedAt = now();
+          );
+      }
+      if (calendarIds.length > 0) {
+        await tx
+          .update(operatorCalendarConnections)
+          .set({
+            status: "disconnected",
+            authorizationState: "revocation_unconfirmed",
+            authorizationSessionHash: null,
+            authorizationExpiresAt: null,
+            failureCode: "provider_revocation_unconfirmed",
+            recoveryMessage: localRevocationMessage,
+            disconnectedAt: sql`coalesce(${operatorCalendarConnections.disconnectedAt}, now())`,
+            updatedAt: now(),
+          })
+          .where(
+            and(
+              eq(operatorCalendarConnections.operatorId, requestOwner.operatorId),
+              inArray(operatorCalendarConnections.id, calendarIds),
+              sql`${operatorCalendarConnections.authorizationState} <> 'revoked'`,
+            ),
+          );
+      }
+      if (mailIds.length > 0) {
+        await tx
+          .update(operatorMailConnections)
+          .set({
+            status: "disconnected",
+            authorizationState: "revocation_unconfirmed",
+            authorizationSessionHash: null,
+            authorizationExpiresAt: null,
+            failureCode: "provider_revocation_unconfirmed",
+            recoveryMessage: localRevocationMessage,
+            disconnectedAt: sql`coalesce(${operatorMailConnections.disconnectedAt}, now())`,
+            updatedAt: now(),
+          })
+          .where(
+            and(
+              eq(operatorMailConnections.operatorId, requestOwner.operatorId),
+              inArray(operatorMailConnections.id, mailIds),
+              sql`${operatorMailConnections.authorizationState} <> 'revoked'`,
+            ),
+          );
+      }
+      if (sendingIds.length > 0) {
+        await tx
+          .update(operatorMailSendingConnections)
+          .set({
+            status: "disconnected",
+            authorizationState: "revocation_unconfirmed",
+            authorizationSessionHash: null,
+            authorizationExpiresAt: null,
+            failureCode: "provider_revocation_unconfirmed",
+            recoveryMessage: localRevocationMessage,
+            disconnectedAt: sql`coalesce(${operatorMailSendingConnections.disconnectedAt}, now())`,
+            updatedAt: now(),
+          })
+          .where(
+            and(
+              eq(operatorMailSendingConnections.operatorId, requestOwner.operatorId),
+              inArray(operatorMailSendingConnections.id, sendingIds),
+              sql`${operatorMailSendingConnections.authorizationState} <> 'revoked'`,
+            ),
+          );
+      }
+      const exhaustedAfterAttempt: typeof due = [];
+      for (const row of due) {
+        if (!dueIds.has(row.connectionId)) continue;
+        const result = results.find((item) => item.connectionKind === row.connectionKind);
+        const ok = !revocationCallFailed && result?.ok === true;
+        const attemptCount = row.attemptCount + 1;
+        const exhausted = !ok && attemptCount >= FOUNDER_REVOCATION_MAX_ATTEMPTS;
         await tx
           .update(operatorDeletionRevocations)
           .set({
-            status: result.ok ? "succeeded" : "failed",
-            attemptCount: row.attemptCount + 1,
+            status: ok ? "succeeded" : "failed",
+            attemptCount,
             lastAttemptAt: attemptedAt,
-            nextAttemptAt: result.ok
+            nextAttemptAt:
+              ok || exhausted
+                ? null
+                : new Date(attemptedAt.getTime() + FOUNDER_REVOCATION_RETRY_MS),
+            errorCode: ok
               ? null
-              : new Date(attemptedAt.getTime() + FOUNDER_REVOCATION_RETRY_MS),
-            errorCode: result.ok ? null : (result.errorCode ?? "provider_revocation_unconfirmed"),
+              : exhausted
+                ? "provider_revocation_recovery_exhausted"
+                : (result?.errorCode ??
+                  (revocationCallFailed
+                    ? "provider_revocation_failed"
+                    : "provider_revocation_unconfirmed")),
             updatedAt: attemptedAt,
           })
           .where(eq(operatorDeletionRevocations.id, row.id));
+        if (exhausted) exhaustedAfterAttempt.push({ ...row, attemptCount });
       }
-      if (revocationCallFailed) {
-        const pendingRows = await tx
-          .select()
-          .from(operatorDeletionRevocations)
-          .where(
-            and(
-              eq(operatorDeletionRevocations.requestId, requestId),
-              or(
-                eq(operatorDeletionRevocations.status, "pending"),
-                eq(operatorDeletionRevocations.status, "failed"),
-              ),
-            ),
-          );
-        for (const row of pendingRows) {
-          const attemptedAt = now();
-          await tx
-            .update(operatorDeletionRevocations)
-            .set({
-              status: "failed",
-              attemptCount: row.attemptCount + 1,
-              lastAttemptAt: attemptedAt,
-              nextAttemptAt: new Date(attemptedAt.getTime() + FOUNDER_REVOCATION_RETRY_MS),
-              errorCode: "provider_revocation_failed",
-              updatedAt: attemptedAt,
-            })
-            .where(eq(operatorDeletionRevocations.id, row.id));
-        }
+      if (exhaustedAfterAttempt.length > 0) {
+        await markFounderRevocationRecoveryExhausted(tx, exhaustedAfterAttempt, attemptedAt);
       }
       const [pending] = await tx
         .select({ count: sql<number>`count(*)` })
@@ -963,6 +1038,69 @@ async function attemptFounderDeletionRevocations(
     });
   } finally {
     if (ownsConnection) await connection.close();
+  }
+}
+
+async function markFounderRevocationRecoveryExhausted(
+  tx: DeletionTransaction,
+  rows: Array<{ id: string; connectionId: string; connectionKind: string }>,
+  at: Date,
+): Promise<void> {
+  const exhaustedMessage =
+    "Recovery Exhausted. Provider revocation could not be confirmed within the safe retry budget. Retained retry credentials were removed; attended resolution is required.";
+  await tx
+    .update(operatorDeletionRevocations)
+    .set({
+      status: "failed",
+      nextAttemptAt: null,
+      errorCode: "provider_revocation_recovery_exhausted",
+      updatedAt: at,
+    })
+    .where(
+      inArray(
+        operatorDeletionRevocations.id,
+        rows.map((row) => row.id),
+      ),
+    );
+  const calendarIds = rows
+    .filter((row) => row.connectionKind === "calendar")
+    .map((row) => row.connectionId);
+  const mailIds = rows
+    .filter((row) => row.connectionKind === "mail")
+    .map((row) => row.connectionId);
+  const sendingIds = rows
+    .filter((row) => row.connectionKind === "mail_sending")
+    .map((row) => row.connectionId);
+  const clearedGrant = {
+    accessTokenCiphertext: null,
+    accessTokenIv: null,
+    accessTokenAuthTag: null,
+    refreshTokenCiphertext: null,
+    refreshTokenIv: null,
+    refreshTokenAuthTag: null,
+    secretKeyVersion: null,
+    tokenExpiresAt: null,
+    failureCode: "provider_revocation_recovery_exhausted",
+    recoveryMessage: exhaustedMessage,
+    updatedAt: at,
+  };
+  if (calendarIds.length > 0) {
+    await tx
+      .update(operatorCalendarConnections)
+      .set(clearedGrant)
+      .where(inArray(operatorCalendarConnections.id, calendarIds));
+  }
+  if (mailIds.length > 0) {
+    await tx
+      .update(operatorMailConnections)
+      .set(clearedGrant)
+      .where(inArray(operatorMailConnections.id, mailIds));
+  }
+  if (sendingIds.length > 0) {
+    await tx
+      .update(operatorMailSendingConnections)
+      .set(clearedGrant)
+      .where(inArray(operatorMailSendingConnections.id, sendingIds));
   }
 }
 
@@ -1199,7 +1337,35 @@ async function purgeActiveFounderContent(
 
 async function defaultRevokeConnections(
   userId: string,
+  connectionKinds: readonly string[] = [
+    "ai:openai",
+    "ai:anthropic",
+    "calendar",
+    "mail",
+    "mail_sending",
+  ],
 ): Promise<FounderDeletionRevocationResult[]> {
+  const selectedKinds = new Set(connectionKinds);
+  const contractRunId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID?.trim();
+  const deterministicCalendarAdapter =
+    process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE === "deterministic" && contractRunId
+      ? {
+          ...createGoogleCalendarAdapter(),
+          revokeAuthorization: async (input: {
+            accessToken: string | null;
+            refreshToken: string | null;
+          }) => {
+            const token = input.refreshToken ?? input.accessToken;
+            if (!token) return { providerRevoked: false };
+            return revokeDeterministicFounderContractGoogleConnection({
+              runId: contractRunId,
+              userId,
+              connectionKind: "calendar",
+              token,
+            });
+          },
+        }
+      : null;
   const calls: Array<
     [string, () => Promise<{ status?: string; recoveryMessage?: string | null } | null>]
   > = [
@@ -1210,6 +1376,7 @@ async function defaultRevokeConnections(
       () =>
         disconnectFounderGoogleCalendarForUser(userId, {
           preserveCredentialsOnUnconfirmedRevocation: true,
+          ...(deterministicCalendarAdapter ? { adapter: deterministicCalendarAdapter } : {}),
         }),
     ],
     [
@@ -1229,6 +1396,7 @@ async function defaultRevokeConnections(
   ];
   const results: FounderDeletionRevocationResult[] = [];
   for (const [connectionKind, call] of calls) {
+    if (!selectedKinds.has(connectionKind)) continue;
     try {
       const result = await call();
       if (result) {

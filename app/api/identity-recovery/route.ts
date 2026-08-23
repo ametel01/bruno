@@ -3,8 +3,10 @@ import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { resolveFounderContractIdentity } from "@/src/server/founder-product-contract/deterministic-identity";
 import {
   FounderIdentityRecoveryError,
+  FounderIdentityRecoveryReceiptError,
   getFounderIdentityRecoveryStatusForClerkSubject,
   recoverFounderIdentityWithCredential,
+  recoverFounderIdentityWithCredentialAndStatus,
 } from "@/src/server/users/founder-identity-recovery";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +16,7 @@ type RouteDependencies = {
   getClerkUserId?: () => Promise<string | null>;
   getStatus?: typeof getFounderIdentityRecoveryStatusForClerkSubject;
   recover?: typeof recoverFounderIdentityWithCredential;
+  recoverAndGetStatus?: typeof recoverFounderIdentityWithCredentialAndStatus;
   readSigningSecret?: () => string | null;
   now?: () => Date;
 };
@@ -68,14 +71,31 @@ export async function POST(
     );
   }
   let recovered: { ownerId: string; recoveredAt: string };
+  let observedRecovery:
+    | Awaited<ReturnType<typeof getFounderIdentityRecoveryStatusForClerkSubject>>
+    | undefined;
   try {
-    recovered = await (dependencies.recover ?? recoverFounderIdentityWithCredential)({
+    const recoveryInput = {
       replacementClerkUserId: clerkUserId,
       recoveryCode: value.recoveryCode,
       signingSecret,
       now: dependencies.now?.() ?? new Date(),
-    });
+    };
+    if (!dependencies.recover && !dependencies.getStatus) {
+      const result = await (
+        dependencies.recoverAndGetStatus ?? recoverFounderIdentityWithCredentialAndStatus
+      )(recoveryInput);
+      recovered = result.recovered;
+      observedRecovery = result.recovery;
+    } else {
+      recovered = await (dependencies.recover ?? recoverFounderIdentityWithCredential)(
+        recoveryInput,
+      );
+    }
   } catch (error) {
+    if (error instanceof FounderIdentityRecoveryReceiptError) {
+      return receiptUnavailableResponse();
+    }
     const code =
       error instanceof FounderIdentityRecoveryError ? error.code : "identity_recovery_failed";
     return Response.json(
@@ -90,9 +110,11 @@ export async function POST(
     );
   }
   try {
-    const recovery = await (
-      dependencies.getStatus ?? getFounderIdentityRecoveryStatusForClerkSubject
-    )(clerkUserId);
+    const recovery =
+      observedRecovery ??
+      (await (dependencies.getStatus ?? getFounderIdentityRecoveryStatusForClerkSubject)(
+        clerkUserId,
+      ));
     if (recovery.state !== "recovered" || recovery.recoveredAt !== recovered.recoveredAt) {
       throw new Error("Recovered identity state was not observable.");
     }
@@ -103,17 +125,21 @@ export async function POST(
       { headers: noStoreHeaders() },
     );
   } catch {
-    return Response.json(
-      {
-        error: {
-          code: "identity_recovery_receipts_unavailable",
-          message:
-            "Identity was recovered, but its receipts are temporarily unavailable. Reload this page before retrying recovery.",
-        },
-      },
-      { status: 503, headers: noStoreHeaders() },
-    );
+    return receiptUnavailableResponse();
   }
+}
+
+function receiptUnavailableResponse(): Response {
+  return Response.json(
+    {
+      error: {
+        code: "identity_recovery_receipts_unavailable",
+        message:
+          "Identity was recovered, but its receipts are temporarily unavailable. Reload this page before retrying recovery.",
+      },
+    },
+    { status: 503, headers: noStoreHeaders() },
+  );
 }
 
 async function getClerkUserId(

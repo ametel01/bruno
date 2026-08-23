@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomUUID } from "node:crypto";
+import { createCipheriv, createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { expect, type APIRequestContext } from "@playwright/test";
 import postgres from "postgres";
 import type { FounderProductContractClock } from "@/src/testing/founder-product-contract";
@@ -229,6 +229,48 @@ export async function prepareFounderIdentityRecoveryBrowserPreconditions(
     if (!event) throw new Error("Browser commerce event was not persisted.");
     await sql`insert into founder_product_entitlements (user_id, source_event_id, provider_subscription_id, status, reconciled_provider_status, provider_state_updated_at, reconciled_at, updated_at) values (${fixture.userId}, ${event.id}, ${`${input.runId}:subscription`}, 'verified', 'active', ${occurredAt}, ${occurredAt}, ${occurredAt})`;
   });
+  await prepareFounderRevocableCalendarConnection(fixture, input);
+}
+
+export async function prepareFounderRevocableCalendarConnection(
+  fixture: FounderProductContractFixture,
+  input: { runId: string; now: Date },
+): Promise<void> {
+  const access = encryptFounderContractConnectionSecret(
+    `founder-contract-calendar-access:${input.runId}`,
+    "google-calendar-access",
+  );
+  const refresh = encryptFounderContractConnectionSecret(
+    `founder-contract-calendar-refresh:${input.runId}`,
+    "google-calendar-refresh",
+  );
+  const connectionId = randomUUID();
+  const at = input.now.toISOString();
+  await withFounderProductContractDatabase(async (sql) => {
+    await sql`insert into operator_calendar_connections (id, operator_id, provider, provider_subject_id, account_label, status, authorization_state, access_token_ciphertext, access_token_iv, access_token_auth_tag, refresh_token_ciphertext, refresh_token_iv, refresh_token_auth_tag, secret_key_version, authorized_at, last_verified_at, last_evidence_at, last_evidence_count, evidence_state, created_at, updated_at) values (${connectionId}, ${fixture.operatorId}, 'google_calendar', ${`founder-contract-calendar:${input.runId}`}, 'founder-contract@example.invalid', 'ready', 'authorized', ${access.ciphertext}, ${access.iv}, ${access.authTag}, ${refresh.ciphertext}, ${refresh.iv}, ${refresh.authTag}, ${access.keyVersion}, ${at}, ${at}, ${at}, 0, 'current', ${at}, ${at}) on conflict (operator_id, provider) do nothing`;
+  });
+}
+
+function encryptFounderContractConnectionSecret(value: string, scope: string) {
+  const keyVersion = requiredContractEnvironment("BRUNO_CONNECTION_SECRET_ACTIVE_KEY_VERSION");
+  const serializedKeys = requiredContractEnvironment("BRUNO_CONNECTION_SECRET_KEYS_JSON");
+  const keys = JSON.parse(serializedKeys) as Record<string, unknown>;
+  const encodedKey = keys[keyVersion];
+  if (typeof encodedKey !== "string") {
+    throw new Error("Founder Product Contract connection key is unavailable.");
+  }
+  const key = Buffer.from(encodedKey, "base64url");
+  if (key.length !== 32) throw new Error("Founder Product Contract connection key is invalid.");
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(`bruno.operator.connection.${scope}.${keyVersion}`, "utf8"));
+  const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  return {
+    ciphertext: ciphertext.toString("base64url"),
+    iv: iv.toString("base64url"),
+    authTag: cipher.getAuthTag().toString("base64url"),
+    keyVersion,
+  };
 }
 
 function requiredContractEnvironment(name: string): string {
@@ -241,47 +283,68 @@ export async function deleteFounderProductContractFixture(
   fixture: FounderProductContractFixture,
   options: { retainScenarioExecutions?: boolean } = {},
 ): Promise<void> {
-  await withFounderProductContractDatabase(async (sql) => {
-    const allUserIds = [
-      fixture.userId,
-      fixture.externalBetaOwnerUserId,
-      fixture.externalBetaParticipantUserId,
-    ];
-    const contractRunId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID;
-    if (contractRunId) {
-      await sql`delete from founder_preview_qualifications where cohort = ${`external-beta-contract:${contractRunId}`}`;
-    }
-    if (!options.retainScenarioExecutions) {
-      await sql`delete from founder_product_contract_scenario_executions where user_id = ${fixture.userId}`;
-    }
-    await sql`delete from founder_identity_recovery_receipts where user_id = ${fixture.userId}`;
-    await sql`delete from founder_identity_recoveries where user_id = ${fixture.userId}`;
-    await sql`delete from founder_identity_recovery_credentials where user_id = ${fixture.userId}`;
-    await sql`delete from operator_deletion_receipts where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
-    await sql`delete from operator_deletion_commerce_cancellations where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
-    await sql`delete from operator_deletion_tombstones where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
-    await sql`delete from operator_deletion_requests where operator_id = ${fixture.operatorId}`;
-    await sql`delete from founder_infrastructure_retirements where user_id = any(${allUserIds})`;
-    await sql`delete from founder_external_beta_invitations where cohort_owner_user_id = ${fixture.externalBetaOwnerUserId} or participant_user_id = any(${[fixture.userId, fixture.externalBetaParticipantUserId]})`;
-    await sql`delete from founder_product_entitlements where user_id = ${fixture.userId}`;
-    await sql`delete from founder_commerce_events where user_id = ${fixture.userId}`;
-    await sql`delete from founder_checkout_correlations where user_id = ${fixture.userId}`;
-    await sql`delete from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId}`;
-    await sql`delete from founder_recovery_archives where user_id = any(${allUserIds})`;
-    await sql`delete from founder_release_decisions where user_id = any(${allUserIds})`;
-    await sql`delete from runner_credentials where runner_id in (select id from runners where user_id = any(${allUserIds}))`;
-    await sql`delete from runners where user_id = any(${allUserIds})`;
-    await sql`delete from operator_conversations where operator_id = ${fixture.operatorId}`;
-    await sql`delete from operator_runtimes where operator_id = ${fixture.operatorId}`;
-    await sql`delete from operator_preparations where operator_id = ${fixture.operatorId}`;
-    await sql`delete from operators where id = ${fixture.operatorId}`;
-    await sql`delete from users where id = ${fixture.userId}`;
-    await sql`delete from operator_runtimes where operator_id in (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaParticipantOperatorId})`;
-    await sql`delete from operator_preparations where operator_id in (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaParticipantOperatorId})`;
-    await sql`delete from operators where id in (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaParticipantOperatorId})`;
-    await sql`delete from users where id in (${fixture.externalBetaOwnerUserId}, ${fixture.externalBetaParticipantUserId})`;
-    await sql`delete from app_metadata where key = 'founder_owner_preview_owner_user_id:v1' and value = any(${allUserIds})`;
+  assertFounderProductContractCleanupBoundary();
+  await withFounderProductContractDatabase(async (database) => {
+    await database.begin(async (sql) => {
+      await sql`set local session_replication_role = replica`;
+      const allUserIds = [
+        fixture.userId,
+        fixture.externalBetaOwnerUserId,
+        fixture.externalBetaParticipantUserId,
+      ];
+      const contractRunId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID;
+      if (contractRunId) {
+        await sql`delete from founder_preview_qualifications where cohort = ${`external-beta-contract:${contractRunId}`}`;
+      }
+      if (!options.retainScenarioExecutions) {
+        await sql`delete from founder_product_contract_scenario_executions where user_id = ${fixture.userId}`;
+      }
+      await sql`delete from founder_identity_recovery_receipts where user_id = ${fixture.userId}`;
+      await sql`delete from founder_identity_recoveries where user_id = ${fixture.userId}`;
+      await sql`delete from founder_identity_recovery_credentials where user_id = ${fixture.userId}`;
+      await sql`delete from operator_deletion_receipts where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
+      await sql`delete from operator_deletion_commerce_cancellations where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
+      await sql`delete from operator_deletion_tombstones where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
+      await sql`delete from operator_deletion_requests where operator_id = ${fixture.operatorId}`;
+      await sql`delete from founder_infrastructure_retirements where user_id = any(${allUserIds})`;
+      await sql`delete from founder_external_beta_invitations where cohort_owner_user_id = ${fixture.externalBetaOwnerUserId} or participant_user_id = any(${[fixture.userId, fixture.externalBetaParticipantUserId]})`;
+      await sql`delete from founder_product_entitlements where user_id = ${fixture.userId}`;
+      await sql`delete from founder_commerce_events where user_id = ${fixture.userId}`;
+      await sql`delete from founder_checkout_correlations where user_id = ${fixture.userId}`;
+      await sql`delete from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId}`;
+      await sql`delete from founder_recovery_archives where user_id = any(${allUserIds})`;
+      await sql`delete from founder_release_decisions where user_id = any(${allUserIds})`;
+      await sql`delete from runner_credentials where runner_id in (select id from runners where user_id = any(${allUserIds}))`;
+      await sql`delete from runners where user_id = any(${allUserIds})`;
+      await sql`delete from operator_conversations where operator_id = ${fixture.operatorId}`;
+      await sql`delete from operator_calendar_connection_receipts where connection_id in (select id from operator_calendar_connections where operator_id = ${fixture.operatorId})`;
+      await sql`delete from operator_calendar_resources where connection_id in (select id from operator_calendar_connections where operator_id = ${fixture.operatorId})`;
+      await sql`delete from operator_calendar_connections where operator_id = ${fixture.operatorId}`;
+      await sql`delete from operator_runtimes where operator_id = ${fixture.operatorId}`;
+      await sql`delete from operator_preparations where operator_id = ${fixture.operatorId}`;
+      await sql`delete from operators where id = ${fixture.operatorId}`;
+      await sql`delete from users where id = ${fixture.userId}`;
+      await sql`delete from operator_runtimes where operator_id in (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaParticipantOperatorId})`;
+      await sql`delete from operator_preparations where operator_id in (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaParticipantOperatorId})`;
+      await sql`delete from operators where id in (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaParticipantOperatorId})`;
+      await sql`delete from users where id in (${fixture.externalBetaOwnerUserId}, ${fixture.externalBetaParticipantUserId})`;
+      await sql`delete from app_metadata where key = 'founder_owner_preview_owner_user_id:v1' and value = any(${allUserIds})`;
+    });
   });
+}
+
+function assertFounderProductContractCleanupBoundary(): void {
+  const databaseUrl = process.env.DATABASE_URL;
+  const parsed = databaseUrl ? new URL(databaseUrl) : null;
+  if (
+    process.env.BRUNO_AUTH_MODE !== "development" ||
+    process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE !== "deterministic" ||
+    !process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID ||
+    !parsed ||
+    !["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)
+  ) {
+    throw new Error("Founder Product Contract cleanup is restricted to a loopback test database.");
+  }
 }
 
 export async function assertPersistedFounderLifecycleAuthority(

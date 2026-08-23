@@ -16,6 +16,7 @@ import {
   recordFounderIdentityLoss,
   recoverFounderIdentity,
   recoverFounderIdentityWithCredential,
+  recoverFounderIdentityWithCredentialAndStatus,
   signFounderIdentityRecoveryAssertion,
 } from "@/src/server/users/founder-identity-recovery";
 
@@ -82,6 +83,9 @@ describe("Founder identity recovery", () => {
         createConnection: () => connection,
       }),
     ).resolves.toEqual({ state: "recovery_required" });
+    await expect(getFounderIdentityRecoveryStatusForClerkSubject(PRIOR_SUBJECT)).resolves.toEqual({
+      state: "recovery_required",
+    });
 
     const [owner] = await connection.db.select().from(users);
     expect(owner).toMatchObject({ id: OWNER_ID, clerkUserId: PRIOR_SUBJECT });
@@ -195,14 +199,25 @@ describe("Founder identity recovery", () => {
     ).rejects.toMatchObject({ code: "recovery_credential_invalid" });
 
     await expect(
-      recoverFounderIdentityWithCredential({
+      recoverFounderIdentityWithCredentialAndStatus({
         replacementClerkUserId: REPLACEMENT_SUBJECT,
         recoveryCode: issued.recoveryCode,
         signingSecret: SIGNING_SECRET,
         now: NOW,
         createConnection: () => connection,
       }),
-    ).resolves.toEqual({ ownerId: OWNER_ID, recoveredAt: NOW.toISOString() });
+    ).resolves.toEqual({
+      recovered: { ownerId: OWNER_ID, recoveredAt: NOW.toISOString() },
+      recovery: {
+        state: "recovered",
+        recoveredAt: NOW.toISOString(),
+        receipts: [
+          { kind: "identity_loss_recorded", occurredAt: NOW.toISOString() },
+          { kind: "recovery_denied", occurredAt: NOW.toISOString() },
+          { kind: "identity_rebound", occurredAt: NOW.toISOString() },
+        ],
+      },
+    });
     await expect(
       getFounderIdentityRecoveryCredentialStatusForUser(OWNER_ID, {
         now: () => NOW,

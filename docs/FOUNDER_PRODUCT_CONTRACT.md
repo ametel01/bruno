@@ -90,8 +90,11 @@ same internal Owner, and retains separate loss, denial, and rebound receipts. Sn
 sides of that flow prove it did not mutate commerce events, Product Entitlement, Infrastructure
 Retirement, Recovery Archive deletion, refund, Bruno Data Deletion, or Account Closure authority.
 Only after those checks does the scenario request Account Closure through its existing coordinator
-and verify the distinct closure receipt. The deterministic identity signing secret is scoped to the
-contract process and is not a live Clerk credential or release acceptance.
+and verify the distinct closure receipt, subscription cancellation, and a seeded Google Calendar
+connection's provider-visible revocation. The browser proof renders the separate successful
+revocation receipt. The deterministic identity signing secret and encrypted connection grant are
+scoped to the loopback contract process and are not live Clerk or Google credentials or release
+acceptance.
 
 The Lemon Squeezy production boundary verifies the `X-Signature` HMAC over the exact bounded raw
 request body before decoding JSON. Because Lemon Squeezy does not document a webhook delivery ID,

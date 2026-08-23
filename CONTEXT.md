@@ -613,7 +613,10 @@ start or imply a refund. In Clerk mode, the server requires Clerk strict reverif
 inferring recent authentication from session-token issuance. Destructive purge and Operator archive
 wait until commerce cancellation and provider revocations are confirmed; an unconfirmed Google
 revocation retains only the encrypted authority required for the bounded retry and clears it after
-confirmation.
+confirmation. Automatic revocation retries wait one hour, stop after three total attempts, erase
+retained Google retry credentials on exhaustion, and leave Account Closure visibly paused for
+attended resolution. A connection whose provider revocation was already confirmed stays terminal
+and is never restaged from missing credentials.
 _Avoid_: Sign out, delete agent
 
 ### Managed intelligence

@@ -111,7 +111,13 @@ test("Operator UI remains usable across the required browser matrix", async ({ p
       );
       await page.getByRole("button", { name: "Create Identity Recovery code" }).click();
       expect((await credentialResponse).status()).toBe(200);
-      const recoveryCode = (await page.locator("code").textContent())?.trim() ?? "";
+      const recoveryCode =
+        (
+          await page
+            .locator("code")
+            .filter({ hasText: /^bruno_recovery_/ })
+            .textContent()
+        )?.trim() ?? "";
       expect(recoveryCode.length).toBeGreaterThan(20);
 
       await sendFounderIdentityLossWebhook(request, {
@@ -145,7 +151,9 @@ test("Operator UI remains usable across the required browser matrix", async ({ p
       );
       await page.getByRole("button", { name: "Recover my Founder workspace" }).click();
       expect((await deniedResponse).status()).toBe(403);
-      await expect(page.getByRole("alert")).toContainText("Recovery was denied");
+      await expect(
+        page.getByRole("alert").filter({ hasText: "Recovery was denied" }),
+      ).toBeVisible();
 
       const replacementSubject = `clerk:recovered:${fixture.userId}`;
       const replacementIdentityHeaders = founderContractIdentityHeaders(replacementSubject);
@@ -177,9 +185,11 @@ test("Operator UI remains usable across the required browser matrix", async ({ p
       await page.getByRole("button", { name: "Request Account Closure" }).click();
       expect((await closureResponse).status()).toBe(200);
       await expect(page.getByRole("heading", { name: /Account Closure Receipt/ })).toBeVisible();
-      await expect(page.getByText("Commerce cancellation")).toBeVisible();
+      await expect(page.getByText("Commerce cancellation", { exact: true })).toBeVisible();
       await expect(page.getByText(/Lemon Squeezy subscription: succeeded/)).toBeVisible();
       await expect(page.getByText(/Refund started: no/)).toBeVisible();
+      await expect(page.getByText("Provider revocation", { exact: true })).toBeVisible();
+      await expect(page.getByText(/calendar: succeeded/)).toBeVisible();
       await expect(page.getByText("Identity Recovery receipts")).toBeVisible();
       await expect(page.getByText("Identity loss recorded", { exact: false })).toBeVisible();
       await expect(page.getByText("Recovery attempt denied", { exact: false })).toBeVisible();
