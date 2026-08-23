@@ -189,7 +189,7 @@ export async function revokeDeterministicFounderContractGoogleConnection(input: 
   connectionKind: "calendar";
   token: string;
 }): Promise<{ providerRevoked: true }> {
-  assertDeterministicGoogleBoundary(input.runId, input.token);
+  assertDeterministicGoogleBoundary(input);
   if (!globalProviders.__brunoFounderLifecycleProviders) {
     globalProviders.__brunoFounderLifecycleProviders = new Map();
   }
@@ -221,15 +221,21 @@ export function deterministicFounderContractGoogleConnectionRevoked(input: {
   );
 }
 
-function assertDeterministicGoogleBoundary(runId: string, token: string): void {
+function assertDeterministicGoogleBoundary(input: {
+  runId: string;
+  userId: string;
+  connectionKind: "calendar";
+  token: string;
+}): void {
   const appUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? "invalid:");
+  const expectedToken = `founder-contract-google:${input.runId}:${input.userId}:${input.connectionKind}:refresh`;
   if (
     process.env.BRUNO_AUTH_MODE !== "development" ||
     process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE !== "deterministic" ||
     process.env.VERCEL_ENV ||
-    process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID !== runId ||
+    process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID !== input.runId ||
     !["localhost", "127.0.0.1", "[::1]"].includes(appUrl.hostname) ||
-    token.length === 0
+    input.token !== expectedToken
   ) {
     throw new Error("Deterministic Founder Google revocation is unavailable.");
   }

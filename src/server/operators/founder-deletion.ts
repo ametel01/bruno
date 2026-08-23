@@ -823,30 +823,49 @@ async function attemptFounderDeletionRevocations(
   const now = dependencies.now ?? (() => new Date());
   try {
     const attemptedAt = now();
-    const unresolved = await connection.db
-      .select()
-      .from(operatorDeletionRevocations)
-      .where(
-        and(
-          eq(operatorDeletionRevocations.requestId, requestId),
-          sql`${operatorDeletionRevocations.status} <> 'succeeded'`,
-        ),
+    const due = await connection.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:account-closure-revocation:${requestId}`}, 0))`,
       );
-    const newlyExhausted = unresolved.filter(
-      (row) =>
-        row.attemptCount >= FOUNDER_REVOCATION_MAX_ATTEMPTS &&
-        row.errorCode !== "provider_revocation_recovery_exhausted",
-    );
-    if (newlyExhausted.length > 0) {
-      await connection.db.transaction(async (tx) => {
+      const unresolved = await tx
+        .select()
+        .from(operatorDeletionRevocations)
+        .where(
+          and(
+            eq(operatorDeletionRevocations.requestId, requestId),
+            sql`${operatorDeletionRevocations.status} <> 'succeeded'`,
+          ),
+        )
+        .for("update");
+      const newlyExhausted = unresolved.filter(
+        (row) =>
+          row.attemptCount >= FOUNDER_REVOCATION_MAX_ATTEMPTS &&
+          row.errorCode !== "provider_revocation_recovery_exhausted" &&
+          (!row.nextAttemptAt || row.nextAttemptAt <= attemptedAt),
+      );
+      if (newlyExhausted.length > 0) {
         await markFounderRevocationRecoveryExhausted(tx, newlyExhausted, attemptedAt);
-      });
-    }
-    const due = unresolved.filter(
-      (row) =>
-        row.attemptCount < FOUNDER_REVOCATION_MAX_ATTEMPTS &&
-        (!row.nextAttemptAt || row.nextAttemptAt <= attemptedAt),
-    );
+      }
+      const dueRows = unresolved.filter(
+        (row) =>
+          row.attemptCount < FOUNDER_REVOCATION_MAX_ATTEMPTS &&
+          (!row.nextAttemptAt || row.nextAttemptAt <= attemptedAt),
+      );
+      for (const row of dueRows) {
+        await tx
+          .update(operatorDeletionRevocations)
+          .set({
+            status: "failed",
+            attemptCount: row.attemptCount + 1,
+            lastAttemptAt: attemptedAt,
+            nextAttemptAt: new Date(attemptedAt.getTime() + FOUNDER_REVOCATION_RETRY_MS),
+            errorCode: "provider_revocation_attempt_in_progress",
+            updatedAt: attemptedAt,
+          })
+          .where(eq(operatorDeletionRevocations.id, row.id));
+      }
+      return dueRows.map((row) => ({ ...row, attemptCount: row.attemptCount + 1 }));
+    });
     if (due.length === 0) return;
 
     let results: FounderDeletionRevocationResult[] = [];
@@ -860,6 +879,9 @@ async function attemptFounderDeletionRevocations(
       revocationCallFailed = true;
     }
     await connection.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:account-closure-revocation:${requestId}`}, 0))`,
+      );
       const [requestOwner] = await tx
         .select({ operatorId: operatorDeletionRequests.operatorId })
         .from(operatorDeletionRequests)
@@ -975,13 +997,11 @@ async function attemptFounderDeletionRevocations(
         if (!dueIds.has(row.connectionId)) continue;
         const result = results.find((item) => item.connectionKind === row.connectionKind);
         const ok = !revocationCallFailed && result?.ok === true;
-        const attemptCount = row.attemptCount + 1;
-        const exhausted = !ok && attemptCount >= FOUNDER_REVOCATION_MAX_ATTEMPTS;
-        await tx
+        const exhausted = !ok && row.attemptCount >= FOUNDER_REVOCATION_MAX_ATTEMPTS;
+        const updated = await tx
           .update(operatorDeletionRevocations)
           .set({
             status: ok ? "succeeded" : "failed",
-            attemptCount,
             lastAttemptAt: attemptedAt,
             nextAttemptAt:
               ok || exhausted
@@ -997,8 +1017,16 @@ async function attemptFounderDeletionRevocations(
                     : "provider_revocation_unconfirmed")),
             updatedAt: attemptedAt,
           })
-          .where(eq(operatorDeletionRevocations.id, row.id));
-        if (exhausted) exhaustedAfterAttempt.push({ ...row, attemptCount });
+          .where(
+            and(
+              eq(operatorDeletionRevocations.id, row.id),
+              eq(operatorDeletionRevocations.attemptCount, row.attemptCount),
+              eq(operatorDeletionRevocations.lastAttemptAt, attemptedAt),
+              eq(operatorDeletionRevocations.errorCode, "provider_revocation_attempt_in_progress"),
+            ),
+          )
+          .returning({ id: operatorDeletionRevocations.id });
+        if (updated.length === 1 && exhausted) exhaustedAfterAttempt.push(row);
       }
       if (exhaustedAfterAttempt.length > 0) {
         await markFounderRevocationRecoveryExhausted(tx, exhaustedAfterAttempt, attemptedAt);

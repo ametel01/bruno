@@ -237,11 +237,11 @@ export async function prepareFounderRevocableCalendarConnection(
   input: { runId: string; now: Date },
 ): Promise<void> {
   const access = encryptFounderContractConnectionSecret(
-    `founder-contract-calendar-access:${input.runId}`,
+    `founder-contract-google:${input.runId}:${fixture.userId}:calendar:access`,
     "google-calendar-access",
   );
   const refresh = encryptFounderContractConnectionSecret(
-    `founder-contract-calendar-refresh:${input.runId}`,
+    `founder-contract-google:${input.runId}:${fixture.userId}:calendar:refresh`,
     "google-calendar-refresh",
   );
   const connectionId = randomUUID();
@@ -304,6 +304,8 @@ export async function deleteFounderProductContractFixture(
       await sql`delete from founder_identity_recovery_credentials where user_id = ${fixture.userId}`;
       await sql`delete from operator_deletion_receipts where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
       await sql`delete from operator_deletion_commerce_cancellations where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
+      await sql`delete from operator_deletion_revocations where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
+      await sql`delete from operator_deletion_backup_expiries where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
       await sql`delete from operator_deletion_tombstones where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
       await sql`delete from operator_deletion_requests where operator_id = ${fixture.operatorId}`;
       await sql`delete from founder_infrastructure_retirements where user_id = any(${allUserIds})`;
@@ -329,6 +331,23 @@ export async function deleteFounderProductContractFixture(
       await sql`delete from operators where id in (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaParticipantOperatorId})`;
       await sql`delete from users where id in (${fixture.externalBetaOwnerUserId}, ${fixture.externalBetaParticipantUserId})`;
       await sql`delete from app_metadata where key = 'founder_owner_preview_owner_user_id:v1' and value = any(${allUserIds})`;
+      const [remaining] = await sql<
+        {
+          revocations: number;
+          backup_expiries: number;
+          requests: number;
+          calendar_connections: number;
+          users: number;
+        }[]
+      >`select
+        (select count(*)::int from operator_deletion_revocations where operator_id = ${fixture.operatorId}) as revocations,
+        (select count(*)::int from operator_deletion_backup_expiries where operator_id = ${fixture.operatorId}) as backup_expiries,
+        (select count(*)::int from operator_deletion_requests where operator_id = ${fixture.operatorId}) as requests,
+        (select count(*)::int from operator_calendar_connections where operator_id = ${fixture.operatorId}) as calendar_connections,
+        (select count(*)::int from users where id = any(${allUserIds})) as users`;
+      if (!remaining || Object.values(remaining).some((count) => count !== 0)) {
+        throw new Error("Founder Product Contract fixture cleanup left scoped database rows.");
+      }
     });
   });
 }

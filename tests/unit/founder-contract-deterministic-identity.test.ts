@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFounderContractIdentityHeaders,
   resolveFounderContractIdentity,
 } from "@/src/server/founder-product-contract/deterministic-identity";
+import {
+  deterministicFounderContractGoogleConnectionRevoked,
+  revokeDeterministicFounderContractGoogleConnection,
+} from "@/src/server/founder-product-contract/deterministic-providers";
 
 const ENV = {
   BRUNO_AUTH_MODE: "development",
@@ -14,6 +18,10 @@ const ENV = {
 };
 
 describe("Founder Product Contract deterministic identity", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("accepts a short-lived signed opaque subject for the exact local run", () => {
     const headers = new Headers(createFounderContractIdentityHeaders("clerk:replacement", ENV));
     expect(resolveFounderContractIdentity(headers, ENV)).toEqual({
@@ -56,5 +64,34 @@ describe("Founder Product Contract deterministic identity", () => {
 
   it("does not treat an ordinary request as a deterministic identity", () => {
     expect(resolveFounderContractIdentity(new Headers(), ENV)).toEqual({ present: false });
+  });
+
+  it("accepts only the exact run, Owner, kind, and decrypted deterministic Google grant", async () => {
+    for (const [name, value] of Object.entries(ENV)) vi.stubEnv(name, value);
+    const userId = "00000000-0000-4000-8000-000000000384";
+    await expect(
+      revokeDeterministicFounderContractGoogleConnection({
+        runId: ENV.BRUNO_FOUNDER_CONTRACT_RUN_ID,
+        userId,
+        connectionKind: "calendar",
+        token: "wrong-decrypted-token",
+      }),
+    ).rejects.toThrow("Deterministic Founder Google revocation is unavailable.");
+    expect(
+      deterministicFounderContractGoogleConnectionRevoked({
+        runId: ENV.BRUNO_FOUNDER_CONTRACT_RUN_ID,
+        userId,
+        connectionKind: "calendar",
+      }),
+    ).toBe(false);
+
+    await expect(
+      revokeDeterministicFounderContractGoogleConnection({
+        runId: ENV.BRUNO_FOUNDER_CONTRACT_RUN_ID,
+        userId,
+        connectionKind: "calendar",
+        token: `founder-contract-google:${ENV.BRUNO_FOUNDER_CONTRACT_RUN_ID}:${userId}:calendar:refresh`,
+      }),
+    ).resolves.toEqual({ providerRevoked: true });
   });
 });

@@ -484,4 +484,82 @@ describe("Founder deletion lifecycle", () => {
     });
     expect(revokeConnections).toHaveBeenCalledTimes(FOUNDER_REVOCATION_MAX_ATTEMPTS);
   });
+
+  it("serializes concurrent revocation retries before either can reuse retained credentials", async () => {
+    await connection.db.insert(operatorMailConnections).values({
+      id: "00000000-0000-4000-8000-000000003710",
+      operatorId: OPERATOR_ID,
+      providerSubjectId: "gmail-concurrent-retry",
+      accountLabel: "founder@example.com",
+      status: "ready",
+      authorizationState: "authorized",
+      accessTokenCiphertext: "access",
+      accessTokenIv: "access-iv",
+      accessTokenAuthTag: "access-tag",
+      refreshTokenCiphertext: "refresh",
+      refreshTokenIv: "refresh-iv",
+      refreshTokenAuthTag: "refresh-tag",
+      secretKeyVersion: "test-v1",
+      authorizedAt: NOW,
+      lastVerifiedAt: NOW,
+      lastEvidenceAt: NOW,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    let releaseProvider!: () => void;
+    const providerGate = new Promise<void>((resolve) => {
+      releaseProvider = resolve;
+    });
+    let observeThirdCall!: () => void;
+    const thirdCall = new Promise<void>((resolve) => {
+      observeThirdCall = resolve;
+    });
+    const revokeConnections = vi.fn(async () => {
+      const callNumber = revokeConnections.mock.calls.length;
+      if (callNumber === 3) observeThirdCall();
+      if (callNumber >= 2) await providerGate;
+      return [{ connectionKind: "mail", ok: false, errorCode: "provider_503" }];
+    });
+    await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        revokeConnections,
+      },
+    );
+
+    const firstRetryConnection = createDatabaseConnection();
+    const secondRetryConnection = createDatabaseConnection();
+    try {
+      const retryAt = new Date(NOW.valueOf() + FOUNDER_REVOCATION_RETRY_MS);
+      const first = retryFounderDeletionRevocationsForUser(OWNER_ID, {
+        createConnection: () => firstRetryConnection,
+        now: () => retryAt,
+        revokeConnections,
+      });
+      await vi.waitFor(() => expect(revokeConnections).toHaveBeenCalledTimes(2));
+      const second = retryFounderDeletionRevocationsForUser(OWNER_ID, {
+        createConnection: () => secondRetryConnection,
+        now: () => retryAt,
+        revokeConnections,
+      });
+      const concurrentProviderReuse = await Promise.race([
+        thirdCall.then(() => true),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 100)),
+      ]);
+      expect(concurrentProviderReuse).toBe(false);
+      releaseProvider();
+      const [firstReceipt, secondReceipt] = await Promise.all([first, second]);
+      expect(revokeConnections).toHaveBeenCalledTimes(2);
+      expect(firstReceipt?.revocations[0]?.attemptCount).toBe(2);
+      expect(secondReceipt?.revocations[0]?.attemptCount).toBe(2);
+    } finally {
+      releaseProvider();
+      await firstRetryConnection.close();
+      await secondRetryConnection.close();
+    }
+  });
 });
