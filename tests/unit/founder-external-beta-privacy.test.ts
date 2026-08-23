@@ -181,6 +181,22 @@ describe("External Beta privacy boundary", () => {
     ).rejects.toThrow("Separate measurement consent");
   });
 
+  it("rejects ambiguous same-instant decisions for one consent purpose", async () => {
+    const dependencies = { createConnection: () => connection };
+    await decideFounderExternalBetaConsent(
+      PARTICIPANT_ID,
+      { purpose: "measurement", decision: "grant", decidedAt: NOW },
+      dependencies,
+    );
+    await expect(
+      decideFounderExternalBetaConsent(
+        PARTICIPANT_ID,
+        { purpose: "measurement", decision: "withdraw", decidedAt: NOW },
+        dependencies,
+      ),
+    ).rejects.toThrow("later decision instant");
+  });
+
   it("requires separate recording and marketing decisions and verifies deletion by day 30", async () => {
     const dependencies = { createConnection: () => connection };
     await decideFounderExternalBetaConsent(

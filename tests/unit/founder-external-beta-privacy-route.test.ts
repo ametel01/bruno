@@ -57,8 +57,7 @@ describe("External Beta privacy route", () => {
     expect(decideConsent).toHaveBeenCalledTimes(1);
   });
 
-  it("passes measurement through the server allowlist boundary", async () => {
-    const captureMeasurement = vi.fn(async () => undefined);
+  it("keeps measurement capture off the participant-facing endpoint", async () => {
     const response = await POST(
       request({
         action: "capture_measurement",
@@ -67,16 +66,10 @@ describe("External Beta privacy route", () => {
       undefined,
       {
         requireApplicationUser: async () => ({ ok: true as const, userId: USER_ID }),
-        captureMeasurement,
         now: () => NOW,
       },
     );
-    expect(response.status).toBe(200);
-    expect(captureMeasurement).toHaveBeenCalledWith(
-      USER_ID,
-      { event: "safe_failure_observed", safeFailureCategory: "support_required" },
-      NOW,
-    );
+    expect(response.status).toBe(400);
   });
 
   it("preserves explicit export and deletion controls", async () => {

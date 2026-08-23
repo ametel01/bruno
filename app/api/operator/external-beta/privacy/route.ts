@@ -1,5 +1,4 @@
 import {
-  captureFounderExternalBetaMeasurement,
   decideFounderExternalBetaConsent,
   deleteFounderExternalBetaMeasurements,
   exportFounderExternalBetaPrivacyData,
@@ -16,7 +15,6 @@ type RouteDependencies = {
   requireApplicationUser?: typeof requireConfiguredApplicationUser;
   getStatus?: typeof getFounderExternalBetaPrivacyStatusForUser;
   decideConsent?: typeof decideFounderExternalBetaConsent;
-  captureMeasurement?: typeof captureFounderExternalBetaMeasurement;
   exportData?: typeof exportFounderExternalBetaPrivacyData;
   deleteMeasurements?: typeof deleteFounderExternalBetaMeasurements;
   now?: () => Date;
@@ -57,14 +55,6 @@ export async function POST(
       );
       return Response.json({ privacy }, { headers: noStoreHeaders() });
     }
-    if (body.action === "capture_measurement") {
-      await (dependencies.captureMeasurement ?? captureFounderExternalBetaMeasurement)(
-        user.userId,
-        body.measurement,
-        now,
-      );
-      return Response.json({ accepted: true }, { headers: noStoreHeaders() });
-    }
     if (body.action === "export") {
       const privacyExport = await (dependencies.exportData ?? exportFounderExternalBetaPrivacyData)(
         user.userId,
@@ -86,7 +76,6 @@ type RequestBody =
       purpose: FounderExternalBetaConsentPurpose;
       decision: FounderExternalBetaConsentDecision;
     }
-  | { action: "capture_measurement"; measurement: unknown }
   | { action: "export" }
   | { action: "delete_measurements" };
 
@@ -110,10 +99,6 @@ async function readBody(request: Request): Promise<RequestBody | null> {
         purpose: value.purpose as FounderExternalBetaConsentPurpose,
         decision: value.decision,
       };
-    }
-    if (value.action === "capture_measurement") {
-      if (!hasExactKeys(value, ["action", "measurement"])) return null;
-      return { action: value.action, measurement: value.measurement };
     }
     if (value.action === "export" || value.action === "delete_measurements") {
       return hasExactKeys(value, ["action"]) ? { action: value.action } : null;

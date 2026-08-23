@@ -253,6 +253,20 @@ export async function decideFounderExternalBetaConsent(
       ) {
         throw new Error("Active External Beta access is required to grant new consent.");
       }
+      const [latest] = await tx
+        .select({ decidedAt: founderExternalBetaConsentReceipts.decidedAt })
+        .from(founderExternalBetaConsentReceipts)
+        .where(
+          and(
+            eq(founderExternalBetaConsentReceipts.invitationId, membership.id),
+            eq(founderExternalBetaConsentReceipts.purpose, input.purpose),
+          ),
+        )
+        .orderBy(desc(founderExternalBetaConsentReceipts.decidedAt))
+        .limit(1);
+      if (latest && input.decidedAt <= latest.decidedAt) {
+        throw new Error("External Beta consent decisions require a later decision instant.");
+      }
       await tx.insert(founderExternalBetaConsentReceipts).values({
         invitationId: membership.id,
         participantUserId: membership.participantUserId,

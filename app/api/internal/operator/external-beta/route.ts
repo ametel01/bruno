@@ -46,6 +46,18 @@ export async function GET(
   if (new URL(request.url).search.length > 0 || request.body !== null) {
     return errorResponse(400, "external_beta_retirement_request_invalid");
   }
+  const now = dependencies.now?.() ?? new Date();
+  let recordingDeletion: { deleted: number; failed: number };
+  try {
+    recordingDeletion = await (
+      dependencies.reconcileRecordings ?? reconcileFounderExternalBetaRecordingRetention
+    )(now, (dependencies.createRecordingProvider ?? createFounderExternalBetaRecordingProvider)());
+  } catch {
+    return errorResponse(500, "external_beta_recording_deletion_failed");
+  }
+  if (recordingDeletion.failed > 0) {
+    return errorResponse(500, "external_beta_recording_deletion_failed");
+  }
   const applicationRevision = (
     dependencies.readApplicationRevision ?? readFounderApplicationRevision
   )();
@@ -61,15 +73,11 @@ export async function GET(
   if (!providers) return errorResponse(503, "external_beta_retirement_configuration_invalid");
 
   try {
-    const now = dependencies.now?.() ?? new Date();
     const result = await (dependencies.reconcile ?? reconcileFounderExternalBetaRetirements)({
       applicationRevision,
       now,
       providers,
     });
-    const recordingDeletion = await (
-      dependencies.reconcileRecordings ?? reconcileFounderExternalBetaRecordingRetention
-    )(now, (dependencies.createRecordingProvider ?? createFounderExternalBetaRecordingProvider)());
     return Response.json({ ok: true, ...result, recordingDeletion }, { headers: noStoreHeaders() });
   } catch {
     return errorResponse(500, "external_beta_retirement_processing_failed");
