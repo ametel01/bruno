@@ -11,6 +11,7 @@ export function createFounderProductContractHarness(input: {
   clock?: FounderProductContractClock;
   providers?: FounderProductContractProviderDoubles;
   sourceRevision?: string;
+  runtimeRevision?: string;
 }): FounderProductContractHarness {
   const clock = input.clock ?? createFounderProductContractClock();
   const providers = input.providers ?? createFounderProductContractProviderDoubles({ clock });
@@ -31,5 +32,6 @@ export function createFounderProductContractHarness(input: {
       return requestCount;
     },
     ...(input.sourceRevision ? { sourceRevision: input.sourceRevision } : {}),
+    ...(input.runtimeRevision ? { runtimeRevision: input.runtimeRevision } : {}),
   });
 }

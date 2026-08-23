@@ -24,11 +24,13 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
   );
   const fixture = await createFounderProductContractFixture(clock);
   const sourceRevision = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION");
+  const runtimeRevision = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION");
   const runId = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID");
   const ledgerPath = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH");
   const harness = createFounderProductContractHarness({
     clock,
     sourceRevision,
+    runtimeRevision,
     application: {
       request: async ({ method, path, body }) => {
         const response = await request.fetch(path, {

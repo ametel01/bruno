@@ -7,7 +7,8 @@ CI Founder Product Contract passes its automated unit and five-browser checks, b
 `releaseEligible: false`: no attended VoiceOver/Safari or TalkBack/Chrome evidence is bound to the
 candidate. There is also no completed eight-founder moderated-study summary. The provider tickets
 resolved safely by keeping OpenAI, Google reading, Gmail sending, and Anthropic unreleased after
-their production preflights could not run.
+their production preflights could not run. No exact-application-and-runtime attended Clerk
+production, Lemon Squeezy test-mode, or attended live-canary qualification summary exists.
 
 No founder participant, activation, timing, comprehension, recovery, accessibility, or provider
 result is inferred from automated tests. No interview, recording, transcript, credential, prompt,
@@ -31,13 +32,27 @@ The exact-release workflow now emits
 - zero permission/safety failures, unintended effects, unsafe misunderstandings, technical setup
   requirements, or Founder credential handling;
 - independent exact-revision released evidence for OpenAI, Anthropic, Calendar reading, Gmail
-  reading, and one-to-one Gmail sending.
+  reading, and one-to-one Gmail sending; and
+- independently reviewed, exact-application-and-runtime qualification for attended Clerk production,
+  Lemon Squeezy test mode, and an attended Lemon Squeezy live canary against the intended live store
+  and product.
 
 Each provider record carries only its released outcome, source revision, qualification and expiry
 instants, and sanitized evidence digest. Hidden, missing, malformed, expired, stale, future-dated,
 or revision-mismatched evidence denies the decision. No capability may borrow another capability's
-digest, including OpenAI and Anthropic. A missing or malformed provider summary produces a denied
+digest, including OpenAI and Anthropic, and no capability or production-qualification summary or
+record may reuse another retained digest. Currency is evaluated at the actual decision creation
+instant. A missing or malformed provider summary produces a denied
 artifact without echoing supplied content.
+
+The separate production-provider summary carries exactly one Clerk production record, one Lemon
+Squeezy test-mode record, and one attended live-canary record. Existing accounts and deterministic
+CI do not count. The live record must prove the intended store and product through matching,
+non-aliased sanitized reference digests, and every record must match the decision's exact application
+and runtime revisions. The retained booleans are only an allowlisted summary of independently
+reviewed evidence; they are not the source proof. The release workflow obtains the runtime and
+expected live Store/Product digest authorities from its protected environment, never freely
+supplied dispatch metadata.
 
 Releasing both AI providers does not require a Founder to connect both. After release, Provider
 Routing may use OpenAI only, Anthropic only, or both according to the Ready accounts that Founder
@@ -55,8 +70,11 @@ months. The attended summary must state that these controls were applied.
 
 ## Required rerun
 
-First complete the independent provider acceptance runs against one exact candidate. Then conduct
+First complete the independent provider acceptance runs against one exact application and runtime
+candidate by following
+[`CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md`](CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md).
+Then conduct
 the moderated cohort and attended VoiceOver/TalkBack journeys without facilitator rescue, review and
 sanitize the source evidence, and dispatch the Founder Product Contract in `release` mode with only
-the two allowlisted summaries and accessibility digests. General Release remains denied until that
+the three allowlisted summaries and accessibility digests. General Release remains denied until that
 exact run emits `outcome: approved`.

@@ -14,6 +14,7 @@ import {
 const REVISION = "a".repeat(40);
 const DIGEST = `sha256:${"b".repeat(64)}`;
 const SIGNING_SECRET = "founder-contract-test-secret";
+const RUNTIME_REVISION = "runtime-release-v1";
 
 describe("Founder Product Contract evidence", () => {
   it("emits an allowlisted exact-release summary while keeping attended evidence explicit", () => {
@@ -22,7 +23,11 @@ describe("Founder Product Contract evidence", () => {
     expect(evidence).toMatchObject({
       result: "passed",
       releaseEligible: false,
-      releaseIdentity: { sourceRevision: REVISION, runId: "local-365" },
+      releaseIdentity: {
+        sourceRevision: REVISION,
+        runtimeRevision: "runtime-release-v1",
+        runId: "local-365",
+      },
       execution: {
         reruns: 0,
         unit: { passed: 64, failed: 0, skipped: 0 },
@@ -122,6 +127,21 @@ describe("Founder Product Contract evidence", () => {
     );
   });
 
+  it("requires an exact runtime revision in the release identity", () => {
+    expect(() =>
+      buildFounderProductContractEvidence({ ...validInput(), runtimeRevision: "not valid" }),
+    ).toThrow("runtime revision is invalid");
+  });
+
+  it("rejects a signed lifecycle ledger from a different runtime before emitting evidence", () => {
+    expect(() =>
+      buildFounderProductContractEvidence({
+        ...validInput(),
+        runtimeRevision: "runtime-release-v2",
+      }),
+    ).toThrow("runtime revision mismatch");
+  });
+
   it("refuses a missing lifecycle ledger in normal CI", () => {
     const input = validInput() as Record<string, unknown>;
     delete input.scenarioLedger;
@@ -205,6 +225,7 @@ describe("Founder Product Contract evidence", () => {
       parseFounderProductContractScenarioLedger({
         value: JSON.stringify(extended),
         sourceRevision: REVISION,
+        runtimeRevision: RUNTIME_REVISION,
         runId: "local-365",
         observedAt: "2026-08-20T00:00:00.000Z",
         signingSecret: SIGNING_SECRET,
@@ -215,6 +236,7 @@ describe("Founder Product Contract evidence", () => {
       parseFounderProductContractScenarioLedger({
         value: JSON.stringify({ ...ledger, signature: "hmac-sha256:forged" }),
         sourceRevision: REVISION,
+        runtimeRevision: RUNTIME_REVISION,
         runId: "local-365",
         observedAt: "2026-08-20T00:00:00.000Z",
         signingSecret: SIGNING_SECRET,
@@ -238,9 +260,10 @@ describe("Founder Product Contract evidence", () => {
       })),
     );
     expect(evidence.scenarioLedger).toEqual({
-      schemaVersion: "bruno.founder-product-contract.scenario-ledger.v1",
+      schemaVersion: "bruno.founder-product-contract.scenario-ledger.v2",
       producer: "bruno.persisted-founder-application",
       sourceRevision: REVISION,
+      runtimeRevision: RUNTIME_REVISION,
       runId: "local-365",
       observedAt: "2026-08-20T00:00:00.000Z",
       results: scenarioResults,
@@ -251,6 +274,7 @@ describe("Founder Product Contract evidence", () => {
       parseFounderProductContractScenarioLedger({
         value: JSON.stringify(evidence.scenarioLedger),
         sourceRevision: REVISION,
+        runtimeRevision: RUNTIME_REVISION,
         runId: "local-365",
         observedAt: "2026-08-20T00:00:00.000Z",
         signingSecret: SIGNING_SECRET,
@@ -277,6 +301,7 @@ function validInput() {
     },
     unit: { numPassedTests: 64, numFailedTests: 0, numPendingTests: 0 },
     sourceRevision: REVISION,
+    runtimeRevision: RUNTIME_REVISION,
     runId: "local-365",
     runAttempt: 1,
     mode: "ci" as const,
@@ -292,6 +317,7 @@ function lifecycleScenarioResults() {
     status: "passed" as const,
     attempts: 1,
     sourceRevision: REVISION,
+    runtimeRevision: RUNTIME_REVISION,
     observedAt: "2026-08-20T00:00:00.000Z",
     cleanup: {
       status: "passed" as const,
@@ -308,6 +334,7 @@ function signedScenarioLedger(
 ) {
   return createFounderProductContractScenarioLedger({
     sourceRevision: REVISION,
+    runtimeRevision: RUNTIME_REVISION,
     runId: "local-365",
     observedAt: "2026-08-20T00:00:00.000Z",
     results,

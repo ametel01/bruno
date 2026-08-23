@@ -133,10 +133,12 @@ describe("Founder Product Contract deterministic seam", () => {
 
   it("records exact-once scenarios and fails closed on missing, retry, stale, and mismatched results", async () => {
     const sourceRevision = "a".repeat(40);
+    const runtimeRevision = "runtime-release-v1";
     const clock = createFounderProductContractClock();
     const providers = createFounderProductContractProviderDoubles({ clock });
     const harness = createFounderProductContractHarness({
       sourceRevision,
+      runtimeRevision,
       clock,
       providers,
       application: {
@@ -168,6 +170,7 @@ describe("Founder Product Contract deterministic seam", () => {
       required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
       results: harness.scenarioResults,
       sourceRevision,
+      runtimeRevision,
       observedAt: "2026-01-01T00:00:00.000Z",
     });
 
@@ -176,6 +179,7 @@ describe("Founder Product Contract deterministic seam", () => {
         required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
         results: harness.scenarioResults.slice(1),
         sourceRevision,
+        runtimeRevision,
         observedAt: "2026-01-01T00:00:00.000Z",
       }),
     ).toThrow(
@@ -192,6 +196,7 @@ describe("Founder Product Contract deterministic seam", () => {
           ...harness.scenarioResults.slice(1),
         ],
         sourceRevision,
+        runtimeRevision,
         observedAt: "2026-01-01T00:00:00.000Z",
       }),
     ).toThrow("was retried");
@@ -206,6 +211,7 @@ describe("Founder Product Contract deterministic seam", () => {
           ...harness.scenarioResults.slice(1),
         ],
         sourceRevision,
+        runtimeRevision,
         observedAt: "2026-01-01T00:00:00.000Z",
       }),
     ).toThrow("is stale");
@@ -223,6 +229,7 @@ describe("Founder Product Contract deterministic seam", () => {
           ...harness.scenarioResults.slice(1),
         ],
         sourceRevision,
+        runtimeRevision,
         observedAt: "2026-01-01T00:00:00.000Z",
       }),
     ).toThrow("cleanup was stale");
@@ -237,9 +244,19 @@ describe("Founder Product Contract deterministic seam", () => {
           ...harness.scenarioResults.slice(1),
         ],
         sourceRevision,
+        runtimeRevision,
         observedAt: "2026-01-01T00:00:00.000Z",
       }),
     ).toThrow("revision mismatch");
+    expect(() =>
+      validateFounderProductContractScenarios({
+        required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
+        results: harness.scenarioResults,
+        sourceRevision,
+        runtimeRevision: "runtime-release-v2",
+        observedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toThrow("runtime mismatch");
 
     validateFounderProductContractScenarios({
       required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
@@ -249,6 +266,7 @@ describe("Founder Product Contract deterministic seam", () => {
         cleanup: { ...result.cleanup, observedAt: "2026-01-01T00:00:00.001Z" },
       })),
       sourceRevision,
+      runtimeRevision,
       observedAt: "2026-01-01T00:00:00.001Z",
     });
 
@@ -261,6 +279,7 @@ describe("Founder Product Contract deterministic seam", () => {
           cleanup: { ...result.cleanup, observedAt: "2026-01-01T00:00:00.001Z" },
         })),
         sourceRevision,
+        runtimeRevision,
         observedAt: "2026-01-01T00:00:00.000Z",
       }),
     ).not.toThrow();

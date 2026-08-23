@@ -16,6 +16,7 @@ release authority and is destroyed with the runner.
 
 ```bash
 BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION="$(git rev-parse HEAD)" \
+BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION="founder-contract-v1" \
 BRUNO_FOUNDER_CONTRACT_RUN_ID="local-$(git rev-parse --short HEAD)" \
 BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT="1" \
 BRUNO_FOUNDER_CONTRACT_OBSERVED_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" \
@@ -38,7 +39,11 @@ with the OS and browser versions used. Each attended record is bound to the app 
 the canonical resume, review, approve, and deny tasks with a passed outcome. The workflow rejects
 release mode if either attended record is absent, malformed, or incomplete.
 
-The retained JSON is an allowlisted summary bound to the source revision and GitHub run identity.
+The retained JSON is an allowlisted summary bound to the source revision, exact runtime revision,
+and GitHub run identity. The lifecycle fixture persists that runtime revision in the exercised
+Operator runtime, and the application reads it back into every signed scenario result and the v2
+ledger. A caller cannot relabel a ledger after execution: a persisted, result-level, ledger-level,
+or candidate runtime mismatch fails before evidence is emitted.
 It excludes credentials, authorization codes, message bodies, recipients, prompts, provider
 responses, and infrastructure identifiers. GitHub attests the summary and retains it for 90 days.
 Unit and browser runner output is deliberately not uploaded because it is not part of the evidence
@@ -46,7 +51,7 @@ allowlist.
 
 The same run also emits `founder-initial-general-release-decision.json`. In ordinary CI this is an
 explicit denied decision because attended evidence is absent. A release-mode dispatch may provide
-two JSON inputs containing only allowlisted aggregate counts, exact timestamps, release outcomes,
+three JSON inputs containing only allowlisted aggregate counts, exact timestamps, release outcomes,
 retention controls, and SHA-256 evidence digests:
 
 - `moderated_founder_summary_json` records the 4/4 desktop/phone cohort, cross-device day-two count,
@@ -55,22 +60,60 @@ retention controls, and SHA-256 evidence digests:
 - `provider_decision_summary_json` records each capability's released/hidden outcome, exact source
   revision, qualification and expiry instants, and a distinct sanitized evidence digest for OpenAI,
   Anthropic, Calendar reading, Gmail reading, and one-to-one Gmail sending.
+- `production_provider_qualification_summary_json` records exactly one attended production Clerk
+  qualification, one Lemon Squeezy test-mode qualification, and one attended Lemon Squeezy live
+  canary. Every record binds the same exact application and runtime revisions, environment,
+  observation and expiry instants, result, sanitized digest, and its fixed checklist. The live
+  record also binds separate intended and observed store and product reference digests.
 
-The decision approves only when the product contract is release-eligible, every usability and
+The decision is timestamped when it is created, and provider currency is evaluated against that
+instant rather than the earlier contract observation time. The decision approves only when the product contract is release-eligible, every usability and
 safety threshold passes, all five provider capability decisions are independently released and
-current for the exact app revision, and the attended summaries are complete. Hidden, missing,
-malformed, stale, expired, future-dated, revision-mismatched, or reused provider evidence fails
-closed. The retained decision excludes participant identities, recordings, transcripts,
-credentials, prompts, provider responses, and any unrecognized supplied fields. It also records the
+current for the exact app revision, and the attended summaries are complete. Clerk production,
+Lemon Squeezy test mode, and the attended live canary must all pass independently for the same exact
+application and runtime candidate. Hidden, missing, malformed, stale, expired, future-dated,
+revision-mismatched, or reused provider evidence fails closed. Evidence digests must be distinct
+across the capability summary, every capability record, the production qualification summary, and
+every qualification record. A test-mode record cannot occupy the
+live-canary slot; the live canary's intended store and product digests must match their observed
+references and must not alias each other. Those target digests are compared to independent,
+environment-protected release-candidate variables; values inside dispatch JSON are evidence claims,
+not target authority. The retained decision excludes participant identities,
+recordings, transcripts, credentials, payment details, webhook secrets, prompts, provider payloads,
+provider responses, raw store/product identifiers, and any unrecognized supplied fields. It also records the
 General Release policy boundary: each Founder may authorize OpenAI only, Anthropic only, or both;
 routing uses only those authorized Ready connections; Bruno-funded fallback is prohibited; and
 qualification loss is capability-scoped at Safe Work Checkpoints.
 
-The workflow runs in automated mode for every push to `main`. A release candidate uses the manual
-`release` mode only after attended assistive-technology evidence exists. Before either mode runs,
-the workflow queries its GitHub Actions history for the exact source revision and fails closed when
-an earlier run for that revision was unsuccessful or remains unresolved. A successful automated run
-does not block the later attended release dispatch. No provider credential is used by either mode.
+The workflow runs in automated mode for every push to `main`. With no external provider summary, CI
+still validates the parser and decision logic and emits an explicit denied decision; deterministic
+Clerk and Lemon Squeezy doubles never create test-mode, attended-production, real-charge, refund, or
+cleanup evidence. A release candidate uses the manual `release` mode only after attended
+assistive-technology evidence exists. Its exact immutable runtime revision and expected live Store
+and Product digests come from the protected release environment, never workflow-dispatch inputs.
+Ordinary CI uses the explicit `founder-contract-v1` deterministic fixture identity. Before a release
+run begins, the workflow creates a GitHub Actions Check Run bound to the exact source revision and a
+one-way digest of the protected runtime, after querying every Check Suite and its Check Runs for that
+exact source. The globally bounded scan fails closed rather than trusting GitHub's truncated
+commit-run view. Only the run-unique expected control name created by the GitHub Actions app is
+authority; the unique name also prevents GitHub's same-name automatic deletion threshold from
+erasing an older exact-candidate result. An earlier
+denied, unsuccessful, or unresolved control for the pair blocks a fresh dispatch even if another
+control succeeded; a different protected runtime is a different candidate, and ordinary CI fixture
+runs do not create release controls. A denied release decision is still sanitized, attested, and
+retained before the control is finalized as failed and the workflow fails terminally. Candidate
+execution is serialized across refs by the exact source revision. A completed-success control is
+trusted only when its canonical run URL resolves to this workflow's exact source and the originating
+manual workflow is authoritatively completed-success; missing, malformed, unresolved, failed, or
+ambiguous control/run state blocks replacement dispatch. The 90-day artifact is evidence retention,
+not rerun authority.
+No provider credential is used by either mode.
+
+The qualification booleans and digests are only the allowlisted summary of separately reviewed
+source evidence. They are not the source proof, do not make an existing Clerk or Lemon Squeezy
+account qualified, and must never be authored from deterministic test results. Follow
+[`CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md`](acceptance/CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md)
+for the attended evidence boundary and sanitized handoff.
 
 ## Deterministic lifecycle seam
 
@@ -283,8 +326,8 @@ identifiers. Every
 canonical scenario must pass exactly once against the same revision and within the bounded
 observation window; missing, failed, skipped, retried, stale, mismatched, or unverified-cleanup
 results fail closed. Official GitHub workflow reruns are rejected rather than receiving a fresh
-evidence identity, and a fresh dispatch cannot erase an earlier failed run for the same source
-revision. Scenario execution history is candidate evidence rather than user-owned fixture state, so
+evidence identity, and a fresh dispatch cannot erase an earlier failed run for the same source and
+protected runtime candidate. Scenario execution history is candidate evidence rather than user-owned fixture state, so
 deleting a disposable lifecycle user cannot erase a failure. After each successful transition, the
 application commits a canonical scenario-execution receipt. Only the application can assemble and
 sign the complete exact-run ledger from those persisted receipts; the browser test copies that
@@ -292,8 +335,10 @@ response to the producer's fixed artifact path without constructing results or u
 authority. The runner executes an isolated public provider-failure proof first, then one lifecycle
 producer under the candidate run identity, and finally the five-project browser and accessibility
 matrix without lifecycle mutations. Both the failed proof receipt and the candidate's eight passing
-receipts survive disposable-user cleanup until the workflow database is destroyed. The ledger binds
-the canonical producer, source revision, workflow run ID, observation instant, results digest, and
+receipts survive disposable-user cleanup until the workflow database is destroyed. Each receipt
+persists the runtime exercised at claim time; legacy receipts without that provenance remain null
+and fail closed. The ledger binds the canonical producer, source revision, persisted runtime
+revision, workflow run ID, observation instant, results digest, and
 HMAC signature using the protected
 `BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET`; unsigned or caller-authored results are
 rejected. Cleanup is rebuilt from its five-field explicit allowlist before serialization. The contract
@@ -301,5 +346,5 @@ runner never generates lifecycle results, and missing lifecycle evidence fails C
 dispatches alike. A lifecycle/API/provider failure blocks the workflow rather than emitting a
 passing contract. The retained `scenarioLedger`
 contains the complete sanitized signed payload, including schema version and every result's source
-revision, observation time, cleanup outcome, digest, and signature, so its canonical signed input
+and runtime revisions, observation time, cleanup outcome, digest, and signature, so its canonical signed input
 can be independently reconstructed.

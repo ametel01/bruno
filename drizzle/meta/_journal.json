@@ -785,6 +785,13 @@
       "when": 1787461198867,
       "tag": "0111_issue_384_inflight_commerce_fence",
       "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1787473787899,
+      "tag": "0112_issue_386_scenario_runtime_provenance",
+      "breakpoints": true
     }
   ]
 }

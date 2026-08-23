@@ -21,6 +21,7 @@ export type FounderProductContractScenarioResult = {
   status: "passed" | "failed" | "skipped";
   attempts: number;
   sourceRevision: string | null;
+  runtimeRevision: string | null;
   observedAt: string;
   cleanup: FounderProductContractCleanupOutcome;
 };
@@ -36,4 +37,5 @@ export type FounderProductContractHarness = {
   readonly scenarioResults: FounderProductContractScenarioResult[];
   readonly requestCount: number;
   readonly sourceRevision?: string;
+  readonly runtimeRevision?: string;
 };

@@ -2,7 +2,11 @@ import "server-only";
 
 import { and, eq, sql } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { founderProductContractScenarioExecutions } from "@/src/server/db/schema";
+import {
+  founderProductContractScenarioExecutions,
+  operatorRuntimes,
+  operators,
+} from "@/src/server/db/schema";
 import { FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS } from "@/src/shared/founder-product-contract";
 import { createFounderProductContractScenarioLedger } from "@/src/testing/founder-product-contract/ledger";
 import type { FounderProductContractScenarioResult } from "@/src/testing/founder-product-contract/types";
@@ -12,6 +16,7 @@ type ScenarioExecutionIdentity = {
   runId: string;
   userId: string;
   sourceRevision: string;
+  runtimeRevision: string;
   scenarioId: FounderLifecycleOutcome["action"];
   observedAt: Date;
   createConnection?: () => DatabaseConnection;
@@ -30,6 +35,7 @@ export async function claimFounderProductContractScenarioExecution(
         userId: input.userId,
         scenarioId: input.scenarioId,
         sourceRevision: input.sourceRevision,
+        runtimeRevision: input.runtimeRevision,
         status: "in_progress",
         attempts: 1,
         resourcesBefore: 0,
@@ -88,6 +94,10 @@ export async function completeFounderProductContractScenarioExecution(input: {
             founderProductContractScenarioExecutions.sourceRevision,
             input.identity.sourceRevision,
           ),
+          eq(
+            founderProductContractScenarioExecutions.runtimeRevision,
+            input.identity.runtimeRevision,
+          ),
           eq(founderProductContractScenarioExecutions.status, "in_progress"),
           eq(founderProductContractScenarioExecutions.attempts, 1),
         ),
@@ -114,6 +124,7 @@ export async function failFounderProductContractScenarioExecution(
           eq(founderProductContractScenarioExecutions.userId, input.userId),
           eq(founderProductContractScenarioExecutions.scenarioId, input.scenarioId),
           eq(founderProductContractScenarioExecutions.sourceRevision, input.sourceRevision),
+          eq(founderProductContractScenarioExecutions.runtimeRevision, input.runtimeRevision),
         ),
       );
   } finally {
@@ -125,6 +136,7 @@ export async function issueFounderProductContractScenarioLedger(input: {
   runId: string;
   userId: string;
   sourceRevision: string;
+  runtimeRevision: string;
   observedAt: string;
   signingSecret: string;
   createConnection?: () => DatabaseConnection;
@@ -132,6 +144,20 @@ export async function issueFounderProductContractScenarioLedger(input: {
   const connection = input.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !input.createConnection;
   try {
+    const runtimeRows = await connection.db
+      .select({ runtimeRevision: operatorRuntimes.configRevision })
+      .from(operatorRuntimes)
+      .innerJoin(operators, eq(operators.id, operatorRuntimes.operatorId))
+      .where(eq(operators.userId, input.userId));
+    const exercisedRuntimeRevisions = new Set(
+      runtimeRows.map(({ runtimeRevision }) => runtimeRevision),
+    );
+    if (
+      exercisedRuntimeRevisions.size !== 1 ||
+      !exercisedRuntimeRevisions.has(input.runtimeRevision)
+    ) {
+      throw new Error("The persisted lifecycle runtime revision does not match the candidate.");
+    }
     const rows = await connection.db
       .select()
       .from(founderProductContractScenarioExecutions)
@@ -140,6 +166,7 @@ export async function issueFounderProductContractScenarioLedger(input: {
       rows.some(
         (row) =>
           row.sourceRevision !== input.sourceRevision ||
+          row.runtimeRevision !== input.runtimeRevision ||
           row.userId !== input.userId ||
           row.status !== "passed" ||
           row.attempts !== 1 ||
@@ -163,6 +190,7 @@ export async function issueFounderProductContractScenarioLedger(input: {
           status: row.status === "passed" ? "passed" : "failed",
           attempts: row.attempts,
           sourceRevision: row.sourceRevision,
+          runtimeRevision: row.runtimeRevision,
           observedAt: row.observedAt.toISOString(),
           cleanup: {
             status: row.status === "passed" ? "passed" : "failed",
@@ -175,6 +203,7 @@ export async function issueFounderProductContractScenarioLedger(input: {
       });
     return createFounderProductContractScenarioLedger({
       sourceRevision: input.sourceRevision,
+      runtimeRevision: input.runtimeRevision,
       runId: input.runId,
       observedAt: input.observedAt,
       results,

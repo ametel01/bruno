@@ -40,6 +40,7 @@ export async function runFounderProductContractScenario(
     status: "failed",
     attempts: 1,
     sourceRevision: harness.sourceRevision ?? null,
+    runtimeRevision: harness.runtimeRevision ?? null,
     observedAt: harness.clock.now().toISOString(),
     cleanup: failedCleanup(harness.clock),
   };
@@ -64,6 +65,7 @@ export function validateFounderProductContractScenarios(input: {
   required: readonly FounderProductContractLifecycleScenario[];
   results: readonly FounderProductContractScenarioResult[];
   sourceRevision: string;
+  runtimeRevision: string;
   observedAt: string;
   maxAgeMilliseconds?: number;
 }): void {
@@ -101,6 +103,9 @@ export function validateFounderProductContractScenarios(input: {
     validateCleanupOutcome(result.cleanup, expectedAt, maxAge);
     if (result.sourceRevision !== input.sourceRevision) {
       throw new Error(`Founder Product Contract scenario ${result.id} has a revision mismatch.`);
+    }
+    if (result.runtimeRevision !== input.runtimeRevision) {
+      throw new Error(`Founder Product Contract scenario ${result.id} has a runtime mismatch.`);
     }
     const observedAt = parseFounderProductContractInstant(result.observedAt).getTime();
     if (observedAt < expectedAt || observedAt - expectedAt > maxAge) {

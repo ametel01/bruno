@@ -46,15 +46,20 @@ on:
         description: Exact-revision provider outcomes and evidence digests
         required: false
         type: string
+      production_provider_qualification_summary_json:
+        description: Allowlisted attended Clerk and Lemon test/live qualification summary; no source payloads
+        required: false
+        type: string
 
 permissions:
   actions: read
+  checks: write
   contents: read
   id-token: write
   attestations: write
 
 concurrency:
-  group: founder-product-contract-${{ github.ref }}
+  group: founder-product-contract-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -86,6 +91,7 @@ jobs:
       PORT: "3100"
       PLAYWRIGHT_BASE_URL: http://localhost:3100
       BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION: ${{ github.sha }}
+      BRUNO_FOUNDER_PROTECTED_RUNTIME_REVISION: ${{ vars.BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION }}
       BRUNO_FOUNDER_CONTRACT_RUN_ID: github-${{ github.run_id }}
       BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT: ${{ github.run_attempt }}
       BRUNO_FOUNDER_CONTRACT_MODE: ${{ inputs.mode || 'ci' }}
@@ -97,6 +103,9 @@ jobs:
       BRUNO_FOUNDER_CONTRACT_TALKBACK_BROWSER_VERSION: ${{ inputs.talkback_browser_version }}
       BRUNO_FOUNDER_MODERATED_SUMMARY_JSON: ${{ inputs.moderated_founder_summary_json }}
       BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON: ${{ inputs.provider_decision_summary_json }}
+      BRUNO_FOUNDER_PRODUCTION_PROVIDER_QUALIFICATION_SUMMARY_JSON: ${{ inputs.production_provider_qualification_summary_json }}
+      BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST: ${{ vars.BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST }}
+      BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST: ${{ vars.BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST }}
       BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH: founder-contract-artifacts/scenario-ledger.json
 
     steps:
@@ -111,10 +120,31 @@ jobs:
       - name: Install frozen dependencies
         run: bun install --frozen-lockfile
 
+      - name: Require the exact release runtime revision
+        if: inputs.mode == 'release'
+        shell: bash
+        run: |
+          [[ "$BRUNO_FOUNDER_PROTECTED_RUNTIME_REVISION" =~ ^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$ ]]
+          [[ "$BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST" != "$BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST"
+          echo "BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION=$BRUNO_FOUNDER_PROTECTED_RUNTIME_REVISION" >> "$GITHUB_ENV"
+
+      - name: Bind the deterministic CI runtime revision
+        if: inputs.mode != 'release'
+        run: echo "BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION=founder-contract-v1" >> "$GITHUB_ENV"
+
       - name: Reject previously failed exact candidate
         env:
           BRUNO_FOUNDER_CONTRACT_GITHUB_TOKEN: ${{ github.token }}
         run: bun scripts/check-founder-product-contract-candidate-history.ts
+
+      - name: Create the durable protected release candidate control
+        id: release_candidate_control
+        if: inputs.mode == 'release'
+        env:
+          BRUNO_FOUNDER_CONTRACT_GITHUB_TOKEN: ${{ github.token }}
+        run: bun scripts/founder-product-contract-candidate-control.ts create
 
       - name: Install exact browser engines
         run: bunx playwright install --with-deps chromium firefox webkit
@@ -155,3 +185,11 @@ jobs:
             founder-contract-artifacts/founder-initial-general-release-decision.json
           if-no-files-found: error
           retention-days: 90
+
+      - name: Finalize and enforce the durable release candidate control
+        if: always() && inputs.mode == 'release'
+        env:
+          BRUNO_FOUNDER_CANDIDATE_CHECK_RUN_ID: ${{ steps.release_candidate_control.outputs.check_run_id }}
+          BRUNO_FOUNDER_CONTRACT_GITHUB_TOKEN: ${{ github.token }}
+          BRUNO_FOUNDER_PRIOR_JOB_STATUS: ${{ job.status }}
+        run: bun scripts/founder-product-contract-candidate-control.ts finalize

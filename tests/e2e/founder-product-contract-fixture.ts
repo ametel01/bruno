@@ -1,9 +1,18 @@
 import { createCipheriv, createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { expect, type APIRequestContext } from "@playwright/test";
 import postgres from "postgres";
+import { FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS } from "@/src/shared/founder-product-contract";
 import type { FounderProductContractClock } from "@/src/testing/founder-product-contract";
 
 const DEVELOPMENT_USER_E2E_LOCK_KEY = 125_365;
+
+export function founderProductContractQualificationCohorts(runId: string): string[] {
+  const baseCohort = `external-beta-contract:${runId}`;
+  return [
+    baseCohort,
+    ...FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS.map((project) => `${baseCohort}:${project}`),
+  ];
+}
 
 export type FounderProductContractFixture = {
   userId: string;
@@ -54,6 +63,7 @@ export function signedFounderCommerceEvent(
 export async function createFounderProductContractFixture(
   clock: FounderProductContractClock,
 ): Promise<FounderProductContractFixture> {
+  const runtimeRevision = founderProductContractRuntimeRevision();
   const userId = randomUUID();
   const operatorId = randomUUID();
   const preparationId = randomUUID();
@@ -92,7 +102,7 @@ export async function createFounderProductContractFixture(
     await sql`insert into users (id, created_at, updated_at) values (${userId}, ${createdAt}, ${readyAt})`;
     await sql`insert into operators (id, user_id, status, created_at, updated_at) values (${operatorId}, ${userId}, 'active', ${createdAt}, ${readyAt})`;
     await sql`insert into operator_preparations (id, operator_id, status, timezone, timezone_confirmed_at, started_at, completed_at, created_at, updated_at) values (${preparationId}, ${operatorId}, 'ready', 'Asia/Manila', ${createdAt}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
-    await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${runtimeId}, ${operatorId}, 'ready', 'connected', 'verified', 'founder-contract-v1', 'founder-contract-runtime', 1, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
+    await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${runtimeId}, ${operatorId}, 'ready', 'connected', 'verified', ${runtimeRevision}, 'founder-contract-runtime', 1, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
     await sql`insert into runners (id, user_id, name, kind, endpoint_url, status, provider, provider_resource_id, provider_firewall_id, region, size_slug, image, provisioning_status, provisioning_operation_key, provisioning_started_at, provisioning_completed_at, created_at, updated_at) values (${runnerId}, ${userId}, ${`founder-${runnerId}`}, 'digitalocean', 'https://203.0.113.10', 'online', 'digitalocean', ${`droplet-${runnerId}`}, ${`firewall-${runnerId}`}, 'sfo3', 's-1vcpu-1gb', 'ubuntu-24-04-x64', 'ready', ${`bruno-deploy-${runnerId.replaceAll("-", "")}`}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
     await sql`insert into runner_credentials (id, runner_id, credential_hash, credential_prefix, status, created_at, updated_at) values (${credentialId}, ${runnerId}, ${`sha256:${runnerId.replaceAll("-", "")}`}, 'fpct', 'active', ${createdAt}, ${readyAt})`;
     await sql`insert into runner_provisioning_events (runner_id, phase, status, message, metadata, created_at) values (${runnerId}, 'creating', 'completed', 'Provider creation confirmed.', ${sql.json({ providerCreatedAt: readyAt })}, ${readyAt})`;
@@ -112,7 +122,7 @@ export async function createFounderProductContractFixture(
       await sql`insert into users (id, created_at, updated_at) values (${branch.userId}, ${createdAt}, ${readyAt})`;
       await sql`insert into operators (id, user_id, status, created_at, updated_at) values (${branch.operatorId}, ${branch.userId}, 'active', ${createdAt}, ${readyAt})`;
       await sql`insert into operator_preparations (id, operator_id, status, timezone, timezone_confirmed_at, started_at, completed_at, created_at, updated_at) values (${branch.preparationId}, ${branch.operatorId}, 'ready', 'Asia/Manila', ${createdAt}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
-      await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${branch.runtimeId}, ${branch.operatorId}, 'ready', 'connected', 'verified', 'founder-contract-v1', ${`restoration-old-runtime-${branch.kind}`}, 1, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
+      await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${branch.runtimeId}, ${branch.operatorId}, 'ready', 'connected', 'verified', ${runtimeRevision}, ${`restoration-old-runtime-${branch.kind}`}, 1, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
       await sql`insert into runners (id, user_id, name, kind, endpoint_url, status, provider, provider_resource_id, provider_firewall_id, region, size_slug, image, provisioning_status, provisioning_operation_key, provisioning_started_at, provisioning_completed_at, created_at, updated_at) values (${branch.runnerId}, ${branch.userId}, ${`restoration-${branch.kind}-${branch.runnerId}`}, 'digitalocean', ${`https://203.0.113.${30 + restorationBranches.indexOf(branch)}`}, 'online', 'digitalocean', ${`restoration-old-droplet-${branch.kind}`}, ${`restoration-old-firewall-${branch.kind}`}, 'sfo3', 's-1vcpu-1gb', 'ubuntu-24-04-x64', 'ready', ${`bruno-deploy-${branch.runnerId.replaceAll("-", "")}`}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
       await sql`insert into runner_credentials (id, runner_id, credential_hash, credential_prefix, status, created_at, updated_at) values (${branch.credentialId}, ${branch.runnerId}, ${`sha256:${branch.runnerId.replaceAll("-", "")}`}, 'fpct', 'active', ${createdAt}, ${readyAt})`;
       await sql`insert into founder_checkout_correlations (id, user_id, correlation_digest, generation, status, provider_subscription_id, provider_order_id, payment_detected_at, reconciliation_due_at, consumed_at, created_at, expires_at) values (${branch.oldCorrelationId}, ${branch.userId}, ${`sha256:${createHash("sha256").update(`old:${branch.userId}`).digest("hex")}`}, 1, 'consumed', ${oldSubscriptionId}, ${oldOrderId}, ${createdAt}, ${new Date(new Date(createdAt).valueOf() + 60 * 60 * 1_000).toISOString()}, ${createdAt}, ${createdAt}, ${checkoutExpiry})`;
@@ -154,6 +164,7 @@ export async function prepareFounderExternalBetaContractFixture(
   fixture: FounderProductContractFixture,
   input: { runId: string; applicationRevision: string; now: Date },
 ): Promise<void> {
+  const runtimeRevision = founderProductContractRuntimeRevision();
   const cohort = `external-beta-contract:${input.runId}`;
   const expiresAt = new Date(input.now.valueOf() + 8 * 24 * 60 * 60 * 1_000).toISOString();
   const ownerPreparationId = randomUUID();
@@ -175,21 +186,21 @@ export async function prepareFounderExternalBetaContractFixture(
     await sql`insert into users (id, clerk_user_id, created_at, updated_at) values (${fixture.externalBetaOwnerUserId}, ${`clerk:${fixture.externalBetaOwnerUserId}`}, ${createdAt}, ${createdAt})`;
     await sql`insert into operators (id, user_id, status, created_at, updated_at) values (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaOwnerUserId}, 'active', ${createdAt}, ${createdAt})`;
     await sql`insert into operator_preparations (id, operator_id, status, timezone, timezone_confirmed_at, started_at, completed_at, created_at, updated_at) values (${ownerPreparationId}, ${fixture.externalBetaOwnerOperatorId}, 'ready', 'Asia/Manila', ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt})`;
-    await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${ownerRuntimeId}, ${fixture.externalBetaOwnerOperatorId}, 'ready', 'connected', 'verified', 'founder-contract-v1', ${`external-beta-owner:${input.runId}`}, 1, ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt})`;
+    await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${ownerRuntimeId}, ${fixture.externalBetaOwnerOperatorId}, 'ready', 'connected', 'verified', ${runtimeRevision}, ${`external-beta-owner:${input.runId}`}, 1, ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt})`;
 
     await sql`insert into users (id, clerk_user_id, created_at, updated_at) values (${fixture.externalBetaParticipantUserId}, ${`clerk:${fixture.externalBetaParticipantUserId}`}, ${createdAt}, ${createdAt})`;
     await sql`insert into operators (id, user_id, status, created_at, updated_at) values (${fixture.externalBetaParticipantOperatorId}, ${fixture.externalBetaParticipantUserId}, 'active', ${createdAt}, ${createdAt})`;
     await sql`insert into operator_preparations (id, operator_id, status, timezone, timezone_confirmed_at, started_at, completed_at, created_at, updated_at) values (${participantPreparationId}, ${fixture.externalBetaParticipantOperatorId}, 'ready', 'Asia/Manila', ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt})`;
-    await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${participantRuntimeId}, ${fixture.externalBetaParticipantOperatorId}, 'ready', 'connected', 'verified', 'founder-contract-v1', ${`external-beta-participant:${input.runId}`}, 1, ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt})`;
+    await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${participantRuntimeId}, ${fixture.externalBetaParticipantOperatorId}, 'ready', 'connected', 'verified', ${runtimeRevision}, ${`external-beta-participant:${input.runId}`}, 1, ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt})`;
     await sql`insert into runners (id, user_id, name, kind, status, provider, provider_resource_id, provider_firewall_id, region, size_slug, image, provisioning_status, provisioning_operation_key, provisioning_started_at, provisioning_completed_at, created_at, updated_at) values (${fixture.externalBetaParticipantRunnerId}, ${fixture.externalBetaParticipantUserId}, ${`external-beta-${fixture.externalBetaParticipantRunnerId}`}, 'digitalocean', 'online', 'digitalocean', ${`droplet-${fixture.externalBetaParticipantRunnerId}`}, ${`firewall-${fixture.externalBetaParticipantRunnerId}`}, 'sfo3', 's-1vcpu-1gb', 'ubuntu-24-04-x64', 'ready', ${`bruno-deploy-${fixture.externalBetaParticipantRunnerId.replaceAll("-", "")}`}, ${createdAt}, ${createdAt}, ${createdAt}, ${createdAt})`;
     await sql`insert into runner_credentials (id, runner_id, credential_hash, credential_prefix, status, created_at, updated_at) values (${participantCredentialId}, ${fixture.externalBetaParticipantRunnerId}, ${`sha256:${fixture.externalBetaParticipantRunnerId.replaceAll("-", "")}`}, 'fpct', 'active', ${createdAt}, ${createdAt})`;
 
     await sql`insert into app_metadata (key, value) values ('founder_owner_preview_owner_user_id:v1', ${fixture.externalBetaOwnerUserId}) on conflict (key) do update set value = excluded.value, updated_at = ${createdAt}`;
     await sql`delete from founder_preview_qualifications where cohort = ${cohort}`;
     for (const [index, capability] of capabilities.entries()) {
-      await sql`insert into founder_preview_qualifications (stage, cohort, capability, application_revision, runtime_revision, evidence_digest, observed_at, expires_at, created_at) values ('external_beta', ${cohort}, ${capability}, ${input.applicationRevision}, 'founder-contract-v1', ${`sha256:${(500 + index).toString(16).padStart(64, "0")}`}, ${createdAt}, ${expiresAt}, ${createdAt})`;
+      await sql`insert into founder_preview_qualifications (stage, cohort, capability, application_revision, runtime_revision, evidence_digest, observed_at, expires_at, created_at) values ('external_beta', ${cohort}, ${capability}, ${input.applicationRevision}, ${runtimeRevision}, ${`sha256:${(500 + index).toString(16).padStart(64, "0")}`}, ${createdAt}, ${expiresAt}, ${createdAt})`;
     }
-    await sql`insert into founder_release_decisions (user_id, operator_id, stage, outcome, application_revision, runtime_revision, capability_manifest, external_beta_cohort, evidence_digests, decided_at, created_at) values (${fixture.externalBetaOwnerUserId}, ${fixture.externalBetaOwnerOperatorId}, 'external_beta', 'enter', ${input.applicationRevision}, 'founder-contract-v1', ${sql.json(capabilities)}, ${cohort}, ${sql.json([`sha256:${"f".repeat(64)}`])}, ${createdAt}, ${createdAt})`;
+    await sql`insert into founder_release_decisions (user_id, operator_id, stage, outcome, application_revision, runtime_revision, capability_manifest, external_beta_cohort, evidence_digests, decided_at, created_at) values (${fixture.externalBetaOwnerUserId}, ${fixture.externalBetaOwnerOperatorId}, 'external_beta', 'enter', ${input.applicationRevision}, ${runtimeRevision}, ${sql.json(capabilities)}, ${cohort}, ${sql.json([`sha256:${"f".repeat(64)}`])}, ${createdAt}, ${createdAt})`;
   });
 }
 
@@ -197,6 +208,7 @@ export async function prepareFounderExternalBetaBrowserFixture(
   fixture: FounderProductContractFixture,
   input: { runId: string; applicationRevision: string; now: Date },
 ): Promise<{ accessExpiresAt: string; retirementDueAt: string }> {
+  const runtimeRevision = founderProductContractRuntimeRevision();
   await prepareFounderExternalBetaContractFixture(fixture, input);
   const cohort = `external-beta-contract:${input.runId}`;
   const admittedAt = input.now.toISOString();
@@ -222,7 +234,7 @@ export async function prepareFounderExternalBetaBrowserFixture(
     if (!stageDecision) throw new Error("External Beta browser stage decision is unavailable.");
     const [admissionDecision] = await sql<
       { id: string }[]
-    >`insert into founder_release_decisions (user_id, operator_id, stage, outcome, application_revision, runtime_revision, capability_manifest, external_beta_cohort, evidence_digests, decided_at, created_at) values (${fixture.userId}, ${fixture.operatorId}, 'external_beta', 'enter', ${input.applicationRevision}, 'founder-contract-v1', ${sql.json(capabilities)}, ${cohort}, ${sql.json([`sha256:${"e".repeat(64)}`])}, ${admittedAt}, ${admittedAt}) returning id`;
+    >`insert into founder_release_decisions (user_id, operator_id, stage, outcome, application_revision, runtime_revision, capability_manifest, external_beta_cohort, evidence_digests, decided_at, created_at) values (${fixture.userId}, ${fixture.operatorId}, 'external_beta', 'enter', ${input.applicationRevision}, ${runtimeRevision}, ${sql.json(capabilities)}, ${cohort}, ${sql.json([`sha256:${"e".repeat(64)}`])}, ${admittedAt}, ${admittedAt}) returning id`;
     if (!admissionDecision) {
       throw new Error("External Beta browser admission decision was not persisted.");
     }
@@ -394,10 +406,9 @@ export async function deleteFounderProductContractFixture(
       { id: string }[]
     >`select id from runners where user_id = any(${allUserIds})`;
     const runnerIds = runnerRows.map(({ id }) => id);
-    const contractRunId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID;
-    if (contractRunId) {
-      await sql`delete from founder_preview_qualifications where cohort = ${`external-beta-contract:${contractRunId}`}`;
-    }
+    const contractRunId = requiredContractEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID");
+    const contractCohorts = founderProductContractQualificationCohorts(contractRunId);
+    await sql`delete from founder_preview_qualifications where cohort = any(${contractCohorts})`;
     if (!options.retainScenarioExecutions) {
       await sql`delete from founder_product_contract_scenario_executions where user_id = ${fixture.userId}`;
     }
@@ -521,6 +532,7 @@ export async function deleteFounderProductContractFixture(
       union all select 'founder_external_beta_measurements', count(*)::integer from founder_external_beta_measurements where participant_user_id = any(${allUserIds})
       union all select 'founder_external_beta_consent_receipts', count(*)::integer from founder_external_beta_consent_receipts where participant_user_id = any(${allUserIds})
       union all select 'founder_external_beta_invitations', count(*)::integer from founder_external_beta_invitations where cohort_owner_user_id = any(${allUserIds}) or participant_user_id = any(${allUserIds})
+      union all select 'founder_preview_qualifications', count(*)::integer from founder_preview_qualifications where cohort = any(${contractCohorts})
       union all select 'founder_general_release_activations', count(*)::integer from founder_general_release_activations where user_id = any(${allUserIds})
       union all select 'founder_product_entitlements', count(*)::integer from founder_product_entitlements where user_id = any(${allUserIds})
       union all select 'founder_commerce_lifecycle_receipts', count(*)::integer from founder_commerce_lifecycle_receipts where user_id = any(${allUserIds})
@@ -592,8 +604,8 @@ export async function assertPersistedFounderLifecycleAuthority(
       (select count(*)::int from founder_commerce_events where user_id = ${fixture.userId}) as commerce_events,
       (select count(*)::int from founder_product_entitlements where user_id = ${fixture.userId} and status = 'cancelled' and retirement_due_at is not null) as terminal_entitlements,
       (select count(*)::int from founder_checkout_correlations where user_id = ${fixture.userId} and status = 'consumed') as consumed_correlations,
-      (select count(*)::int from founder_release_decisions where user_id = ${fixture.userId} and application_revision = ${process.env.BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION ?? "a".repeat(40)} and runtime_revision = 'founder-contract-v1' and capability_manifest = '["openai", "calendar_reading"]'::jsonb) as safe_release_decisions,
-      (select count(*)::int from founder_preview_qualifications where cohort = ${`external-beta-contract:${process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID ?? "missing"}`} and application_revision = ${process.env.BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION ?? "a".repeat(40)} and runtime_revision = 'founder-contract-v1') as external_beta_qualifications,
+      (select count(*)::int from founder_release_decisions where user_id = ${fixture.userId} and application_revision = ${process.env.BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION ?? "a".repeat(40)} and runtime_revision = ${founderProductContractRuntimeRevision()} and capability_manifest = '["openai", "calendar_reading"]'::jsonb) as safe_release_decisions,
+      (select count(*)::int from founder_preview_qualifications where cohort = ${`external-beta-contract:${process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID ?? "missing"}`} and application_revision = ${process.env.BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION ?? "a".repeat(40)} and runtime_revision = ${founderProductContractRuntimeRevision()}) as external_beta_qualifications,
       (select count(*)::int from founder_recovery_archives where user_id = ${fixture.userId} and status = 'verified' and format_version = 1 and restorable_verified = true and restore_verified_at is not null and state_digest is not null) as archives,
       (select count(*)::int from founder_recovery_archives where user_id = ${fixture.userId} and status = 'failed') as failed_archives,
       (select count(*)::int from founder_recovery_archives where user_id = ${fixture.userId} and status = 'deleted' and deleted_at is not null) as deleted_archives,
@@ -711,4 +723,12 @@ export async function withFounderProductContractDatabase<T>(
   } finally {
     await sql.end({ timeout: 5 });
   }
+}
+
+function founderProductContractRuntimeRevision(): string {
+  const value = process.env.BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION?.trim();
+  if (!value || !/^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$/.test(value)) {
+    throw new Error("BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION is required.");
+  }
+  return value;
 }

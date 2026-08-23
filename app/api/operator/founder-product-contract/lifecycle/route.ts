@@ -164,6 +164,7 @@ export async function POST(request: Request): Promise<Response> {
     runId: identity.runId,
     userId: applicationUser.userId,
     sourceRevision: identity.sourceRevision,
+    runtimeRevision: identity.runtimeRevision,
     scenarioId: body.action,
     observedAt: now,
   };
@@ -518,22 +519,25 @@ function isLoopbackHostname(hostname: string): boolean {
 
 function contractIdentity(): {
   sourceRevision: string;
+  runtimeRevision: string;
   runId: string;
   observedAt: string;
 } | null {
   const sourceRevision =
     process.env.BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION ?? process.env.VERCEL_GIT_COMMIT_SHA ?? "";
+  const runtimeRevision = process.env.BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION ?? "";
   const runId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID ?? "";
   const observedAt = process.env.BRUNO_FOUNDER_CONTRACT_OBSERVED_AT ?? "";
   if (
     !/^[a-f0-9]{40}$/.test(sourceRevision) ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$/.test(runtimeRevision) ||
     !/^[A-Za-z0-9._:-]{1,128}$/.test(runId) ||
     Number.isNaN(new Date(observedAt).valueOf()) ||
     new Date(observedAt).toISOString() !== observedAt
   ) {
     return null;
   }
-  return { sourceRevision, runId, observedAt };
+  return { sourceRevision, runtimeRevision, runId, observedAt };
 }
 
 async function readBody(request: Request): Promise<{

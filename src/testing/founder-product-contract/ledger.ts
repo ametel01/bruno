@@ -7,7 +7,7 @@ import type {
 } from "./types";
 
 export const FOUNDER_PRODUCT_CONTRACT_SCENARIO_LEDGER_SCHEMA_VERSION =
-  "bruno.founder-product-contract.scenario-ledger.v1" as const;
+  "bruno.founder-product-contract.scenario-ledger.v2" as const;
 export const FOUNDER_PRODUCT_CONTRACT_SCENARIO_LEDGER_PRODUCER =
   "bruno.persisted-founder-application" as const;
 export const FOUNDER_PRODUCT_CONTRACT_SCENARIO_SIGNING_SECRET_ENV =
@@ -17,6 +17,7 @@ export type FounderProductContractScenarioLedger = {
   schemaVersion: typeof FOUNDER_PRODUCT_CONTRACT_SCENARIO_LEDGER_SCHEMA_VERSION;
   producer: typeof FOUNDER_PRODUCT_CONTRACT_SCENARIO_LEDGER_PRODUCER;
   sourceRevision: string;
+  runtimeRevision: string;
   runId: string;
   observedAt: string;
   results: readonly FounderProductContractScenarioResult[];
@@ -31,6 +32,7 @@ type ScenarioLedgerPayload = Omit<
 
 export function createFounderProductContractScenarioLedger(input: {
   sourceRevision: string;
+  runtimeRevision: string;
   runId: string;
   observedAt: string;
   results: readonly FounderProductContractScenarioResult[];
@@ -48,11 +50,15 @@ export function createFounderProductContractScenarioLedger(input: {
 export function verifyFounderProductContractScenarioLedger(input: {
   ledger: FounderProductContractScenarioLedger;
   sourceRevision: string;
+  runtimeRevision: string;
   runId: string;
   observedAt: string;
   signingSecret: string;
 }): FounderProductContractScenarioLedger {
   const { ledger } = input;
+  if (ledger.runtimeRevision !== input.runtimeRevision) {
+    throw new Error("Founder Product Contract lifecycle ledger runtime revision mismatch.");
+  }
   if (
     ledger.schemaVersion !== FOUNDER_PRODUCT_CONTRACT_SCENARIO_LEDGER_SCHEMA_VERSION ||
     ledger.producer !== FOUNDER_PRODUCT_CONTRACT_SCENARIO_LEDGER_PRODUCER ||
@@ -86,6 +92,7 @@ export function sanitizeFounderProductContractScenarioResult(
     status: result.status,
     attempts: result.attempts,
     sourceRevision: result.sourceRevision,
+    runtimeRevision: result.runtimeRevision,
     observedAt: result.observedAt,
     cleanup: sanitizeCleanupOutcome(result.cleanup),
   };
@@ -94,6 +101,7 @@ export function sanitizeFounderProductContractScenarioResult(
 export function parseFounderProductContractScenarioLedger(input: {
   value: string;
   sourceRevision: string;
+  runtimeRevision: string;
   runId: string;
   observedAt: string;
   signingSecret: string;
@@ -110,6 +118,7 @@ export function parseFounderProductContractScenarioLedger(input: {
       "schemaVersion",
       "producer",
       "sourceRevision",
+      "runtimeRevision",
       "runId",
       "observedAt",
       "results",
@@ -118,6 +127,9 @@ export function parseFounderProductContractScenarioLedger(input: {
     ])
   ) {
     throw new Error("Founder Product Contract scenario ledger is invalid.");
+  }
+  if (parsed.runtimeRevision !== input.runtimeRevision) {
+    throw new Error("Founder Product Contract lifecycle ledger runtime revision mismatch.");
   }
   if (
     parsed.schemaVersion !== FOUNDER_PRODUCT_CONTRACT_SCENARIO_LEDGER_SCHEMA_VERSION ||
@@ -135,6 +147,7 @@ export function parseFounderProductContractScenarioLedger(input: {
     schemaVersion: parsed.schemaVersion,
     producer: parsed.producer,
     sourceRevision: parsed.sourceRevision,
+    runtimeRevision: parsed.runtimeRevision,
     runId: parsed.runId,
     observedAt: parsed.observedAt,
     results: parsed.results.map(parseScenarioResult),
@@ -147,11 +160,20 @@ export function parseFounderProductContractScenarioLedger(input: {
 function parseScenarioResult(value: unknown): FounderProductContractScenarioResult {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["id", "status", "attempts", "sourceRevision", "observedAt", "cleanup"]) ||
+    !hasExactKeys(value, [
+      "id",
+      "status",
+      "attempts",
+      "sourceRevision",
+      "runtimeRevision",
+      "observedAt",
+      "cleanup",
+    ]) ||
     !isLifecycleScenario(value.id) ||
     !isScenarioStatus(value.status) ||
     !Number.isSafeInteger(value.attempts) ||
     (typeof value.sourceRevision !== "string" && value.sourceRevision !== null) ||
+    (typeof value.runtimeRevision !== "string" && value.runtimeRevision !== null) ||
     typeof value.observedAt !== "string"
   ) {
     throw new Error("Founder Product Contract scenario ledger is invalid.");
@@ -161,6 +183,7 @@ function parseScenarioResult(value: unknown): FounderProductContractScenarioResu
     status: value.status,
     attempts: value.attempts as number,
     sourceRevision: value.sourceRevision,
+    runtimeRevision: value.runtimeRevision,
     observedAt: value.observedAt,
     cleanup: parseCleanupOutcome(value.cleanup),
   };
@@ -213,6 +236,7 @@ function sanitizeCleanupOutcome(
 
 function buildScenarioLedgerPayload(input: {
   sourceRevision: string;
+  runtimeRevision: string;
   runId: string;
   observedAt: string;
   results: readonly FounderProductContractScenarioResult[];
@@ -221,6 +245,7 @@ function buildScenarioLedgerPayload(input: {
     schemaVersion: FOUNDER_PRODUCT_CONTRACT_SCENARIO_LEDGER_SCHEMA_VERSION,
     producer: FOUNDER_PRODUCT_CONTRACT_SCENARIO_LEDGER_PRODUCER,
     sourceRevision: input.sourceRevision,
+    runtimeRevision: input.runtimeRevision,
     runId: input.runId,
     observedAt: input.observedAt,
     results: sanitizeScenarioResults(input.results),

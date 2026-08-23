@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { isGitRevision, isRuntimeRevision } from "@/scripts/founder-release-evidence-validation";
 import {
   FOUNDER_PRODUCT_CONTRACT_ATTENDED_TASKS,
   FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS,
@@ -42,6 +43,7 @@ export async function createFounderProductContractEvidence(input: {
   browserResultPath: string;
   unitResultPath: string;
   sourceRevision: string;
+  runtimeRevision: string;
   runId: string;
   runAttempt: number;
   mode: ContractMode;
@@ -64,6 +66,7 @@ export function buildFounderProductContractEvidence(input: {
   browser: PlaywrightResult;
   unit: VitestResult;
   sourceRevision: string;
+  runtimeRevision: string;
   runId: string;
   runAttempt: number;
   mode: ContractMode;
@@ -77,7 +80,8 @@ export function buildFounderProductContractEvidence(input: {
   scenarioLedger: FounderProductContractScenarioLedger;
   scenarioSigningSecret: string;
 }) {
-  requirePattern(input.sourceRevision, /^[a-f0-9]{40}$/, "source revision");
+  if (!isGitRevision(input.sourceRevision)) throw new Error("source revision is invalid.");
+  if (!isRuntimeRevision(input.runtimeRevision)) throw new Error("runtime revision is invalid.");
   requirePattern(input.runId, /^[A-Za-z0-9._:-]{1,128}$/, "run ID");
   if (!Number.isSafeInteger(input.runAttempt) || input.runAttempt < 1) {
     throw new Error("Workflow run attempt must be a positive integer.");
@@ -143,6 +147,7 @@ export function buildFounderProductContractEvidence(input: {
   const scenarioLedger = verifyFounderProductContractScenarioLedger({
     ledger: input.scenarioLedger,
     sourceRevision: input.sourceRevision,
+    runtimeRevision: input.runtimeRevision,
     runId: input.runId,
     observedAt: input.observedAt,
     signingSecret: input.scenarioSigningSecret,
@@ -151,6 +156,7 @@ export function buildFounderProductContractEvidence(input: {
     required: FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
     results: scenarioLedger.results,
     sourceRevision: input.sourceRevision,
+    runtimeRevision: input.runtimeRevision,
     observedAt: input.observedAt,
   });
   const scenarioEvidence = scenarioLedger.results.map((result) => {
@@ -166,6 +172,7 @@ export function buildFounderProductContractEvidence(input: {
     schemaVersion: scenarioLedger.schemaVersion,
     producer: scenarioLedger.producer,
     sourceRevision: scenarioLedger.sourceRevision,
+    runtimeRevision: scenarioLedger.runtimeRevision,
     runId: scenarioLedger.runId,
     observedAt: scenarioLedger.observedAt,
     results: scenarioLedger.results.map(sanitizeFounderProductContractScenarioResult),
@@ -205,6 +212,7 @@ export function buildFounderProductContractEvidence(input: {
     releaseEligible: Boolean(input.mode === "release" && voiceOverEvidence && talkBackEvidence),
     releaseIdentity: {
       sourceRevision: input.sourceRevision,
+      runtimeRevision: input.runtimeRevision,
       runId: input.runId,
     },
     observedAt: input.observedAt,

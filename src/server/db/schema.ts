@@ -1729,6 +1729,9 @@ export const founderProductContractScenarioExecutions = pgTable(
     userId: uuid("user_id").notNull(),
     scenarioId: founderProductContractScenarioEnum("scenario_id").notNull(),
     sourceRevision: text("source_revision").notNull(),
+    // Legacy executions predate runtime-bound evidence and remain null so they
+    // fail closed instead of receiving fabricated provenance during migration.
+    runtimeRevision: text("runtime_revision"),
     status: text("status").notNull().default("in_progress"),
     attempts: integer("attempts").notNull().default(1),
     resourcesBefore: integer("resources_before").notNull(),
@@ -1747,6 +1750,10 @@ export const founderProductContractScenarioExecutions = pgTable(
     check(
       "founder_product_contract_executions_revision_check",
       sql`${table.sourceRevision} ~ '^[a-f0-9]{40}$'`,
+    ),
+    check(
+      "founder_product_contract_executions_runtime_revision_check",
+      sql`${table.runtimeRevision} IS NULL OR ${table.runtimeRevision} ~ '^[A-Za-z0-9][A-Za-z0-9._:@/+\-]{0,127}$'`,
     ),
     check(
       "founder_product_contract_executions_outcome_check",

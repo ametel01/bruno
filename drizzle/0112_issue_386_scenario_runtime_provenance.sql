@@ -1,0 +1,2 @@
+ALTER TABLE "founder_product_contract_scenario_executions" ADD COLUMN "runtime_revision" text;--> statement-breakpoint
+ALTER TABLE "founder_product_contract_scenario_executions" ADD CONSTRAINT "founder_product_contract_executions_runtime_revision_check" CHECK ("founder_product_contract_scenario_executions"."runtime_revision" IS NULL OR "founder_product_contract_scenario_executions"."runtime_revision" ~ '^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$');
