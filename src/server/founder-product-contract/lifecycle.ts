@@ -84,6 +84,7 @@ export type FounderLifecycleProviderBoundary = FounderRecoveryArchiveProvider & 
     gmailSending: true;
   }>;
   readSubscription(input: { subscriptionId: string }): Promise<{ status: FounderCommerceStatus }>;
+  cancelSubscription?(input: { subscriptionId: string }): Promise<void>;
   createCustomerPortal(input: { subscriptionId: string; now: Date }): Promise<{
     url: string;
     expiresAt: Date;

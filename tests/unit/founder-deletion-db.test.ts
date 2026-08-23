@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   founderProductEntitlements,
+  operatorConversations,
   operatorDeletionCommerceCancellations,
   operatorDeletionReceipts,
-  operatorConversations,
   operatorMailConnections,
   operators,
   users,
@@ -13,6 +13,7 @@ import {
 import {
   FOUNDER_ACTIVE_PURGE_WINDOW_MS,
   FOUNDER_BACKUP_EXPIRY_WINDOW_MS,
+  FOUNDER_REVOCATION_RETRY_MS,
   getFounderDeletionReceiptForUser,
   processFounderDeletionRequests,
   requestFounderDeletionForUser,
@@ -172,6 +173,106 @@ describe("Founder deletion lifecycle", () => {
 
     await requestFounderDeletionForUser(OWNER_ID, "account_closure", {}, dependencies);
     expect(cancelCommerce).toHaveBeenCalledOnce();
+  });
+
+  it("cancels a still-renewable subscription after a separate refund decision", async () => {
+    await insertPastDueFounderEntitlementFixture({
+      connection,
+      userId: OWNER_ID,
+      fixtureId: "account-closure-refunded-384",
+      reconciledAt: NOW,
+      retirementDueAt: new Date(NOW.valueOf() + 7 * 24 * 60 * 60 * 1_000),
+    });
+    await connection.db
+      .update(founderProductEntitlements)
+      .set({ status: "refunded", updatedAt: NOW })
+      .where(eq(founderProductEntitlements.userId, OWNER_ID));
+    const cancelCommerce = vi.fn(async () => undefined);
+
+    const receipt = await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        cancelCommerce,
+        revokeConnections: async () => [],
+      },
+    );
+
+    expect(cancelCommerce).toHaveBeenCalledWith("subscription-account-closure-refunded-384");
+    expect(receipt?.commerceCancellation).toMatchObject({
+      status: "succeeded",
+      attemptCount: 1,
+      refundStarted: false,
+    });
+    expect(receipt?.stages).toContainEqual(
+      expect.objectContaining({
+        stage: "commerce_cancellation",
+        details: expect.objectContaining({
+          outcome: "subscription_cancellation_requested",
+          refundStarted: false,
+        }),
+      }),
+    );
+  });
+
+  it("keeps unresolved Account Closure effects visible and retryable after backup expiry", async () => {
+    await insertPastDueFounderEntitlementFixture({
+      connection,
+      userId: OWNER_ID,
+      fixtureId: "account-closure-retry-384",
+      reconciledAt: NOW,
+      retirementDueAt: new Date(NOW.valueOf() + 7 * 24 * 60 * 60 * 1_000),
+    });
+    const cancellationUnavailable = vi.fn(async () => {
+      throw new Error("provider unavailable");
+    });
+    await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        cancelCommerce: cancellationUnavailable,
+        revokeConnections: async () => [],
+      },
+    );
+
+    const afterExpiry = new Date(NOW.valueOf() + FOUNDER_BACKUP_EXPIRY_WINDOW_MS);
+    await processFounderDeletionRequests({
+      createConnection: () => connection,
+      now: () => afterExpiry,
+      cancelCommerce: cancellationUnavailable,
+      revokeConnections: async () => [],
+    });
+    const unresolved = await getFounderDeletionReceiptForUser(OWNER_ID, {
+      createConnection: () => connection,
+    });
+    expect(unresolved?.request).toMatchObject({
+      status: "failed",
+      backupExpiredAt: afterExpiry.toISOString(),
+      completedAt: null,
+      failureCode: "account_closure_external_effects_unresolved",
+    });
+    expect(unresolved?.commerceCancellation).toMatchObject({ status: "failed", attemptCount: 2 });
+
+    const cancellationRestored = vi.fn(async () => undefined);
+    const completed = await retryFounderDeletionRevocationsForUser(OWNER_ID, {
+      createConnection: () => connection,
+      now: () => new Date(afterExpiry.valueOf() + FOUNDER_REVOCATION_RETRY_MS),
+      cancelCommerce: cancellationRestored,
+      revokeConnections: async () => [],
+    });
+    expect(cancellationRestored).toHaveBeenCalledOnce();
+    expect(completed?.request).toMatchObject({
+      status: "completed",
+      completedAt: afterExpiry.toISOString(),
+      failureCode: null,
+    });
+    expect(completed?.commerceCancellation).toMatchObject({ status: "succeeded", attemptCount: 3 });
   });
 
   it("keeps revocation failures visible and retryable after local credential removal", async () => {

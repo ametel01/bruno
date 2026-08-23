@@ -113,7 +113,9 @@ refund, begin Infrastructure Retirement, delete Recovery Archives, begin Bruno D
 request Account Closure.
 
 Before identity loss, the recently reauthenticated Founder creates a one-time, high-entropy
-Identity Recovery code from the Privacy Center. Bruno shows the code once, stores only its digest,
+Identity Recovery code from the Privacy Center. In Clerk mode, "recently reauthenticated" means
+Clerk's server-side strict reverification check succeeds; JWT issuance or session refresh time is
+never accepted as credential verification. Bruno shows the code once, stores only its digest,
 and replaces any earlier code. The `/identity-recovery` surface accepts that code only while it is
 unused, unrevoked, unexpired, and bound to the pending recovery for the same internal Owner. The
 server then issues a short-lived assertion bound to that recovery, the prior and exact replacement

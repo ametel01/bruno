@@ -211,6 +211,7 @@ export async function recoverFounderIdentityWithCredential(input: {
     );
     if (
       credential.credentialDigest !== attemptedDigest ||
+      credential.issuedAt > input.now ||
       credential.usedAt ||
       credential.revokedAt ||
       credential.expiresAt <= input.now
@@ -565,10 +566,25 @@ export async function getFounderIdentityRecoveryStatusForClerkSubject(
       .where(eq(users.clerkUserId, clerkUserId))
       .limit(1);
     if (!owner) return { state: "proof_required" };
+    return getFounderIdentityRecoveryStatusForUser(owner.id, {
+      createConnection: () => connection,
+    });
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
+export async function getFounderIdentityRecoveryStatusForUser(
+  userId: string,
+  dependencies: { createConnection?: () => DatabaseConnection } = {},
+): Promise<FounderIdentityRecoveryStatusDto> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  try {
     const [recovery] = await connection.db
       .select()
       .from(founderIdentityRecoveries)
-      .where(eq(founderIdentityRecoveries.userId, owner.id))
+      .where(eq(founderIdentityRecoveries.userId, userId))
       .orderBy(desc(founderIdentityRecoveries.updatedAt))
       .limit(1);
     if (recovery?.status === "pending") return { state: "recovery_required" };

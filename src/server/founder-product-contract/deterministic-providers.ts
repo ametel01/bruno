@@ -41,6 +41,7 @@ type ProviderState = {
   digitalOcean: FakeDigitalOceanProvider;
   archiveStorage: FakeBackupObjectStorage;
   seededResourceIds: Set<string>;
+  subscriptionStatus: FounderCommerceStatus;
 };
 
 const globalProviders = globalThis as typeof globalThis & {
@@ -63,7 +64,9 @@ export function deterministicFounderLifecycleProviders(input: {
     digitalOcean: new FakeDigitalOceanProvider({ now: () => input.now }),
     archiveStorage: new FakeBackupObjectStorage("founder-product-contract-recovery"),
     seededResourceIds: new Set(),
+    subscriptionStatus: input.subscriptionStatus,
   };
+  state.subscriptionStatus = input.subscriptionStatus;
   registry.set(key, state);
   const calls: string[] = [];
   const failures = new Set(input.failures);
@@ -112,7 +115,12 @@ export function deterministicFounderLifecycleProviders(input: {
       calls.push("lemonSqueezy.read_subscription");
       failIfConfigured(failures, "lemonSqueezy.read_subscription");
       if (!subscriptionId) throw new Error("Subscription identity is required.");
-      return { status: input.subscriptionStatus };
+      return { status: state.subscriptionStatus };
+    },
+    async cancelSubscription({ subscriptionId }) {
+      calls.push("lemonSqueezy.cancel_subscription");
+      if (!subscriptionId) throw new Error("Subscription identity is required.");
+      state.subscriptionStatus = "cancelled";
     },
     async createCustomerPortal({ subscriptionId, now }) {
       calls.push("lemonSqueezy.create_customer_portal");

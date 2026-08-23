@@ -5,6 +5,7 @@ import {
   createFounderProductContractFixture,
   deleteFounderProductContractFixture,
   prepareFounderExternalBetaBrowserFixture,
+  prepareFounderIdentityRecoveryBrowserFixture,
   withPinnedFounderDevelopmentUser,
 } from "./founder-product-contract-fixture";
 
@@ -91,43 +92,39 @@ test("Operator UI remains usable across the required browser matrix", async ({ p
         .analyze();
       expect(externalBetaAccessibility.violations).toEqual([]);
 
-      await page.route("**/api/identity-recovery", async (route) => {
-        if (route.request().method() !== "GET") return route.continue();
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            recovery: {
-              state: "recovered",
-              recoveredAt: clock.now().toISOString(),
-              receipts: [
-                { kind: "identity_loss_recorded", occurredAt: clock.now().toISOString() },
-                { kind: "recovery_denied", occurredAt: clock.now().toISOString() },
-                { kind: "identity_rebound", occurredAt: clock.now().toISOString() },
-              ],
-            },
-          }),
-        });
+      const runId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID ?? "browser";
+      await prepareFounderIdentityRecoveryBrowserFixture(fixture, {
+        runId: `${runId}:${test.info().project.name}`,
+        now: clock.now(),
       });
-      await page.goto("/identity-recovery");
-      await expect(page.getByRole("heading", { name: "Identity Recovery receipts" })).toBeVisible();
+      const identityRecoveryResponse = await request.get("/api/operator/identity-recovery");
+      expect(identityRecoveryResponse.status()).toBe(200);
+      await expect(identityRecoveryResponse.json()).resolves.toMatchObject({
+        recovery: {
+          state: "recovered",
+          receipts: [
+            { kind: "identity_loss_recorded" },
+            { kind: "recovery_denied" },
+            { kind: "identity_rebound" },
+          ],
+        },
+      });
+
+      await page.goto("/operator/privacy");
+      await expect(page.getByRole("heading", { name: /Account Closure Receipt/ })).toBeVisible();
+      await expect(page.getByText("Commerce cancellation")).toBeVisible();
+      await expect(page.getByText(/Lemon Squeezy subscription: succeeded/)).toBeVisible();
+      await expect(page.getByText(/Refund started: no/)).toBeVisible();
+      await expect(page.getByText("Identity Recovery receipts")).toBeVisible();
       await expect(page.getByText("Identity loss recorded", { exact: false })).toBeVisible();
       await expect(page.getByText("Recovery attempt denied", { exact: false })).toBeVisible();
       await expect(
         page.getByText("Identity rebound to the same Owner", { exact: false }),
       ).toBeVisible();
-      await expect(page.getByText("Account Closure stays separate")).toBeVisible();
       const identityRecoveryAccessibility = await new AxeBuilder({ page })
         .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
         .analyze();
       expect(identityRecoveryAccessibility.violations).toEqual([]);
-      await page.unroute("**/api/identity-recovery");
-
-      const resumedResponse = await request.get("/api/operator");
-      const resumedBody = (await resumedResponse.json()) as { operator: { id: string } };
-      expect(resumedBody.operator.id).toBe(fixture.operatorId);
-      await page.goto("/operator");
-      await expect(page.getByText("Your Operator is ready.")).toBeVisible();
       await page.waitForLoadState("networkidle");
       expect(pageErrors).toEqual([]);
     });

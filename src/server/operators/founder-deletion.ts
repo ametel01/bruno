@@ -277,6 +277,7 @@ export async function requestFounderDeletionForUser(
     if (!request) return null;
     if (request.kind === "account_closure") {
       await coordinateFounderAccountClosureEffects(userId, request.id, dependencies);
+      await synchronizeAccountClosureCompletionState(request.id, dependencies);
     }
     return getFounderDeletionReceiptForUser(userId, {
       ...dependencies,
@@ -297,13 +298,23 @@ export async function processFounderDeletionRequests(
     const requests = await connection.db
       .select()
       .from(operatorDeletionRequests)
-      .where(sql`${operatorDeletionRequests.status} <> 'completed'`);
+      .where(sql`${operatorDeletionRequests.status} <> 'completed'
+        OR EXISTS (
+          SELECT 1 FROM ${operatorDeletionCommerceCancellations}
+          WHERE ${operatorDeletionCommerceCancellations.requestId} = ${operatorDeletionRequests.id}
+            AND ${operatorDeletionCommerceCancellations.status} <> 'succeeded'
+        )
+        OR EXISTS (
+          SELECT 1 FROM ${operatorDeletionRevocations}
+          WHERE ${operatorDeletionRevocations.requestId} = ${operatorDeletionRequests.id}
+            AND ${operatorDeletionRevocations.status} <> 'succeeded'
+        )`);
     let processed = 0;
     let failed = 0;
     for (const request of requests) {
       try {
         await connection.db.transaction((tx) => processRequest(tx, request, now()));
-        if (request.kind === "account_closure" && now() < request.backupExpiryDueAt) {
+        if (request.kind === "account_closure") {
           const [owner] = await connection.db
             .select({ userId: operators.userId })
             .from(operators)
@@ -311,6 +322,7 @@ export async function processFounderDeletionRequests(
             .limit(1);
           if (owner) {
             await coordinateFounderAccountClosureEffects(owner.userId, request.id, dependencies);
+            await synchronizeAccountClosureCompletionState(request.id, dependencies);
           }
         }
         processed += 1;
@@ -340,16 +352,13 @@ export async function retryFounderDeletionRevocationsForUser(
       .from(operatorDeletionRequests)
       .innerJoin(operators, eq(operators.id, operatorDeletionRequests.operatorId))
       .where(
-        and(
-          eq(operators.userId, userId),
-          eq(operatorDeletionRequests.kind, "account_closure"),
-          sql`${operatorDeletionRequests.status} <> 'completed'`,
-        ),
+        and(eq(operators.userId, userId), eq(operatorDeletionRequests.kind, "account_closure")),
       )
       .orderBy(desc(operatorDeletionRequests.createdAt))
       .limit(1);
     if (!request) return null;
     await coordinateFounderAccountClosureEffects(userId, request.request.id, dependencies);
+    await synchronizeAccountClosureCompletionState(request.request.id, dependencies);
     return getFounderDeletionReceiptForUser(userId, {
       ...dependencies,
       createConnection: () => connection,
@@ -479,7 +488,7 @@ async function stageAccountClosure(
     .innerJoin(operators, eq(operators.userId, founderProductEntitlements.userId))
     .where(eq(operators.id, operatorId))
     .limit(1);
-  if (commerce && ["verified", "past_due", "unpaid"].includes(commerce.status)) {
+  if (commerce && ["verified", "past_due", "unpaid", "refunded"].includes(commerce.status)) {
     await tx
       .insert(operatorDeletionCommerceCancellations)
       .values({
@@ -492,7 +501,7 @@ async function stageAccountClosure(
         updatedAt: requestedAt,
       })
       .onConflictDoNothing({ target: operatorDeletionCommerceCancellations.requestId });
-  } else if (commerce && ["cancelled", "expired", "refunded"].includes(commerce.status)) {
+  } else if (commerce && ["cancelled", "expired"].includes(commerce.status)) {
     await tx
       .insert(operatorDeletionCommerceCancellations)
       .values({
@@ -666,6 +675,72 @@ async function coordinateFounderAccountClosureEffects(
 ): Promise<void> {
   await attemptFounderCommerceCancellation(requestId, dependencies);
   await attemptFounderDeletionRevocations(userId, requestId, dependencies);
+}
+
+async function synchronizeAccountClosureCompletionState(
+  requestId: string,
+  dependencies: FounderDeletionDependencies,
+): Promise<void> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now ?? (() => new Date());
+  try {
+    await connection.db.transaction(async (tx) => {
+      const [request] = await tx
+        .select({
+          backupExpiredAt: operatorDeletionRequests.backupExpiredAt,
+          completedAt: operatorDeletionRequests.completedAt,
+        })
+        .from(operatorDeletionRequests)
+        .where(eq(operatorDeletionRequests.id, requestId))
+        .limit(1)
+        .for("update");
+      if (!request?.backupExpiredAt) return;
+      const [unresolvedCommerce, unresolvedRevocation] = await Promise.all([
+        tx
+          .select({ id: operatorDeletionCommerceCancellations.id })
+          .from(operatorDeletionCommerceCancellations)
+          .where(
+            and(
+              eq(operatorDeletionCommerceCancellations.requestId, requestId),
+              sql`${operatorDeletionCommerceCancellations.status} <> 'succeeded'`,
+            ),
+          )
+          .limit(1),
+        tx
+          .select({ id: operatorDeletionRevocations.id })
+          .from(operatorDeletionRevocations)
+          .where(
+            and(
+              eq(operatorDeletionRevocations.requestId, requestId),
+              sql`${operatorDeletionRevocations.status} <> 'succeeded'`,
+            ),
+          )
+          .limit(1),
+      ]);
+      const unresolved = Boolean(unresolvedCommerce[0] || unresolvedRevocation[0]);
+      await tx
+        .update(operatorDeletionRequests)
+        .set(
+          unresolved
+            ? {
+                status: "failed",
+                failureCode: "account_closure_external_effects_unresolved",
+                completedAt: null,
+                updatedAt: now(),
+              }
+            : {
+                status: "completed",
+                failureCode: null,
+                completedAt: request.completedAt ?? request.backupExpiredAt,
+                updatedAt: now(),
+              },
+        )
+        .where(eq(operatorDeletionRequests.id, requestId));
+    });
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
 }
 
 async function defaultCancelFounderCommerce(providerSubscriptionId: string): Promise<void> {

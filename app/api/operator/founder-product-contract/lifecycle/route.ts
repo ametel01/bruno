@@ -25,8 +25,6 @@ import { requireApplicationUser } from "@/src/server/users/application-user";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import {
   getFounderIdentityRecoveryStatusForClerkSubject,
-  issueFounderIdentityRecoveryCredentialForUser,
-  recordFounderIdentityLoss,
   recoverFounderIdentityWithCredential,
 } from "@/src/server/users/founder-identity-recovery";
 
@@ -226,20 +224,7 @@ async function executeIdentityRecoveryThroughPublicSeams(input: {
   const credentialResponse = await issueIdentityRecoveryCredentialPOST(
     new Request("http://localhost/api/operator/identity-recovery", { method: "POST" }),
     undefined,
-    {
-      requireApplicationUser: async () => ({ ok: true, userId: input.input.userId }),
-      requireRecentAuth: async () => true,
-      issueCredential: (credentialInput) =>
-        issueFounderIdentityRecoveryCredentialForUser({
-          ...credentialInput,
-          randomBytes: () =>
-            createHash("sha256")
-              .update(`founder-contract-recovery:${input.input.runId}:${input.input.userId}`)
-              .digest(),
-          createConnection: () => connection,
-        }),
-      now: () => input.input.now,
-    },
+    { now: () => input.input.now },
   );
   if (credentialResponse.status !== 200) {
     throw new Error("The recently reauthenticated recovery-code journey was unavailable.");
@@ -251,17 +236,33 @@ async function executeIdentityRecoveryThroughPublicSeams(input: {
   if (!recoveryCode) throw new Error("The public recovery-code journey returned no one-time code.");
 
   const beforeLoss = await readFounderIdentitySeparationSnapshot(connection, input.input.userId);
+  const webhookBody = JSON.stringify({
+    type: "user.deleted",
+    data: { id: owner.clerkUserId },
+  });
+  const webhookId = `founder-contract:${input.input.runId}:clerk-user-deleted`;
+  const webhookTimestamp = Math.floor(Date.now() / 1_000).toString();
+  const webhookKey = createHash("sha256")
+    .update(`founder-contract-clerk-webhook:${input.input.runId}`)
+    .digest();
+  const webhookSigningSecret = `whsec_${webhookKey.toString("base64")}`;
+  const webhookSignature = `v1,${createHmac("sha256", webhookKey)
+    .update(`${webhookId}.${webhookTimestamp}.${webhookBody}`)
+    .digest("base64")}`;
   const webhookResponse = await clerkWebhookPOST(
     new NextRequest("http://localhost/api/webhooks/clerk", {
       method: "POST",
-      headers: { "svix-id": `founder-contract:${input.input.runId}:clerk-user-deleted` },
-      body: "{}",
+      headers: {
+        "content-type": "application/json",
+        "svix-id": webhookId,
+        "svix-timestamp": webhookTimestamp,
+        "svix-signature": webhookSignature,
+      },
+      body: webhookBody,
     }),
     undefined,
     {
-      verify: async () => ({ type: "user.deleted", data: { id: owner.clerkUserId } }) as never,
-      recordLoss: (loss) =>
-        recordFounderIdentityLoss({ ...loss, createConnection: () => connection }),
+      verify: (request) => verifyWebhook(request, { signingSecret: webhookSigningSecret }),
       now: () => input.input.now,
     },
   );
@@ -390,12 +391,14 @@ async function executeIdentityRecoveryThroughPublicSeams(input: {
   }
 
   const closureAt = new Date(input.input.now.valueOf() + 3);
-  const closureProviderCalls: string[] = [];
   const closureCommerce = await providers.readSubscription({
     subscriptionId: `${input.input.runId}:subscription`,
   });
-  if (closureCommerce.status !== "cancelled") {
-    throw new Error("Account Closure could not observe the already-cancelled subscription state.");
+  if (closureCommerce.status !== "active") {
+    throw new Error("Account Closure could not observe the active provider subscription state.");
+  }
+  if (!providers.cancelSubscription) {
+    throw new Error("Account Closure cancellation provider seam was unavailable.");
   }
   const closureResponse = await privacyPOST(
     new Request("http://localhost/api/operator/privacy", {
@@ -405,15 +408,15 @@ async function executeIdentityRecoveryThroughPublicSeams(input: {
     }),
     undefined,
     {
-      requireApplicationUser: async () => ({ ok: true, userId: input.input.userId }),
-      requireRecentAuth: async () => true,
       requestDeletion: (userId, kind, scope) =>
         requestFounderDeletionForUser(userId, kind, scope, {
           createConnection: () => connection,
           now: () => closureAt,
-          cancelCommerce: async () => {
-            closureProviderCalls.push("lemonSqueezy.cancel_subscription");
-          },
+          cancelCommerce: (providerSubscriptionId) =>
+            providers.cancelSubscription?.({ subscriptionId: providerSubscriptionId }) ??
+            Promise.reject(
+              new Error("Account Closure cancellation provider seam was unavailable."),
+            ),
           revokeConnections: async () => [],
         }),
     },
@@ -434,6 +437,12 @@ async function executeIdentityRecoveryThroughPublicSeams(input: {
   ) {
     throw new Error("Recently reauthenticated Account Closure did not coordinate destruction.");
   }
+  const closureProviderObservation = await providers.readSubscription({
+    subscriptionId: `${input.input.runId}:subscription`,
+  });
+  if (closureProviderObservation.status !== "cancelled") {
+    throw new Error("Account Closure cancellation was not visible at the provider seam.");
+  }
   const afterClosure = await readFounderIdentitySeparationSnapshot(connection, input.input.userId);
   if (
     afterClosure.accountClosureRequests !== beforeLoss.accountClosureRequests + 1 ||
@@ -446,7 +455,7 @@ async function executeIdentityRecoveryThroughPublicSeams(input: {
     action: input.input.action,
     status: "passed",
     observedAt: input.input.now.toISOString(),
-    providerCalls: [...providers.calls(), ...closureProviderCalls],
+    providerCalls: providers.calls(),
     cleanup: {
       resourcesBefore: 0,
       resourcesAfter: 0,
@@ -623,7 +632,8 @@ function isCommerceEvent(value: unknown): value is FounderCommerceEvent {
   );
 }
 
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
+import { verifyWebhook } from "@clerk/nextjs/webhooks";
 import { NextRequest } from "next/server";
 import {
   GET as identityRecoveryGET,

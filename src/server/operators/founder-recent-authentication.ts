@@ -1,12 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
-import { evaluateOperatorAccess } from "@/src/auth/operator-access";
 import { resolveAuthMode } from "@/src/auth/auth-mode";
+import { evaluateOperatorAccess } from "@/src/auth/operator-access";
 
 /**
  * Sensitive Founder controls use the same recent-authentication boundary in
  * every route. Development and operator modes represent an authenticated
- * local/operator request; Clerk requests must carry a session issued within
- * the last fifteen minutes.
+ * local/operator request; Clerk requests must satisfy Clerk's strict
+ * reverification policy. A freshly rotated session token is not proof that the
+ * Founder verified a credential again.
  */
 export async function requireRecentFounderAuthentication(
   request: Request,
@@ -30,8 +31,6 @@ export async function requireRecentFounderAuthentication(
   }
   if (mode.mode !== "clerk") return false;
 
-  const { sessionClaims } = await auth();
-  const issuedAt = (sessionClaims as unknown as { iat?: unknown } | null)?.iat;
-  if (typeof issuedAt !== "number") return false;
-  return Date.now() - issuedAt * 1000 <= 15 * 60 * 1000;
+  const { userId, has } = await auth();
+  return userId !== null && has({ reverification: "strict" });
 }

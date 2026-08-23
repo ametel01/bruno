@@ -6,6 +6,7 @@ import type {
   FounderPrivacyCenterDto,
   FounderPrivacyConnection,
 } from "@/src/server/operators/founder-privacy-center";
+import type { FounderIdentityRecoveryStatusDto } from "@/src/server/users/founder-identity-recovery";
 import styles from "./founder-privacy-center.module.css";
 
 export function FounderPrivacyCenter({
@@ -29,6 +30,9 @@ export function FounderPrivacyCenter({
     state?: "not_created" | "ready" | "expired" | "used";
     expiresAt?: string;
   } | null>(null);
+  const [identityRecovery, setIdentityRecovery] = useState<FounderIdentityRecoveryStatusDto | null>(
+    null,
+  );
 
   useEffect(() => {
     let active = true;
@@ -37,11 +41,14 @@ export function FounderPrivacyCenter({
         if (!response.ok) return null;
         const body = (await response.json()) as {
           credential?: { state: "not_created" | "ready" | "expired" | "used"; expiresAt?: string };
+          recovery?: FounderIdentityRecoveryStatusDto;
         };
-        return body.credential ?? null;
+        return body;
       })
-      .then((credential) => {
-        if (active && credential) setRecoveryCredential(credential);
+      .then((body) => {
+        if (!active || !body) return;
+        if (body.credential) setRecoveryCredential(body.credential);
+        if (body.recovery) setIdentityRecovery(body.recovery);
       })
       .catch(() => undefined);
     return () => {
@@ -375,6 +382,19 @@ export function FounderPrivacyCenter({
                 if the stored copy is unavailable.
               </small>
             ) : null}
+            {identityRecovery?.state === "recovered" ? (
+              <div className={styles.exportLinks} aria-live="polite">
+                <strong>Identity Recovery receipts</strong>
+                <ul>
+                  {identityRecovery.receipts.map((receipt) => (
+                    <li key={`${receipt.kind}:${receipt.occurredAt}`}>
+                      {identityRecoveryReceiptLabel(receipt.kind)} ·{" "}
+                      {formatDate(receipt.occurredAt)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
           <div>
             <h3>Disconnect access</h3>
@@ -487,9 +507,13 @@ function DeletionReceipt({
 }) {
   const hasFailedRevocation = receipt.revocations.some((item) => item.status === "failed");
   const hasFailedCommerceCancellation = receipt.commerceCancellation?.status === "failed";
+  const receiptTitle =
+    receipt.request.kind === "account_closure" ? "Account Closure Receipt" : "Deletion Receipt";
   return (
     <div className={styles.aiPanel} aria-live="polite">
-      <h3>Deletion Receipt · {receipt.request.status}</h3>
+      <h3>
+        {receiptTitle} · {receipt.request.status}
+      </h3>
       <p>Requested {formatDate(receipt.request.requestedAt)}.</p>
       <ul>
         <li>Access stopped: {formatDate(receipt.request.accessStoppedAt)}</li>
@@ -541,9 +565,17 @@ function Detail({ label, value }: { label: string; value: string }) {
   );
 }
 
+function identityRecoveryReceiptLabel(
+  kind: "identity_loss_recorded" | "recovery_denied" | "identity_rebound",
+): string {
+  if (kind === "identity_loss_recorded") return "Identity loss recorded";
+  if (kind === "recovery_denied") return "Recovery attempt denied";
+  return "Identity rebound to the same Owner";
+}
+
 function formatDate(value: string | null): string {
   return value
-    ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
+    ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(
         new Date(value),
       )
     : "No recorded use";

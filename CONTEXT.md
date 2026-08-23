@@ -137,6 +137,8 @@ _Avoid_: Owner registry, entitlement source, access policy
 **Identity Recovery**:
 The fail-closed journey that denies Operator access after verified Identity Provider loss and restores
 the exact same internal Owner only after strong, short-lived proof binds a replacement identity.
+Preparing its one-time proof requires Clerk strict reverification; a refreshed session token is not
+recent reauthentication.
 It records distinct loss, denial, and rebound receipts without changing commerce, Product
 Entitlement, Infrastructure Retirement, Recovery Archive deletion, refunds, Bruno Data Deletion, or
 Account Closure.
@@ -607,7 +609,8 @@ _Avoid_: Stop Bruno.Ai, revoke access
 The recently reauthenticated Founder-only action that applies External Action Pause, coordinates
 subscription cancellation and every connection revocation, cancels unstarted actions, begins Bruno
 Data Deletion, and tracks each outcome through distinct commerce and Deletion Receipts. It does not
-start or imply a refund.
+start or imply a refund. In Clerk mode, the server requires Clerk strict reverification rather than
+inferring recent authentication from session-token issuance.
 _Avoid_: Sign out, delete agent
 
 ### Managed intelligence

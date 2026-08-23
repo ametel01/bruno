@@ -168,6 +168,33 @@ export async function prepareFounderExternalBetaBrowserFixture(
   return { accessExpiresAt, retirementDueAt };
 }
 
+export async function prepareFounderIdentityRecoveryBrowserFixture(
+  fixture: FounderProductContractFixture,
+  input: { runId: string; now: Date },
+): Promise<void> {
+  const recoveryId = randomUUID();
+  const deletionRequestId = randomUUID();
+  const occurredAt = input.now.toISOString();
+  const activePurgeDueAt = new Date(input.now.valueOf() + 7 * 24 * 60 * 60 * 1_000).toISOString();
+  const backupExpiryDueAt = new Date(input.now.valueOf() + 30 * 24 * 60 * 60 * 1_000).toISOString();
+  const digest = (value: string) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
+
+  await withFounderProductContractDatabase(async (sql) => {
+    await sql`insert into founder_identity_recoveries (id, user_id, status, reason, prior_clerk_subject_digest, replacement_clerk_subject_digest, provider_event_id, provider_event_digest, loss_observed_at, recovered_at, created_at, updated_at) values (${recoveryId}, ${fixture.userId}, 'recovered', 'clerk_user_deleted', ${digest(`prior:${input.runId}`)}, ${digest(`replacement:${input.runId}`)}, ${`browser:${input.runId}:identity-loss`}, ${digest(`provider-event:${input.runId}`)}, ${occurredAt}, ${occurredAt}, ${occurredAt}, ${occurredAt})`;
+    for (const [index, kind] of [
+      "identity_loss_recorded",
+      "recovery_denied",
+      "identity_rebound",
+    ].entries()) {
+      const receiptAt = new Date(input.now.valueOf() + index).toISOString();
+      await sql`insert into founder_identity_recovery_receipts (recovery_id, user_id, kind, subject_digest, evidence_digest, details, occurred_at, created_at) values (${recoveryId}, ${fixture.userId}, ${kind}, ${digest(`subject:${input.runId}:${index}`)}, ${digest(`receipt:${input.runId}:${index}`)}, ${sql.json({ boundary: "identity_recovery_only" })}, ${receiptAt}, ${receiptAt})`;
+    }
+    await sql`insert into operator_deletion_requests (id, operator_id, kind, status, requested_at, active_purge_due_at, backup_expiry_due_at, access_stopped_at, created_at, updated_at) values (${deletionRequestId}, ${fixture.operatorId}, 'account_closure', 'access_stopped', ${occurredAt}, ${activePurgeDueAt}, ${backupExpiryDueAt}, ${occurredAt}, ${occurredAt}, ${occurredAt})`;
+    await sql`insert into operator_deletion_receipts (request_id, operator_id, stage, occurred_at, details, created_at) values (${deletionRequestId}, ${fixture.operatorId}, 'requested', ${occurredAt}, ${sql.json({ kind: "account_closure" })}, ${occurredAt}), (${deletionRequestId}, ${fixture.operatorId}, 'access_stopped', ${occurredAt}, ${sql.json({ outcome: "external_actions_paused" })}, ${occurredAt}), (${deletionRequestId}, ${fixture.operatorId}, 'commerce_cancellation', ${occurredAt}, ${sql.json({ outcome: "subscription_cancellation_requested", refundStarted: false })}, ${occurredAt})`;
+    await sql`insert into operator_deletion_commerce_cancellations (request_id, operator_id, provider, provider_subscription_id, status, attempt_count, last_attempt_at, confirmed_at, created_at, updated_at) values (${deletionRequestId}, ${fixture.operatorId}, 'lemon_squeezy', ${`${input.runId}:subscription`}, 'succeeded', 1, ${occurredAt}, ${occurredAt}, ${occurredAt}, ${occurredAt})`;
+  });
+}
+
 export async function deleteFounderProductContractFixture(
   fixture: FounderProductContractFixture,
   options: { retainScenarioExecutions?: boolean } = {},

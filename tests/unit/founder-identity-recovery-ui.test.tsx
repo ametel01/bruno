@@ -15,5 +15,7 @@ describe("Founder identity recovery surface", () => {
     expect(html).toContain("Identity Recovery code");
     expect(html).toContain("Identity Recovery receipts");
     expect(html).toContain("Account Closure stays separate");
+    expect(html).toContain('href="/sign-in?continue=identity-recovery"');
+    expect(html).toContain('aria-label="Account Closure boundary"');
   });
 });

@@ -2,6 +2,7 @@ import { requireRecentFounderAuthentication } from "@/src/server/operators/found
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import {
   getFounderIdentityRecoveryCredentialStatusForUser,
+  getFounderIdentityRecoveryStatusForUser,
   issueFounderIdentityRecoveryCredentialForUser,
 } from "@/src/server/users/founder-identity-recovery";
 
@@ -12,6 +13,7 @@ type RouteDependencies = {
   requireApplicationUser?: typeof requireConfiguredApplicationUser;
   requireRecentAuth?: (request: Request) => Promise<boolean>;
   getStatus?: typeof getFounderIdentityRecoveryCredentialStatusForUser;
+  getRecoveryStatus?: typeof getFounderIdentityRecoveryStatusForUser;
   issueCredential?: typeof issueFounderIdentityRecoveryCredentialForUser;
   now?: () => Date;
 };
@@ -26,7 +28,10 @@ export async function GET(
   const credential = await (
     dependencies.getStatus ?? getFounderIdentityRecoveryCredentialStatusForUser
   )(owner.userId);
-  return Response.json({ credential }, { headers: noStoreHeaders() });
+  const recovery = await (
+    dependencies.getRecoveryStatus ?? getFounderIdentityRecoveryStatusForUser
+  )(owner.userId);
+  return Response.json({ credential, recovery }, { headers: noStoreHeaders() });
 }
 
 export async function POST(

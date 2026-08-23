@@ -243,10 +243,26 @@ describe("Founder identity recovery routes", () => {
       {
         requireApplicationUser: async () => owner,
         getStatus: async () => ({ state: "ready", expiresAt: "2027-08-23T04:00:00.000Z" }),
+        getRecoveryStatus: async () => ({
+          state: "recovered",
+          recoveredAt: "2026-08-23T04:00:00.000Z",
+          receipts: [
+            { kind: "identity_loss_recorded", occurredAt: "2026-08-23T03:00:00.000Z" },
+            { kind: "identity_rebound", occurredAt: "2026-08-23T04:00:00.000Z" },
+          ],
+        }),
       },
     );
     await expect(status.json()).resolves.toEqual({
       credential: { state: "ready", expiresAt: "2027-08-23T04:00:00.000Z" },
+      recovery: {
+        state: "recovered",
+        recoveredAt: "2026-08-23T04:00:00.000Z",
+        receipts: [
+          { kind: "identity_loss_recorded", occurredAt: "2026-08-23T03:00:00.000Z" },
+          { kind: "identity_rebound", occurredAt: "2026-08-23T04:00:00.000Z" },
+        ],
+      },
     });
   });
 });

@@ -78,6 +78,11 @@ export function IdentityRecoverySurface() {
           cancel payment, refund a charge, begin Infrastructure Retirement, request Account Closure,
           or delete Bruno-local records.
         </p>
+        <p>
+          Start by{" "}
+          <Link href="/sign-in?continue=identity-recovery">signing in for Identity Recovery</Link>.
+          This return path does not create a new internal Owner before your code is checked.
+        </p>
         {status && status.state !== "recovered" ? (
           <p className={styles.notice} role="status">
             {recoveryStateMessage(status.state)}
@@ -133,7 +138,7 @@ export function IdentityRecoverySurface() {
             </ul>
           </section>
         ) : null}
-        <aside className={styles.boundary} aria-label="Separate account controls">
+        <aside className={styles.boundary} aria-label="Account Closure boundary">
           <strong>Account Closure stays separate</strong>
           <p>
             Only the recently reauthenticated Account Closure control coordinates external-action
