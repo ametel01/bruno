@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { GET, POST } from "@/app/api/operator/general-release/route";
 import { buildTestAnthropicAcceptanceRelease } from "@/scripts/founder-anthropic-test-release";
+import { buildTestGoogleMailSendingAcceptanceRelease } from "@/scripts/founder-google-mail-sending-test-release";
+import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
 import { buildTestOpenAiConnectedAcceptanceRelease } from "@/scripts/founder-openai-test-release";
-import { createDatabaseConnection } from "@/src/server/db/client";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   founderGeneralReleaseActivations,
+  founderReleaseDecisions,
   operatorAiConnections,
   operatorCalendarConnections,
   operatorLimitedOperations,
@@ -25,6 +28,32 @@ import {
 
 const USER_ID = "00000000-0000-4000-8000-000000000381";
 const NOW = new Date("2026-08-23T08:00:00.000Z");
+const REVISION = "a".repeat(40);
+const RUNTIME_REVISION = "runtime-387";
+const GENERAL_RELEASE_ENV = {
+  VERCEL_GIT_COMMIT_SHA: REVISION,
+  BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION: RUNTIME_REVISION,
+  BRUNO_INITIAL_GENERAL_RELEASE_AVAILABILITY: "open",
+  BRUNO_INITIAL_GENERAL_RELEASE_GEOGRAPHIES: "PH",
+  BRUNO_INITIAL_GENERAL_RELEASE_PRICE_LABEL: "$30/month",
+  BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
+    NOW,
+    REVISION,
+  ),
+  BRUNO_ANTHROPIC_CONNECTED_ACCEPTANCE_RELEASE: buildTestAnthropicAcceptanceRelease(NOW, REVISION),
+  BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
+    "calendar_reading",
+    NOW,
+    REVISION,
+  ),
+  BRUNO_GOOGLE_MAIL_READING_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
+    "gmail_reading",
+    NOW,
+    REVISION,
+  ),
+  BRUNO_GOOGLE_MAIL_SENDING_CONNECTED_ACCEPTANCE_RELEASE:
+    buildTestGoogleMailSendingAcceptanceRelease(NOW, REVISION),
+};
 
 describe("public Initial General Release application boundary", () => {
   it("requires current exact-revision releases for both OpenAI and Anthropic", () => {
@@ -56,6 +85,36 @@ describe("public Initial General Release application boundary", () => {
   });
 
   it("rejects a zero-cost published label instead of creating a permanent free tier", async () => {
+    const connection = createDatabaseConnection();
+    try {
+      await seedApplicantAndGeneralReleaseAuthority(connection);
+      await expect(
+        confirmFounderGeneralReleaseEligibility(
+          {
+            userId: USER_ID,
+            serviceBusinessConfirmed: true,
+            geographyCode: "PH",
+            now: NOW,
+          },
+          {
+            createConnection: () => connection,
+            env: { ...GENERAL_RELEASE_ENV, BRUNO_INITIAL_GENERAL_RELEASE_PRICE_LABEL: "$0/month" },
+          },
+        ),
+      ).rejects.toMatchObject({
+        code: "general_release_price_invalid",
+        status: 503,
+      });
+    } finally {
+      await connection.client.unsafe("truncate table users restart identity cascade");
+      await connection.client.unsafe(
+        "truncate table founder_release_decisions restart identity cascade",
+      );
+      await connection.close();
+    }
+  });
+
+  it("admits nobody when availability is open but the persisted decision is absent", async () => {
     await expect(
       confirmFounderGeneralReleaseEligibility(
         {
@@ -64,18 +123,9 @@ describe("public Initial General Release application boundary", () => {
           geographyCode: "PH",
           now: NOW,
         },
-        {
-          env: {
-            BRUNO_INITIAL_GENERAL_RELEASE_AVAILABILITY: "open",
-            BRUNO_INITIAL_GENERAL_RELEASE_GEOGRAPHIES: "PH",
-            BRUNO_INITIAL_GENERAL_RELEASE_PRICE_LABEL: "$0/month",
-          },
-        },
+        { env: GENERAL_RELEASE_ENV },
       ),
-    ).rejects.toMatchObject({
-      code: "general_release_price_invalid",
-      status: 503,
-    });
+    ).rejects.toMatchObject({ code: "general_release_decision_required", status: 503 });
   });
 
   it("requires Clerk authentication and exposes no-cache capacity and price facts", async () => {
@@ -392,6 +442,38 @@ function request(body: object): Request {
   });
 }
 
+async function seedApplicantAndGeneralReleaseAuthority(
+  connection: DatabaseConnection,
+): Promise<string> {
+  await connection.db.insert(users).values({ id: USER_ID });
+  await connection.db.insert(operators).values({ userId: USER_ID });
+  const [decision] = await connection.db
+    .insert(founderReleaseDecisions)
+    .values({
+      stage: "initial_general_release",
+      outcome: "enter",
+      applicationRevision: REVISION,
+      runtimeRevision: RUNTIME_REVISION,
+      capabilityManifest: [
+        "openai",
+        "anthropic",
+        "calendar_reading",
+        "gmail_reading",
+        "gmail_sending",
+      ],
+      evidenceDigests: Array.from(
+        { length: 12 },
+        (_, index) => `sha256:${index.toString(16).repeat(64)}`,
+      ),
+      authorityExpiresAt: new Date(NOW.valueOf() + 24 * 60 * 60 * 1_000),
+      decidedAt: NOW,
+      createdAt: NOW,
+    })
+    .returning({ id: founderReleaseDecisions.id });
+  if (!decision) throw new Error("General Release authority fixture could not be created.");
+  return decision.id;
+}
+
 function status(
   override: Partial<FounderGeneralReleaseActivationDto> = {},
 ): FounderGeneralReleaseActivationDto {
@@ -403,6 +485,20 @@ function status(
       geographyCode: "PH",
       capacity: "available",
       reason: "Public capacity is available in this geography.",
+    },
+    release: {
+      qualified: true,
+      decisionState: "approved",
+      capabilities: [
+        { id: "openai", label: "OpenAI", state: "available" },
+        { id: "anthropic", label: "Anthropic", state: "available" },
+        { id: "calendar_reading", label: "Calendar reading", state: "available" },
+        { id: "gmail_reading", label: "Gmail reading", state: "available" },
+        { id: "gmail_sending", label: "One-to-one Gmail sending", state: "available" },
+      ],
+      providerChoice: "OpenAI, Anthropic, or both",
+      sending: "Off",
+      supportBoundary: "Ordinary product support",
     },
     setup: {
       authenticated: true,

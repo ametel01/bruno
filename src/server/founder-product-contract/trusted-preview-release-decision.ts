@@ -92,7 +92,12 @@ export async function getLatestFounderTrustedPreviewStageDecisionInTransaction(
     )
     .orderBy(desc(founderReleaseDecisions.decidedAt))
     .limit(1);
-  return decision ?? null;
+  if (!decision?.cohortOwnerUserId || !decision.operatorId) return null;
+  return {
+    ...decision,
+    cohortOwnerUserId: decision.cohortOwnerUserId,
+    operatorId: decision.operatorId,
+  };
 }
 
 export async function persistQualifiedFounderTrustedPreviewStageDecisionInTransaction(

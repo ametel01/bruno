@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   buildFounderInitialGeneralReleaseDecision,
+  parseFounderGeneralReleaseOperationalSummary,
   parseFounderModeratedSummary,
   parseFounderProviderDecisionSummary,
 } from "@/scripts/create-founder-general-release-decision";
@@ -13,6 +14,7 @@ import {
   parseFounderProductionProviderQualificationSummary,
 } from "@/scripts/create-founder-production-provider-qualification";
 import { FOUNDER_PRODUCT_CONTRACT_UNIT_FILES } from "@/src/shared/founder-product-contract";
+import { buildDeterministicFounderGeneralReleaseAuthorityFixture } from "@/src/testing/founder-general-release-authority";
 import {
   FOUNDER_PRODUCT_CONTRACT_SCENARIO_SIGNING_SECRET_ENV,
   parseFounderProductContractScenarioLedger,
@@ -60,6 +62,12 @@ const deterministicProviderEnvironment = {
   BRUNO_INITIAL_GENERAL_RELEASE_AVAILABILITY_MESSAGE:
     "Public contract capacity is available in this geography.",
   BRUNO_INITIAL_GENERAL_RELEASE_PRICE_LABEL: "$30/month",
+  BRUNO_INITIAL_GENERAL_RELEASE_DECISION: buildDeterministicFounderGeneralReleaseAuthorityFixture({
+    sourceRevision,
+    runtimeRevision,
+    decidedAt: new Date(observedAt),
+  }),
+  BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION: runtimeRevision,
   BRUNO_FOUNDER_CONTRACT_IDENTITY_RECOVERY_SIGNING_SECRET:
     "founder-contract-identity-recovery-signing-secret-v1",
   BRUNO_IDENTITY_RECOVERY_SIGNING_SECRET: "founder-contract-identity-recovery-signing-secret-v1",
@@ -198,6 +206,9 @@ const generalReleaseDecision = buildFounderInitialGeneralReleaseDecision({
     storeDigest: process.env.BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST,
     productDigest: process.env.BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST,
   }),
+  operationalSummary: parseFounderGeneralReleaseOperationalSummary(
+    process.env.BRUNO_FOUNDER_GENERAL_RELEASE_OPERATIONAL_SUMMARY_JSON,
+  ),
   decisionTime: new Date(),
 });
 await writeFile(generalReleaseDecisionPath, `${JSON.stringify(generalReleaseDecision, null, 2)}\n`);

@@ -169,6 +169,24 @@ function generalReleaseStatus(offerAvailable: boolean) {
       capacity: "available" as const,
       reason: "Public capacity is available.",
     },
+    release: {
+      qualified: true,
+      decisionState: "approved" as const,
+      capabilities: [
+        { id: "openai" as const, label: "OpenAI", state: "available" as const },
+        { id: "anthropic" as const, label: "Anthropic", state: "available" as const },
+        {
+          id: "calendar_reading" as const,
+          label: "Calendar reading",
+          state: "available" as const,
+        },
+        { id: "gmail_reading" as const, label: "Gmail reading", state: "available" as const },
+        { id: "gmail_sending" as const, label: "Gmail sending", state: "available" as const },
+      ],
+      providerChoice: "OpenAI, Anthropic, or both" as const,
+      sending: "Off" as const,
+      supportBoundary: "Ordinary product support" as const,
+    },
     setup: {
       authenticated: true as const,
       serviceBusinessConfirmed: true,

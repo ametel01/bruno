@@ -462,6 +462,7 @@ export async function reconcileFounderRecoveryArchives(input: {
     const latestAdmissionByUserAndStage = new Map<string, (typeof decisions)[number]>();
     for (const decision of decisions) {
       if (decision.outcome !== "enter" && decision.outcome !== "resume") continue;
+      if (!decision.userId) continue;
       const key = `${decision.userId}:${decision.stage}`;
       if (!latestAdmissionByUserAndStage.has(key)) {
         latestAdmissionByUserAndStage.set(key, decision);
@@ -471,7 +472,7 @@ export async function reconcileFounderRecoveryArchives(input: {
     for (const [key, latestDecision] of latestByUserAndStage) {
       if (latestDecision.outcome === "deny") continue;
       const admission = latestAdmissionByUserAndStage.get(key);
-      if (!admission) continue;
+      if (!admission?.userId) continue;
       const current = latestAdmittedDecisionByUser.get(admission.userId);
       if (!current || current.decidedAt < admission.decidedAt) {
         latestAdmittedDecisionByUser.set(admission.userId, admission);
@@ -480,9 +481,10 @@ export async function reconcileFounderRecoveryArchives(input: {
     const eligibleUsers = [...latestAdmittedDecisionByUser.values()]
       .filter(
         (decision) =>
+          decision.userId !== null &&
           (latestRetirementByUser.get(decision.userId) ?? new Date(0)) < decision.decidedAt,
       )
-      .map((decision) => decision.userId);
+      .flatMap((decision) => (decision.userId ? [decision.userId] : []));
     const retainedArchives = await connection.db
       .select({ userId: founderRecoveryArchives.userId })
       .from(founderRecoveryArchives)

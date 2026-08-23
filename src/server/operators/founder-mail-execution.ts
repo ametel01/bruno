@@ -16,8 +16,10 @@ import {
   operatorProposedActions,
 } from "@/src/server/db/schema";
 import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
+import { founderGeneralReleaseAuthorizesWorkAuthorityInTransaction } from "@/src/server/founder-product-contract/initial-general-release";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
+  FounderReleaseStageAccessError,
   requireFounderOwnerPreviewAccessForUser,
   requireFounderOwnerPreviewAccessInTransaction,
 } from "@/src/server/founder-product-contract/release-stage-access";
@@ -114,36 +116,14 @@ export async function executeFounderApprovedGmailActionForUser(
 
   try {
     const preflightAt = now();
-    if (dependencies.requireReleaseStageAccessForUser) {
-      await dependencies.requireReleaseStageAccessForUser(
-        userId,
-        preflightAt,
-        {
-          createConnection: () => connection,
-          ...(dependencies.env ? { env: dependencies.env } : {}),
-        },
-        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
-      );
-    } else if (!dependencies.requireReleaseStageAccess) {
-      await requireFounderOwnerPreviewAccessForUser(
-        userId,
-        preflightAt,
-        {
-          createConnection: () => connection,
-          ...(dependencies.env ? { env: dependencies.env } : {}),
-        },
-        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
-      );
-    }
+    await preflightFounderMailExecutionAuthority(userId, preflightAt, connection, dependencies);
     const prepared = await connection.db.transaction(async (tx) => {
-      await (
-        dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction
-      )(tx, {
+      await requireFounderMailExecutionAuthorityInTransaction(
+        tx,
         userId,
-        now: preflightAt,
-        applicationRevision: readFounderApplicationRevision({ env: dependencies.env }) ?? "",
-        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
-      });
+        preflightAt,
+        dependencies,
+      );
       const [action] = await tx
         .select()
         .from(operatorProposedActions)
@@ -269,14 +249,7 @@ export async function executeFounderApprovedGmailActionForUser(
         .limit(1);
       if (existingStart) return { kind: "in_progress" as const };
       const checkedAt = now();
-      await (
-        dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction
-      )(tx, {
-        userId,
-        now: checkedAt,
-        applicationRevision: readFounderApplicationRevision({ env: dependencies.env }) ?? "",
-        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
-      });
+      await requireFounderMailExecutionAuthorityInTransaction(tx, userId, checkedAt, dependencies);
       await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id, checkedAt);
       const check = await recheckFounderProposedActionForExecution(
         tx,
@@ -404,6 +377,79 @@ export async function executeFounderApprovedGmailActionForUser(
     );
   } finally {
     if (ownsConnection) await connection.close();
+  }
+}
+
+async function preflightFounderMailExecutionAuthority(
+  userId: string,
+  now: Date,
+  connection: DatabaseConnection,
+  dependencies: FounderMailExecutionDependencies,
+): Promise<void> {
+  try {
+    if (dependencies.requireReleaseStageAccessForUser) {
+      await dependencies.requireReleaseStageAccessForUser(
+        userId,
+        now,
+        {
+          createConnection: () => connection,
+          ...(dependencies.env ? { env: dependencies.env } : {}),
+        },
+        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
+      );
+      return;
+    }
+    if (dependencies.requireReleaseStageAccess) return;
+    await requireFounderOwnerPreviewAccessForUser(
+      userId,
+      now,
+      {
+        createConnection: () => connection,
+        ...(dependencies.env ? { env: dependencies.env } : {}),
+      },
+      FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
+    );
+  } catch (error) {
+    if (!(error instanceof FounderReleaseStageAccessError)) throw error;
+    const authorized = await connection.db.transaction((tx) =>
+      founderGeneralReleaseAuthorizesWorkAuthorityInTransaction(
+        tx,
+        userId,
+        now,
+        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
+        dependencies.env ?? process.env,
+      ),
+    );
+    if (!authorized) throw error;
+  }
+}
+
+async function requireFounderMailExecutionAuthorityInTransaction(
+  tx: ExecutionTransaction,
+  userId: string,
+  now: Date,
+  dependencies: FounderMailExecutionDependencies,
+): Promise<void> {
+  try {
+    await (dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction)(
+      tx,
+      {
+        userId,
+        now,
+        applicationRevision: readFounderApplicationRevision({ env: dependencies.env }) ?? "",
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
+      },
+    );
+  } catch (error) {
+    if (!(error instanceof FounderReleaseStageAccessError)) throw error;
+    const authorized = await founderGeneralReleaseAuthorizesWorkAuthorityInTransaction(
+      tx,
+      userId,
+      now,
+      FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
+      dependencies.env ?? process.env,
+    );
+    if (!authorized) throw error;
   }
 }
 

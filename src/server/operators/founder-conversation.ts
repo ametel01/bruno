@@ -134,6 +134,7 @@ export type FounderConversationDependencies = {
     dependencies?: { createConnection?: () => DatabaseConnection },
   ) => Promise<FounderAiConnectionDto>;
   applicationRevision?: string;
+  env?: Record<string, string | undefined>;
   requireOwnerPreviewAccess?: typeof requireFounderOwnerPreviewAccessInTransaction;
   requireOwnerPreviewAccessForUser?: typeof requireFounderOwnerPreviewAccessForUser;
   maxMessageLength?: number;
@@ -626,6 +627,7 @@ function conversationWorkAuthorityDependencies(
   return {
     createConnection: () => connection,
     generalReleaseAuthority: "work",
+    ...(dependencies.env ? { env: dependencies.env } : {}),
     ...(dependencies.applicationRevision
       ? { applicationRevision: dependencies.applicationRevision }
       : {}),

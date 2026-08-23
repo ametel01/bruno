@@ -51,12 +51,14 @@ allowlist.
 
 The same run also emits `founder-initial-general-release-decision.json`. In ordinary CI this is an
 explicit denied decision because attended evidence is absent. A release-mode dispatch may provide
-three JSON inputs containing only allowlisted aggregate counts, exact timestamps, release outcomes,
+four JSON inputs containing only allowlisted aggregate counts, exact timestamps, release outcomes,
 retention controls, and SHA-256 evidence digests:
 
 - `moderated_founder_summary_json` records the 4/4 desktop/phone cohort, cross-device day-two count,
   7-of-8 activation/action/recovery and first-brief thresholds, 8-of-8 comprehension, zero critical
-  failure counts, and applied 90-day/30-day/24-month retention controls.
+  failure counts, and applied 90-day/30-day/24-month retention controls. It also binds eight fresh,
+  independent, nontechnical participants and zero Owner, Trusted Preview, coached, External Beta,
+  build-team, self/friend-test, facilitator-rescue, or support-intervention participants.
 - `provider_decision_summary_json` records each capability's released/hidden outcome, exact source
   revision, qualification and expiry instants, and a distinct sanitized evidence digest for OpenAI,
   Anthropic, Calendar reading, Gmail reading, and one-to-one Gmail sending.
@@ -65,6 +67,10 @@ retention controls, and SHA-256 evidence digests:
   canary. Every record binds the same exact application and runtime revisions, environment,
   observation and expiry instants, result, sanitized digest, and its fixed checklist. The live
   record also binds separate intended and observed store and product reference digests.
+- `general_release_operational_summary_json` proves that all External Beta findings were resolved
+  before the exact candidate froze and retains separate passing operational, privacy, billing,
+  recovery, and retirement digests. None may borrow an accessibility, usability, capability, or
+  production-provider digest.
 
 The decision is timestamped when it is created, and provider currency is evaluated against that
 instant rather than the earlier contract observation time. The decision approves only when the product contract is release-eligible, every usability and
@@ -84,6 +90,15 @@ provider responses, raw store/product identifiers, and any unrecognized supplied
 General Release policy boundary: each Founder may authorize OpenAI only, Anthropic only, or both;
 routing uses only those authorized Ready connections; Bruno-funded fallback is prohibited; and
 qualification loss is capability-scoped at Safe Work Checkpoints.
+
+The emitted decision remains a sanitized evidence artifact until a mapped Bruno.Ai Owner imports it
+through `bun run founder:release:import-decision` in the matching protected deployment. Runtime
+admission reads only the global persisted decision, binds each new activation to its exact decision
+ID, and denies an absent, malformed, stale, denied, revision-mismatched, or unbound authority even
+when public availability is configured `open`. Post-release qualification loss appends an immutable
+capability-scoped Hold; only a fresh complete protected import appends Resume. Deterministic unit and
+lifecycle fixtures exercise this boundary but never become attended, moderated, production-provider,
+payment, refund, cleanup, or release-readiness evidence.
 
 The workflow runs in automated mode for every push to `main`. With no external provider summary, CI
 still validates the parser and decision logic and emits an explicit denied decision; deterministic

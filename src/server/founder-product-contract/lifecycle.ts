@@ -170,6 +170,7 @@ export type FounderLifecycleOutcome = {
     retirementCompleted: true;
   };
   initialGeneralRelease?: {
+    activationBoundToExactReleaseDecision: boolean;
     abandonedSetupCreatedNoDroplet: boolean;
     explicitCreateRequired: boolean;
     exactActivationWindow: boolean;
@@ -725,6 +726,13 @@ async function executeInitialGeneralReleaseContractScenario(
   if (!persistedActivated?.entitlementDueAt) {
     throw new Error("The deterministic General Release activation was not persisted.");
   }
+  const [boundReleaseDecision] = persistedActivated.releaseDecisionId
+    ? await connection.db
+        .select()
+        .from(founderReleaseDecisions)
+        .where(eq(founderReleaseDecisions.id, persistedActivated.releaseDecisionId))
+        .limit(1)
+    : [];
 
   const declineAt = new Date(activationAt.valueOf() + 1);
   const declineResponse = await application({ action: "decline_offer" }, declineAt);
@@ -752,6 +760,11 @@ async function executeInitialGeneralReleaseContractScenario(
     : null;
   const activationDueAt = created.activation.dueAt ? new Date(created.activation.dueAt) : null;
   const proof = {
+    activationBoundToExactReleaseDecision:
+      boundReleaseDecision?.stage === "initial_general_release" &&
+      ["enter", "resume"].includes(boundReleaseDecision.outcome) &&
+      boundReleaseDecision.applicationRevision === dependencies.applicationRevision &&
+      boundReleaseDecision.runtimeRevision === process.env.BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION,
     abandonedSetupCreatedNoDroplet: runnersAfterAbandonedSetup.length === runnersBefore.length,
     explicitCreateRequired:
       prematureCreate.status === 409 &&

@@ -23,7 +23,9 @@ The exact-release workflow now emits
   Firefox, and Safari; iOS Safari; Android Chrome; keyboard/axe; attended VoiceOver/Safari; and
   attended TalkBack/Chrome all passing without retry, flake, failure, or skip;
 - exactly eight representative nontechnical B2B service founders, split four desktop-first and four
-  phone-first, all completing a cross-device day-two task;
+  phone-first, all completing a cross-device day-two task; all eight must be fresh, independent,
+  and nontechnical, with zero Owner, Trusted Preview, coached, External Beta, build-team,
+  self/friend-test, facilitator-rescue, or support-intervention participants;
 - at least seven independently activating, acting on a Lead-to-Client item, and recovering from an
   interruption, plus at least seven reaching the first brief within 15 minutes of Active Founder
   Time;
@@ -35,7 +37,10 @@ The exact-release workflow now emits
   reading, and one-to-one Gmail sending; and
 - independently reviewed, exact-application-and-runtime qualification for attended Clerk production,
   Lemon Squeezy test mode, and an attended Lemon Squeezy live canary against the intended live store
-  and product.
+  and product; and
+- a separately reviewed exact-candidate operational summary proving that every External Beta finding
+  was resolved before candidate freeze, with separate passing operational, privacy, billing,
+  recovery, and retirement evidence digests.
 
 Each provider record carries only its released outcome, source revision, qualification and expiry
 instants, and sanitized evidence digest. Hidden, missing, malformed, expired, stale, future-dated,
@@ -60,6 +65,31 @@ explicitly authorized. Bruno.Ai supplies neither funded capacity nor silent enro
 provider's current qualification pauses only its dependent capability at a Safe Work Checkpoint;
 the other provider and unrelated qualified work remain available.
 
+## Persisted authority and public admission
+
+The workflow artifact is not runtime authority by itself. After independent review, a mapped Bruno.Ai
+Owner may use the protected operator seam to persist the sanitized, approved artifact:
+
+```sh
+BRUNO_FOUNDER_RELEASE_DECISION_OWNER_USER_ID=<mapped-owner-uuid> \
+  bun run founder:release:import-decision \
+  founder-contract-artifacts/founder-initial-general-release-decision.json
+```
+
+Run that command only in the intended protected deployment environment. It validates the artifact
+digest, exact deployed application revision, protected runtime revision, expiry, exact five-capability
+manifest, all separate evidence digests, current provider qualifications, and mapped Owner identity.
+It never accepts source evidence, credentials, recordings, or provider responses. This repository
+change does not run the command or assert that its missing real-world evidence exists.
+
+Public availability configuration cannot admit anyone without this global database authority. Each
+new public activation binds the exact `founder_release_decisions.id`; preexisting unbound rows remain
+unbound and fail closed instead of inheriting later authority. A provider or capability regression
+appends an immutable capability-scoped `hold`. Existing work that does not require a held capability
+may continue, but new public admission remains closed. Recovery of an environment variable does not
+erase the Hold: the mapped Owner must import a fresh complete approved artifact, which appends an
+explicit `resume`. Per-Founder Owner, Trusted Preview, and External Beta decisions remain separate.
+
 ## Evidence minimization and retention
 
 The workflow accepts only aggregate counts, exact timestamps, release outcomes, and SHA-256 digests
@@ -73,8 +103,9 @@ months. The attended summary must state that these controls were applied.
 First complete the independent provider acceptance runs against one exact application and runtime
 candidate by following
 [`CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md`](CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md).
-Then conduct
-the moderated cohort and attended VoiceOver/TalkBack journeys without facilitator rescue, review and
-sanitize the source evidence, and dispatch the Founder Product Contract in `release` mode with only
-the three allowlisted summaries and accessibility digests. General Release remains denied until that
-exact run emits `outcome: approved`.
+Then resolve all External Beta findings before freezing the candidate. Conduct the fresh independent
+moderated cohort and attended VoiceOver/TalkBack journeys without coaching, self/friend testing, or
+facilitator rescue; separately review and sanitize the operational/privacy/billing/recovery/retirement
+evidence; and dispatch the Founder Product Contract in `release` mode with only the four allowlisted
+summaries and accessibility digests. General Release remains denied until that exact run emits
+`outcome: approved` and the protected Owner import persists it for the matching deployed candidate.

@@ -4,11 +4,15 @@ import {
   POST as coreOperationPOST,
 } from "@/app/api/operator/core-operation/route";
 import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
+import { buildTestGoogleMailSendingAcceptanceRelease } from "@/scripts/founder-google-mail-sending-test-release";
+import { buildTestOpenAiConnectedAcceptanceRelease } from "@/scripts/founder-openai-test-release";
+import { buildTestAnthropicAcceptanceRelease } from "@/scripts/founder-anthropic-test-release";
 import { createFounderCheckout } from "@/src/server/commerce/founder-commerce";
 import type { LemonSqueezyCommerceProvider } from "@/src/server/commerce/lemon-squeezy-provider";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   founderGeneralReleaseActivations,
+  founderReleaseDecisions,
   operatorAiConnections,
   operatorCalendarConnections,
   operatorFounderActivations,
@@ -40,6 +44,7 @@ import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-ope
 const OWNER_ID = "00000000-0000-4000-8000-000000003450";
 const NOW = new Date("2026-08-19T01:00:00.000Z");
 const GOOGLE_RELEASE_REVISION = "d".repeat(40);
+const RUNTIME_REVISION = "runtime-core-operation";
 const GOOGLE_MAIL_RELEASE_ENV = {
   BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
     "calendar_reading",
@@ -60,6 +65,20 @@ const GENERAL_RELEASE_ROUTING_POLICY = {
     openai: { ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers.openai, released: true },
     anthropic: { ...ACTIVE_FOUNDER_AI_COMPATIBILITY_POLICY.providers.anthropic, released: true },
   },
+};
+const GENERAL_RELEASE_ENV = {
+  ...GOOGLE_MAIL_RELEASE_ENV,
+  BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION: RUNTIME_REVISION,
+  BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
+    NOW,
+    GOOGLE_RELEASE_REVISION,
+  ),
+  BRUNO_ANTHROPIC_CONNECTED_ACCEPTANCE_RELEASE: buildTestAnthropicAcceptanceRelease(
+    NOW,
+    GOOGLE_RELEASE_REVISION,
+  ),
+  BRUNO_GOOGLE_MAIL_SENDING_CONNECTED_ACCEPTANCE_RELEASE:
+    buildTestGoogleMailSendingAcceptanceRelease(NOW, GOOGLE_RELEASE_REVISION),
 };
 
 describe("Founder Core Operation", () => {
@@ -181,9 +200,33 @@ describe("Founder Core Operation", () => {
     ).resolves.toBeNull();
     const [generalReleaseOperator] = await connection.db.select().from(operators).limit(1);
     if (!generalReleaseOperator) throw new Error("General Release Operator fixture is missing.");
+    const [releaseDecision] = await connection.db
+      .insert(founderReleaseDecisions)
+      .values({
+        stage: "initial_general_release",
+        outcome: "enter",
+        applicationRevision: GOOGLE_RELEASE_REVISION,
+        runtimeRevision: RUNTIME_REVISION,
+        capabilityManifest: [
+          "openai",
+          "anthropic",
+          "calendar_reading",
+          "gmail_reading",
+          "gmail_sending",
+        ],
+        evidenceDigests: Array.from(
+          { length: 12 },
+          (_, index) => `sha256:${index.toString(16).repeat(64)}`,
+        ),
+        authorityExpiresAt: new Date(NOW.valueOf() + 24 * 60 * 60 * 1_000),
+        decidedAt: NOW,
+      })
+      .returning({ id: founderReleaseDecisions.id });
+    if (!releaseDecision) throw new Error("General Release Decision fixture is missing.");
     await connection.db.insert(founderGeneralReleaseActivations).values({
       userId: OWNER_ID,
       operatorId: generalReleaseOperator.id,
+      releaseDecisionId: releaseDecision.id,
       status: "setup",
       serviceBusinessConfirmedAt: NOW,
       geographyCode: "PH",
@@ -198,6 +241,7 @@ describe("Founder Core Operation", () => {
       reconcileFounderCoreOperationForUser(OWNER_ID, {
         createConnection: () => connection,
         now: () => NOW,
+        env: GENERAL_RELEASE_ENV,
         routingPolicy: GENERAL_RELEASE_ROUTING_POLICY,
       }),
     ).resolves.toMatchObject({
@@ -211,6 +255,7 @@ describe("Founder Core Operation", () => {
     const confirmed = await confirmFounderCoreProcessingConsentForUser(OWNER_ID, {
       createConnection: () => connection,
       now: () => NOW,
+      env: GENERAL_RELEASE_ENV,
       routingPolicy: GENERAL_RELEASE_ROUTING_POLICY,
     });
     expect(confirmed).toMatchObject({
@@ -271,6 +316,7 @@ describe("Founder Core Operation", () => {
     const opened = await openFounderCoreBriefForUser(OWNER_ID, {
       createConnection: () => connection,
       now: () => NOW,
+      env: GENERAL_RELEASE_ENV,
       routingPolicy: GENERAL_RELEASE_ROUTING_POLICY,
     });
     await expect(
@@ -308,6 +354,7 @@ describe("Founder Core Operation", () => {
           openFounderCoreBriefForUser(userId, {
             createConnection: () => connection,
             now: () => new Date(NOW.getTime() + 1000),
+            env: GENERAL_RELEASE_ENV,
             routingPolicy: GENERAL_RELEASE_ROUTING_POLICY,
           }),
       },

@@ -64,6 +64,8 @@ export async function createFounderProductContractFixture(
   clock: FounderProductContractClock,
 ): Promise<FounderProductContractFixture> {
   const runtimeRevision = founderProductContractRuntimeRevision();
+  const sourceRevision = requiredContractEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION");
+  const releaseDecisionId = randomUUID();
   const userId = randomUUID();
   const operatorId = randomUUID();
   const preparationId = randomUUID();
@@ -99,6 +101,8 @@ export async function createFounderProductContractFixture(
   const expiredArchiveExpiresAt = new Date(clock.now().valueOf() - 24 * 60 * 60 * 1_000);
 
   await withFounderProductContractDatabase(async (sql) => {
+    await sql`delete from founder_release_decisions where stage = 'initial_general_release'`;
+    await sql`insert into founder_release_decisions (id, stage, outcome, application_revision, runtime_revision, capability_manifest, affected_capabilities, evidence_digests, authority_expires_at, decided_at, created_at) values (${releaseDecisionId}, 'initial_general_release', 'enter', ${sourceRevision}, ${runtimeRevision}, ${sql.json(["openai", "anthropic", "calendar_reading", "gmail_reading", "gmail_sending"])}, ${sql.json([])}, ${sql.json(Array.from({ length: 12 }, (_, index) => `sha256:${index.toString(16).repeat(64)}`))}, ${new Date(clock.now().valueOf() + 8 * 24 * 60 * 60 * 1_000).toISOString()}, ${createdAt}, ${createdAt})`;
     await sql`insert into users (id, created_at, updated_at) values (${userId}, ${createdAt}, ${readyAt})`;
     await sql`insert into operators (id, user_id, status, created_at, updated_at) values (${operatorId}, ${userId}, 'active', ${createdAt}, ${readyAt})`;
     await sql`insert into operator_preparations (id, operator_id, status, timezone, timezone_confirmed_at, started_at, completed_at, created_at, updated_at) values (${preparationId}, ${operatorId}, 'ready', 'Asia/Manila', ${createdAt}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;

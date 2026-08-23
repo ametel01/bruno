@@ -1001,12 +1001,8 @@ export const founderReleaseDecisions = pgTable(
   "founder_release_decisions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id),
-    operatorId: uuid("operator_id")
-      .notNull()
-      .references(() => operators.id),
+    userId: uuid("user_id").references(() => users.id),
+    operatorId: uuid("operator_id").references(() => operators.id),
     stage: founderReleaseStageEnum("stage").notNull(),
     outcome: founderReleaseDecisionOutcomeEnum("outcome").notNull(),
     applicationRevision: text("application_revision").notNull(),
@@ -1024,10 +1020,15 @@ export const founderReleaseDecisions = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`),
     evidenceDigests: jsonb("evidence_digests").$type<readonly string[]>().notNull(),
+    authorityExpiresAt: timestamp("authority_expires_at", { withTimezone: true }),
     decidedAt: timestamp("decided_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check(
+      "founder_release_decisions_scope_check",
+      sql`(${table.stage} = 'initial_general_release' AND ${table.userId} IS NULL AND ${table.operatorId} IS NULL) OR (${table.stage} <> 'initial_general_release' AND ${table.userId} IS NOT NULL AND ${table.operatorId} IS NOT NULL)`,
+    ),
     check(
       "founder_release_decisions_application_revision_check",
       sql`${table.applicationRevision} ~ '^[a-f0-9]{40}$'`,
@@ -1068,6 +1069,25 @@ export const founderReleaseDecisions = pgTable(
       "founder_release_decisions_external_beta_manifest_check",
       sql`${table.stage} <> 'external_beta' OR (jsonb_array_length(${table.capabilityManifest}) = 5 AND ${table.capabilityManifest} @> '["openai", "anthropic", "calendar_reading", "gmail_reading", "gmail_sending"]'::jsonb)`,
     ),
+    check(
+      "founder_release_decisions_initial_general_release_manifest_check",
+      sql`${table.stage} <> 'initial_general_release' OR (jsonb_array_length(${table.capabilityManifest}) = 5 AND ${table.capabilityManifest} @> '["openai", "anthropic", "calendar_reading", "gmail_reading", "gmail_sending"]'::jsonb)`,
+    ),
+    check(
+      "founder_release_decisions_initial_general_release_expiry_check",
+      sql`${table.stage} <> 'initial_general_release' OR ${table.outcome} = 'deny' OR ${table.authorityExpiresAt} IS NOT NULL`,
+    ),
+    check(
+      "founder_release_decisions_initial_general_release_evidence_set_check",
+      sql`${table.stage} <> 'initial_general_release' OR ${table.outcome} = 'deny' OR (${table.outcome} IN ('enter', 'resume') AND jsonb_array_length(${table.evidenceDigests}) = 12) OR (${table.outcome} = 'hold' AND jsonb_array_length(${table.evidenceDigests}) >= 13)`,
+    ),
+    check(
+      "founder_release_decisions_evidence_digests_check",
+      sql`jsonb_array_length(${table.evidenceDigests}) > 0 AND jsonb_path_query_array(${table.evidenceDigests}, '$[*] ? (!(@ like_regex "^sha256:[a-f0-9]{64}$"))') = '[]'::jsonb`,
+    ),
+    uniqueIndex("founder_release_decisions_global_candidate_idx")
+      .on(table.stage, table.applicationRevision, table.runtimeRevision, table.decidedAt)
+      .where(sql`${table.stage} = 'initial_general_release'`),
     index("founder_release_decisions_user_stage_idx").on(
       table.userId,
       table.stage,
@@ -2943,6 +2963,7 @@ export const founderGeneralReleaseActivations = pgTable(
     operatorId: uuid("operator_id")
       .notNull()
       .references(() => operators.id),
+    releaseDecisionId: uuid("release_decision_id").references(() => founderReleaseDecisions.id),
     runnerId: uuid("runner_id").references(() => runners.id),
     status: text("status").notNull().default("setup"),
     serviceBusinessConfirmedAt: timestamp("service_business_confirmed_at", {

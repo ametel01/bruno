@@ -118,9 +118,21 @@ export async function withFounderOwnerPreviewWorkAuthority<T>(
         if (error instanceof FounderReleaseStageAccessError) {
           const generalReleaseAuthorized =
             dependencies.generalReleaseAuthority === "setup"
-              ? await founderGeneralReleaseSetupAuthorizesInTransaction(tx, input.userId, now)
+              ? await founderGeneralReleaseSetupAuthorizesInTransaction(
+                  tx,
+                  input.userId,
+                  now,
+                  input.requiredCapabilities,
+                  dependencies.env ?? process.env,
+                )
               : dependencies.generalReleaseAuthority === "work"
-                ? await founderGeneralReleaseAuthorizesWorkAuthorityInTransaction(tx, input.userId)
+                ? await founderGeneralReleaseAuthorizesWorkAuthorityInTransaction(
+                    tx,
+                    input.userId,
+                    now,
+                    input.requiredCapabilities,
+                    dependencies.env ?? process.env,
+                  )
                 : false;
           if (!generalReleaseAuthorized) return { ok: false as const, error };
         } else {

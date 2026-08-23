@@ -147,7 +147,7 @@ export async function reconcileFounderOwnerPreviewQualificationExpiryInTransacti
     const expiresAt = expirations[capability];
     return !expiresAt || expiresAt <= input.now;
   });
-  if (affectedCapabilities.length === 0) return null;
+  if (affectedCapabilities.length === 0 || !latestDecision.operatorId) return null;
   return persistFounderOwnerPreviewHoldInTransaction(tx, {
     userId: input.userId,
     operatorId: latestDecision.operatorId,

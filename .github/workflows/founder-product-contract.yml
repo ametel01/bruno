@@ -50,6 +50,10 @@ on:
         description: Allowlisted attended Clerk and Lemon test/live qualification summary; no source payloads
         required: false
         type: string
+      general_release_operational_summary_json:
+        description: Allowlisted exact-candidate operational, privacy, billing, recovery, and retirement evidence
+        required: false
+        type: string
 
 permissions:
   actions: read
@@ -104,6 +108,7 @@ jobs:
       BRUNO_FOUNDER_MODERATED_SUMMARY_JSON: ${{ inputs.moderated_founder_summary_json }}
       BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON: ${{ inputs.provider_decision_summary_json }}
       BRUNO_FOUNDER_PRODUCTION_PROVIDER_QUALIFICATION_SUMMARY_JSON: ${{ inputs.production_provider_qualification_summary_json }}
+      BRUNO_FOUNDER_GENERAL_RELEASE_OPERATIONAL_SUMMARY_JSON: ${{ inputs.general_release_operational_summary_json }}
       BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST: ${{ vars.BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST }}
       BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST: ${{ vars.BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST }}
       BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH: founder-contract-artifacts/scenario-ledger.json

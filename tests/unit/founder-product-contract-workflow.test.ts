@@ -105,6 +105,13 @@ describe("Founder Product Contract workflow", () => {
       "BRUNO_FOUNDER_PRODUCTION_PROVIDER_QUALIFICATION_SUMMARY_JSON: $" +
         "{{ inputs.production_provider_qualification_summary_json }}",
     );
+    expect(workflow).toContain("general_release_operational_summary_json:");
+    expect(workflow).toContain(
+      "BRUNO_FOUNDER_GENERAL_RELEASE_OPERATIONAL_SUMMARY_JSON: $" +
+        "{{ inputs.general_release_operational_summary_json }}",
+    );
+    expect(workflow).not.toContain("BRUNO_INITIAL_GENERAL_RELEASE_DECISION:");
+    expect(workflow).not.toContain("founder:release:import-decision");
     expect(workflow).not.toContain("LEMON_SQUEEZY_API_KEY");
     expect(workflow).not.toContain("CLERK_SECRET_KEY");
   });

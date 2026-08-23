@@ -792,6 +792,13 @@
       "when": 1787473787899,
       "tag": "0112_issue_386_scenario_runtime_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1787479888150,
+      "tag": "0113_issue_387_initial_general_release_gate",
+      "breakpoints": true
     }
   ]
 }
