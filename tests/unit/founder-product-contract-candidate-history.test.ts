@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { verifyFounderProductContractCandidateHistory } from "@/scripts/check-founder-product-contract-candidate-history";
 import {
@@ -9,6 +10,32 @@ const REVISION = "a".repeat(40);
 const RUNTIME_REVISION = "runtime-release-v1";
 
 describe("Founder Product Contract candidate history", () => {
+  it("runs the exact CI history command under plain Bun", () => {
+    const result = spawnSync(
+      "bun",
+      ["scripts/check-founder-product-contract-candidate-history.ts"],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: {
+          NODE_ENV: "test",
+          PATH: process.env.PATH ?? "",
+          GITHUB_REPOSITORY: "ametel01/bruno",
+          BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION: REVISION,
+          BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION: RUNTIME_REVISION,
+          BRUNO_FOUNDER_CONTRACT_MODE: "ci",
+          BRUNO_FOUNDER_CONTRACT_GITHUB_TOKEN: "github-test-token",
+        },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      "Founder Product Contract candidate history verified (0 prior successful run(s)).",
+    );
+    expect(result.stderr).not.toContain("server-only");
+  });
+
   it("allows the first run and a release dispatch after a successful CI run", async () => {
     const request = requestReturning([unrelatedControl()]);
 

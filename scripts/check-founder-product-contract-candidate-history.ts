@@ -2,7 +2,7 @@ import {
   FOUNDER_RELEASE_CANDIDATE_CONTROL_NAME_PREFIX,
   founderReleaseCandidateControlKey,
   founderReleaseCandidateControlName,
-} from "@/scripts/founder-product-contract-candidate-control";
+} from "@/scripts/founder-product-contract-candidate-identity";
 
 const GITHUB_API_ORIGIN = "https://api.github.com";
 const MAX_COLLECTION_PAGES = 100;

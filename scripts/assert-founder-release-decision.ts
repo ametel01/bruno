@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import {
   FOUNDER_GENERAL_RELEASE_DECISION_ENV,
-  readFounderGeneralReleaseAuthority,
-} from "@/src/server/founder-product-contract/general-release-authority";
+  readFounderGeneralReleaseDecisionAuthority,
+} from "@/scripts/founder-general-release-decision-authority";
 
 export async function assertFounderReleaseDecisionApproved(
   path: string,
@@ -15,7 +15,7 @@ export async function assertFounderReleaseDecisionApproved(
   } catch {
     throw new Error("Founder Initial General Release decision artifact is unavailable.");
   }
-  const authority = readFounderGeneralReleaseAuthority(
+  const authority = readFounderGeneralReleaseDecisionAuthority(
     { ...env, [FOUNDER_GENERAL_RELEASE_DECISION_ENV]: raw },
     now,
   );

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +29,25 @@ afterEach(async () => {
 });
 
 describe("Founder release candidate control", () => {
+  it.each([
+    "create",
+    "finalize",
+  ])("loads the %s CLI path under plain Bun before fail-closed environment validation", (operation) => {
+    const result = spawnSync(
+      "bun",
+      ["scripts/founder-product-contract-candidate-control.ts", operation],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: { NODE_ENV: "test", PATH: process.env.PATH ?? "" },
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("GITHUB_REPOSITORY is required.");
+    expect(result.stderr).not.toContain("server-only");
+  });
+
   it("derives one stable identity from source and protected runtime", () => {
     expect(founderReleaseCandidateControlKey(REVISION, RUNTIME_REVISION)).toBe(
       founderReleaseCandidateControlKey(REVISION, RUNTIME_REVISION),

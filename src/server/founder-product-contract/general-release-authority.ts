@@ -1,18 +1,15 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
 import { desc, eq, sql } from "drizzle-orm";
+import { FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST } from "@/scripts/create-founder-general-release-decision";
 import {
-  FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST,
-  FOUNDER_GENERAL_RELEASE_DECISION_SCHEMA,
-} from "@/scripts/create-founder-general-release-decision";
-import {
-  isEvidenceDigest,
-  isEvidenceRecord,
-  isExactInstant,
-  isGitRevision,
-  isRuntimeRevision,
-} from "@/scripts/founder-release-evidence-validation";
+  FOUNDER_GENERAL_RELEASE_DECISION_ENV,
+  REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS,
+  type FounderGeneralReleaseCapability,
+  type FounderGeneralReleaseDecisionAuthority,
+  readFounderGeneralReleaseDecisionAuthority,
+} from "@/scripts/founder-general-release-decision-authority";
+import { isGitRevision, isRuntimeRevision } from "@/scripts/founder-release-evidence-validation";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { founderReleaseDecisions } from "@/src/server/db/schema";
 import { isFounderAnthropicReleased } from "@/src/server/operators/founder-anthropic-release";
@@ -26,25 +23,11 @@ import { founderProductContractDigest } from "./digest";
 import type { FounderProductContractTransaction } from "./operator-authority";
 import { requireFounderOwnerPreviewOwnerMappingInTransaction } from "./owner-preview-release-decision";
 
-export const FOUNDER_GENERAL_RELEASE_DECISION_ENV = "BRUNO_INITIAL_GENERAL_RELEASE_DECISION";
-const REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS = [
-  "productContractDigest",
-  "voiceOverDigest",
-  "talkBackDigest",
-  "moderatedFounderDigest",
-  "providerDecisionDigest",
-  "productionProviderQualificationDigest",
-  "operationalDigest",
-  "privacyDigest",
-  "billingDigest",
-  "recoveryDigest",
-  "retirementDigest",
-] as const;
 type FounderGeneralReleaseEvidenceKey = (typeof REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS)[number];
 const FOUNDER_GENERAL_RELEASE_AUTHORITY_LOCK = "founder-initial-general-release-authority-v1";
 
-export type FounderGeneralReleaseCapability =
-  (typeof FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST)[number];
+export { FOUNDER_GENERAL_RELEASE_DECISION_ENV };
+export type { FounderGeneralReleaseCapability };
 
 const REQUIRED_FRESH_RESUME_EVIDENCE_KEYS_BY_CAPABILITY = {
   openai: REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS,
@@ -54,24 +37,9 @@ const REQUIRED_FRESH_RESUME_EVIDENCE_KEYS_BY_CAPABILITY = {
   gmail_sending: REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS,
 } satisfies Record<FounderGeneralReleaseCapability, readonly FounderGeneralReleaseEvidenceKey[]>;
 
-export type FounderGeneralReleaseAuthority = {
-  approved: boolean;
-  reason:
-    | "approved"
-    | "decision_missing"
-    | "decision_invalid"
-    | "decision_denied"
-    | "application_revision_mismatch"
-    | "runtime_revision_mismatch"
-    | "decision_stale";
-  sourceRevision: string | null;
-  runtimeRevision: string | null;
-  decisionDigest: `sha256:${string}` | null;
+export type FounderGeneralReleaseAuthority = FounderGeneralReleaseDecisionAuthority & {
   decisionId: string | null;
   decisionOutcome: "enter" | "deny" | "hold" | "resume" | null;
-  decisionDecidedAt: string | null;
-  authorityExpiresAt: string | null;
-  evidenceDigests: `sha256:${string}`[];
   capabilities: Record<FounderGeneralReleaseCapability, "available" | "paused">;
   heldCapabilities: FounderGeneralReleaseCapability[];
 };
@@ -81,81 +49,17 @@ export function readFounderGeneralReleaseAuthority(
   now = new Date(),
 ): FounderGeneralReleaseAuthority {
   const capabilities = currentCapabilityStates(env, now);
-  const raw = env[FOUNDER_GENERAL_RELEASE_DECISION_ENV]?.trim();
-  if (!raw) return deniedAuthority("decision_missing", capabilities);
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    return deniedAuthority("decision_invalid", capabilities);
-  }
-  if (!isEvidenceRecord(value)) return deniedAuthority("decision_invalid", capabilities);
-  if (
-    value.schemaVersion !== FOUNDER_GENERAL_RELEASE_DECISION_SCHEMA ||
-    value.stage !== "initial_general_release" ||
-    !Array.isArray(value.capabilityManifest) ||
-    !sameCapabilityManifest(value.capabilityManifest) ||
-    !isEvidenceRecord(value.releaseIdentity) ||
-    !isGitRevision(value.releaseIdentity.sourceRevision) ||
-    !isRuntimeRevision(value.releaseIdentity.runtimeRevision) ||
-    !isExactInstant(value.releaseIdentity.decidedAt) ||
-    !isExactInstant(value.authorityExpiresAt) ||
-    !isEvidenceDigest(value.summaryDigest) ||
-    !Array.isArray(value.reasons) ||
-    !isEvidenceRecord(value.evidence) ||
-    !requiredEvidenceDigestsPresent(value.evidence)
-  ) {
-    return deniedAuthority("decision_invalid", capabilities);
-  }
-  const { summaryDigest, ...payload } = value;
-  const expectedDigest = `sha256:${createHash("sha256")
-    .update(JSON.stringify(payload))
-    .digest("hex")}`;
-  if (summaryDigest !== expectedDigest) return deniedAuthority("decision_invalid", capabilities);
-  if (value.outcome !== "approved" || value.reasons.length !== 0) {
-    return deniedAuthority("decision_denied", capabilities);
-  }
-  const deployedRevision = env.VERCEL_GIT_COMMIT_SHA?.trim();
-  if (
-    !isGitRevision(deployedRevision) ||
-    deployedRevision !== value.releaseIdentity.sourceRevision
-  ) {
-    return deniedAuthority("application_revision_mismatch", capabilities);
-  }
-  const runtimeRevision = env.BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION?.trim();
-  if (
-    !isRuntimeRevision(runtimeRevision) ||
-    runtimeRevision !== value.releaseIdentity.runtimeRevision
-  ) {
-    return deniedAuthority("runtime_revision_mismatch", capabilities);
-  }
-  const decidedAt = new Date(value.releaseIdentity.decidedAt);
-  const expiresAt = new Date(value.authorityExpiresAt);
-  if (decidedAt > now || expiresAt <= now) {
-    return deniedAuthority("decision_stale", capabilities);
-  }
-  const retainedEvidence = value.evidence as Record<string, unknown>;
-  const evidenceDigests = REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS.map(
-    (key) => retainedEvidence[key] as `sha256:${string}`,
-  );
-  if (new Set([summaryDigest, ...evidenceDigests]).size !== evidenceDigests.length + 1) {
-    return deniedAuthority("decision_invalid", capabilities);
-  }
+  const decision = readFounderGeneralReleaseDecisionAuthority(env, now);
   return {
-    approved: true,
-    reason: "approved",
-    sourceRevision: value.releaseIdentity.sourceRevision,
-    runtimeRevision: value.releaseIdentity.runtimeRevision,
-    decisionDigest: summaryDigest,
+    ...decision,
     decisionId: null,
-    decisionOutcome: "enter",
-    decisionDecidedAt: value.releaseIdentity.decidedAt,
-    authorityExpiresAt: value.authorityExpiresAt,
-    evidenceDigests,
+    decisionOutcome: decision.approved ? "enter" : null,
     capabilities,
-    heldCapabilities: FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST.filter(
-      (capability) => capabilities[capability] === "paused",
-    ),
+    heldCapabilities: decision.approved
+      ? FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST.filter(
+          (capability) => capabilities[capability] === "paused",
+        )
+      : [...FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST],
   };
 }
 
@@ -437,19 +341,5 @@ async function lockFounderGeneralReleaseAuthorityInTransaction(
 ): Promise<void> {
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${FOUNDER_GENERAL_RELEASE_AUTHORITY_LOCK}, 0))`,
-  );
-}
-
-function sameCapabilityManifest(value: unknown[]): boolean {
-  return (
-    value.length === FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST.length &&
-    FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST.every((capability) => value.includes(capability))
-  );
-}
-
-function requiredEvidenceDigestsPresent(value: Record<string, unknown>): boolean {
-  return (
-    Object.keys(value).length === REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS.length &&
-    REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS.every((key) => isEvidenceDigest(value[key]))
   );
 }
