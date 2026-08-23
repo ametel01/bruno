@@ -38,6 +38,29 @@ describe("Founder Owner Preview route access", () => {
     expect(requireAccess).not.toHaveBeenCalled();
   });
 
+  it("allows General Release setup only when the caller explicitly opts into that narrow seam", async () => {
+    const requireAccess = vi.fn(async () => {
+      throw new FounderReleaseStageAccessError();
+    });
+    const hasGeneralReleaseSetupAccess = vi.fn(async () => true);
+
+    await expect(
+      requireFounderOperatorWorkspaceAccess(USER_ID, "workspace", {
+        authMode: "clerk",
+        requireAccess,
+        hasGeneralReleaseSetupAccess,
+      }),
+    ).resolves.toMatchObject({ status: 403 });
+    await expect(
+      requireFounderOperatorWorkspaceAccess(USER_ID, "workspace", {
+        authMode: "clerk",
+        requireAccess,
+        allowGeneralReleaseSetup: true,
+        hasGeneralReleaseSetupAccess,
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("sanitizes a deep work-authority denial for route adapters", async () => {
     const response = founderOperatorAccessErrorResponse(new FounderReleaseStageAccessError());
 

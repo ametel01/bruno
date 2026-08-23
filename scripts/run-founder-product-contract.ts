@@ -13,6 +13,7 @@ import {
   FOUNDER_PRODUCT_CONTRACT_SCENARIO_SIGNING_SECRET_ENV,
   parseFounderProductContractScenarioLedger,
 } from "@/src/testing/founder-product-contract";
+import { buildTestAnthropicAcceptanceRelease } from "./founder-anthropic-test-release";
 import { buildTestGoogleMailSendingAcceptanceRelease } from "./founder-google-mail-sending-test-release";
 import { buildTestGoogleConnectedAcceptanceRelease } from "./founder-google-test-release";
 import { buildTestOpenAiConnectedAcceptanceRelease } from "./founder-openai-test-release";
@@ -46,6 +47,11 @@ await rm(scenarioLedgerPath, { force: true });
 const deterministicProviderEnvironment = {
   BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE: "deterministic",
   BRUNO_FOUNDER_CONTRACT_COMMERCE_WEBHOOK_SECRET: "founder-contract-lemon-test-secret-v1",
+  BRUNO_INITIAL_GENERAL_RELEASE_AVAILABILITY: "open",
+  BRUNO_INITIAL_GENERAL_RELEASE_GEOGRAPHIES: "PH",
+  BRUNO_INITIAL_GENERAL_RELEASE_AVAILABILITY_MESSAGE:
+    "Public contract capacity is available in this geography.",
+  BRUNO_INITIAL_GENERAL_RELEASE_PRICE_LABEL: "$30/month",
   BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
     "calendar_reading",
     new Date(),
@@ -59,6 +65,10 @@ const deterministicProviderEnvironment = {
   BRUNO_GOOGLE_MAIL_SENDING_CONNECTED_ACCEPTANCE_RELEASE:
     buildTestGoogleMailSendingAcceptanceRelease(new Date(), sourceRevision),
   BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
+    new Date(),
+    sourceRevision,
+  ),
+  BRUNO_ANTHROPIC_CONNECTED_ACCEPTANCE_RELEASE: buildTestAnthropicAcceptanceRelease(
     new Date(),
     sourceRevision,
   ),

@@ -1,4 +1,5 @@
 import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
+import { hasFounderGeneralReleaseSetupAccessForUser } from "@/src/server/founder-product-contract/initial-general-release";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import type { getFounderAiConnectionForUser } from "@/src/server/operators/founder-ai-connection";
 import {
@@ -29,6 +30,7 @@ type ConnectionRouteDependencies = {
   disconnectAnthropicConnection?: typeof disconnectFounderAnthropicForUser;
   isOpenAiReleased?: () => boolean;
   isAnthropicReleased?: () => boolean;
+  hasGeneralReleaseSetupAccess?: typeof hasFounderGeneralReleaseSetupAccessForUser;
 };
 
 export const dynamic = "force-dynamic";
@@ -43,19 +45,38 @@ export async function GET(
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
 
-  const provider = readProvider(new URL(request.url).searchParams.get("provider"));
-  if (provider === "anthropic") return ownerPreviewUnavailableResponse("Anthropic");
+  const providerValue = new URL(request.url).searchParams.get("provider");
+  const provider = providerValue === null ? "openai" : readProvider(providerValue);
+  if (!provider) return validationResponse("Choose a supported AI provider.");
+  const generalReleaseSetup = await (
+    dependencies.hasGeneralReleaseSetupAccess ?? hasFounderGeneralReleaseSetupAccessForUser
+  )(applicationUser.userId);
+  if (provider === "anthropic" && !generalReleaseSetup) {
+    return ownerPreviewUnavailableResponse("Anthropic");
+  }
   const accessError = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
     FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+    { allowGeneralReleaseSetup: true },
   );
   if (accessError) return accessError;
   if (provider === "openai" && !(dependencies.isOpenAiReleased ?? isFounderOpenAiReleased)()) {
     return providerNotReleasedResponse("openai");
   }
-  const connection = dependencies.getConnection
-    ? await dependencies.getConnection(applicationUser.userId)
-    : await recheckFounderOpenAiConnectionForUser(applicationUser.userId);
+  if (
+    provider === "anthropic" &&
+    !(dependencies.isAnthropicReleased ?? isFounderAnthropicReleased)()
+  ) {
+    return providerNotReleasedResponse("anthropic");
+  }
+  const connection =
+    provider === "anthropic"
+      ? await (dependencies.recheckAnthropicConnection ?? recheckFounderAnthropicConnectionForUser)(
+          applicationUser.userId,
+        )
+      : dependencies.getConnection
+        ? await dependencies.getConnection(applicationUser.userId)
+        : await recheckFounderOpenAiConnectionForUser(applicationUser.userId);
   return Response.json({ connection }, { headers: noStoreHeaders() });
 }
 
@@ -77,17 +98,23 @@ export async function POST(
   }
 
   const action = readAction(payload);
-  const provider = readProvider(
-    payload && typeof payload === "object" && "provider" in payload ? payload.provider : null,
-  );
+  const provider =
+    payload && typeof payload === "object" && "provider" in payload
+      ? readProvider(payload.provider)
+      : "openai";
+  if (!provider) return validationResponse("Choose a supported AI provider.");
   try {
-    if (provider === "anthropic" && action !== "disconnect") {
+    const generalReleaseSetup = await (
+      dependencies.hasGeneralReleaseSetupAccess ?? hasFounderGeneralReleaseSetupAccessForUser
+    )(applicationUser.userId);
+    if (provider === "anthropic" && action !== "disconnect" && !generalReleaseSetup) {
       return ownerPreviewUnavailableResponse("Anthropic");
     }
-    if (provider === "openai" && action !== "disconnect") {
+    if (action !== "disconnect") {
       const accessError = await requireFounderOperatorWorkspaceAccess(
         applicationUser.userId,
         FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+        { allowGeneralReleaseSetup: true },
       );
       if (accessError) return accessError;
     }
@@ -179,8 +206,8 @@ function readSessionId(payload: unknown): string | null {
   return typeof sessionId === "string" && sessionId.trim() ? sessionId.trim() : null;
 }
 
-function readProvider(value: unknown): "openai" | "anthropic" {
-  return value === "anthropic" ? "anthropic" : "openai";
+function readProvider(value: unknown): "openai" | "anthropic" | null {
+  return value === "openai" || value === "anthropic" ? value : null;
 }
 
 function authenticationResponse(status: 401 | 503): Response {

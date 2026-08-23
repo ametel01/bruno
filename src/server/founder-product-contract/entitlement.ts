@@ -246,6 +246,16 @@ export async function requireRetirementDue(
   userId: string,
   now: Date,
 ): Promise<Date> {
+  const retirementDueAt = await findProductEntitlementRetirementDue(tx, userId, now);
+  if (!retirementDueAt) throw new Error("Product Entitlement retirement is not due.");
+  return retirementDueAt;
+}
+
+export async function findProductEntitlementRetirementDue(
+  tx: Transaction,
+  userId: string,
+  now: Date,
+): Promise<Date | null> {
   const [entitlement] = await tx
     .select({ retirementDueAt: founderProductEntitlements.retirementDueAt })
     .from(founderProductEntitlements)
@@ -263,7 +273,7 @@ export async function requireRetirementDue(
       ),
     )
     .limit(1);
-  if (!entitlement) throw new Error("Product Entitlement retirement is not due.");
+  if (!entitlement) return null;
   if (!entitlement.retirementDueAt) {
     throw new Error("Product Entitlement retirement deadline is unavailable.");
   }

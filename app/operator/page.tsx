@@ -1,12 +1,14 @@
-import { FounderOperatorPreparation } from "@/app/operator/_components/founder-operator-preparation";
 import { FounderExternalBetaManifest } from "@/app/operator/_components/founder-external-beta-manifest";
+import { FounderGeneralRelease } from "@/app/operator/_components/founder-general-release";
+import { FounderOperatorPreparation } from "@/app/operator/_components/founder-operator-preparation";
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
-import { getFounderInfrastructureRetirementStatusForUser } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import { getFounderExternalBetaManifestStatusForUser } from "@/src/server/founder-product-contract/external-beta-manifest";
-import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
+import { getFounderInfrastructureRetirementStatusForUser } from "@/src/server/founder-product-contract/infrastructure-retirement";
+import { getFounderGeneralReleaseActivationForUser } from "@/src/server/founder-product-contract/initial-general-release";
 import { projectFounderOwnerPreviewStatus } from "@/src/server/founder-product-contract/owner-preview-status";
+import { FOUNDER_OWNER_PREVIEW_CAPABILITIES } from "@/src/server/founder-product-contract/preview-qualification";
 import {
   getFounderRecoveryArchiveStatusForUser,
   unavailableFounderRecoveryArchiveStatus,
@@ -16,6 +18,7 @@ import {
   hasFounderOwnerPreviewCapabilities,
   requiresFounderReleaseStageAuthority,
 } from "@/src/server/founder-product-contract/release-stage-access";
+import { isFounderAnthropicReleased } from "@/src/server/operators/founder-anthropic-release";
 import { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
 import {
   isFounderGoogleCalendarReleased,
@@ -70,6 +73,7 @@ export default async function FounderOperatorPage({
     infrastructureRetirement,
     ownerPreviewAccess,
     externalBetaStatus,
+    generalReleaseStatus,
   ] = await Promise.all([
     operator ? getFounderOnboardingForUser(applicationUser.userId) : Promise.resolve(undefined),
     applicationRevision
@@ -85,14 +89,26 @@ export default async function FounderOperatorPage({
           availableCapabilities: FOUNDER_OWNER_PREVIEW_CAPABILITIES,
         }),
     getFounderExternalBetaManifestStatusForUser(applicationUser.userId, new Date()),
+    getFounderGeneralReleaseActivationForUser(applicationUser.userId),
   ]);
   const calendarReadingReleased = isFounderGoogleCalendarReleased();
   const mailReadingReleased = isFounderGoogleMailReadingReleased();
   const mailSendingReleased = isFounderGoogleMailSendingReleased();
   const openAiReleased = isFounderOpenAiReleased();
+  const anthropicReleased = isFounderAnthropicReleased();
+  const generalReleaseSetupAvailable = [
+    "setup",
+    "waitlisted",
+    "provisioning",
+    "activation_pending",
+    "entitled",
+  ].includes(generalReleaseStatus.state);
 
   return (
     <FounderOperatorShell>
+      {generalReleaseStatus.admission.capacity !== "unavailable" ? (
+        <FounderGeneralRelease initialStatus={generalReleaseStatus} />
+      ) : null}
       <FounderOperatorPreparation
         initialOperator={operator}
         {...(onboarding ? { initialOnboarding: onboarding } : {})}
@@ -108,6 +124,8 @@ export default async function FounderOperatorPage({
         {...(trustedPreviewInvitationToken ? { trustedPreviewInvitationToken } : {})}
         timezoneOptions={buildFounderTimezoneOptions()}
         openAiReleased={openAiReleased}
+        anthropicReleased={anthropicReleased}
+        generalReleaseSetupAvailable={generalReleaseSetupAvailable}
         calendarReadingReleased={calendarReadingReleased}
         mailReadingReleased={mailReadingReleased}
         mailSendingReleased={mailSendingReleased}

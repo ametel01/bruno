@@ -229,6 +229,26 @@ describe("Founder AI connection route", () => {
     expect(mocks.startAnthropicAuthorization).not.toHaveBeenCalled();
   });
 
+  it("reads Anthropic state through the Anthropic recheck for General Release setup", async () => {
+    const { GET } = await import("@/app/api/operator/connections/route");
+    const response = await GET(
+      new Request("http://localhost/api/operator/connections?provider=anthropic"),
+      undefined,
+      {
+        hasGeneralReleaseSetupAccess: async () => true,
+        isAnthropicReleased: () => true,
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      connection: { provider: "anthropic" },
+    });
+    expect(mocks.recheckAnthropicConnection).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.getConnection).not.toHaveBeenCalled();
+    expect(mocks.recheckConnection).not.toHaveBeenCalled();
+  });
+
   it("does not let missing Anthropic evidence block released OpenAI", async () => {
     const { POST } = await import("@/app/api/operator/connections/route");
     const response = await POST(
@@ -242,6 +262,32 @@ describe("Founder AI connection route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.startAuthorization).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.startAnthropicAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("rejects an explicitly unsupported provider without invoking OpenAI", async () => {
+    const { GET, POST } = await import("@/app/api/operator/connections/route");
+    const read = await GET(
+      new Request("http://localhost/api/operator/connections?provider=unsupported"),
+    );
+    const start = await POST(
+      new Request("http://localhost/api/operator/connections", {
+        method: "POST",
+        body: JSON.stringify({ action: "start", provider: "unsupported" }),
+      }),
+    );
+
+    expect(read.status).toBe(400);
+    expect(start.status).toBe(400);
+    await expect(read.json()).resolves.toMatchObject({
+      error: { code: "validation_failed", message: "Choose a supported AI provider." },
+    });
+    await expect(start.json()).resolves.toMatchObject({
+      error: { code: "validation_failed", message: "Choose a supported AI provider." },
+    });
+    expect(mocks.getConnection).not.toHaveBeenCalled();
+    expect(mocks.startAuthorization).not.toHaveBeenCalled();
+    expect(mocks.recheckAnthropicConnection).not.toHaveBeenCalled();
     expect(mocks.startAnthropicAuthorization).not.toHaveBeenCalled();
   });
 

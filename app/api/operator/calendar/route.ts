@@ -36,6 +36,7 @@ export async function GET(
   const accessError = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
     FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarRelationshipEvidence,
+    { allowGeneralReleaseSetup: true },
   );
   if (accessError) return accessError;
   if (!(dependencies.isCalendarReleased ?? isFounderGoogleCalendarReleased)()) {
@@ -71,6 +72,7 @@ export async function POST(
       const accessError = await requireFounderOperatorWorkspaceAccess(
         applicationUser.userId,
         FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.calendarRelationshipEvidence,
+        { allowGeneralReleaseSetup: true },
       );
       if (accessError) return accessError;
     }

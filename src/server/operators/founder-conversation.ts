@@ -12,6 +12,10 @@ import {
   operatorConversationWorks,
 } from "@/src/server/db/schema";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import {
+  founderGeneralReleaseAuthorizesNewWorkInTransaction,
+  founderGeneralReleaseUsesPublicAiRoutingInTransaction,
+} from "@/src/server/founder-product-contract/initial-general-release";
 import type {
   requireFounderOwnerPreviewAccessForUser,
   requireFounderOwnerPreviewAccessInTransaction,
@@ -139,6 +143,7 @@ export class FounderConversationError extends Error {
   readonly code:
     | "invalid_message"
     | "operator_not_ready"
+    | "product_entitlement_required"
     | "conversation_unavailable"
     | "conversation_ai_unavailable";
   readonly status: 400 | 403 | 409 | 503;
@@ -215,6 +220,12 @@ export async function sendFounderConversationMessageForUser(
       conversationWorkAuthorityDependencies(connection, dependencies),
       async (tx, checkedAt) => {
         await lockOperator(tx, operator.id);
+        if (!(await founderGeneralReleaseAuthorizesNewWorkInTransaction(tx, userId, checkedAt))) {
+          throw new FounderConversationError(
+            "product_entitlement_required",
+            "New Operator work is paused after Founder Activation until Product Entitlement is verified.",
+          );
+        }
         const conversation = await ensureConversation(tx, operator.id, checkedAt);
         const [existing] = await tx
           .select()
@@ -303,9 +314,13 @@ export async function sendFounderConversationMessageForUser(
     }
 
     const routed = await connection.db.transaction(async (tx) => {
+      const publicGeneralRelease = await founderGeneralReleaseUsesPublicAiRoutingInTransaction(
+        tx,
+        userId,
+      );
       const decision = await routeFounderAiProvider(tx, operator.id, {
         now: now(),
-        allowedProviders: ["openai"],
+        allowedProviders: publicGeneralRelease ? ["openai", "anthropic"] : ["openai"],
         ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
       });
       if (!decision) return null;
@@ -343,7 +358,7 @@ export async function sendFounderConversationMessageForUser(
       );
     }
     const provider = routed?.provider ?? readyConnection.provider;
-    if (provider !== "openai") {
+    if (provider !== "openai" && !routed) {
       return finalizePausedConversation(
         connection,
         started,
@@ -485,9 +500,13 @@ export async function resumeFounderConversationWorkForUser(
           };
         }
 
+        const publicGeneralRelease = await founderGeneralReleaseUsesPublicAiRoutingInTransaction(
+          tx,
+          userId,
+        );
         const decision = await routeFounderAiProvider(tx, operator.id, {
           now: checkedAt,
-          allowedProviders: ["openai"],
+          allowedProviders: publicGeneralRelease ? ["openai", "anthropic"] : ["openai"],
           ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
         });
         if (!decision) return { kind: "unchanged" as const, conversation };
@@ -606,6 +625,7 @@ function conversationWorkAuthorityDependencies(
 ): Parameters<typeof withFounderOwnerPreviewWorkAuthority>[1] {
   return {
     createConnection: () => connection,
+    generalReleaseAuthority: "work",
     ...(dependencies.applicationRevision
       ? { applicationRevision: dependencies.applicationRevision }
       : {}),

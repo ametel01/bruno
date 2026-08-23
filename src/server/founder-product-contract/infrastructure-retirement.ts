@@ -19,7 +19,11 @@ import type {
 } from "@/src/server/runners/digitalocean-provider";
 import { digitalOceanRunnerFirewallName } from "@/src/server/runners/runner-provisioning";
 import { founderProductContractDigest } from "./digest";
-import { requireRetirementDue } from "./entitlement";
+import { findProductEntitlementRetirementDue } from "./entitlement";
+import {
+  markFounderGeneralReleaseRetiredInTransaction,
+  requireFounderGeneralReleaseRetirementDueInTransaction,
+} from "./initial-general-release";
 import {
   lockFounderProductContractLifecycleInTransaction,
   requireActiveFounderOperatorAuthorityInTransaction,
@@ -286,7 +290,12 @@ async function prepareFounderInfrastructureRetirement(
     if (!runtime?.configRevision) {
       throw new Error("Infrastructure Retirement requires a persisted runtime revision.");
     }
-    const hardDestructionDueAt = await requireRetirementDue(tx, input.userId, input.now);
+    const hardDestructionDueAt =
+      (await findProductEntitlementRetirementDue(tx, input.userId, input.now)) ??
+      (await requireFounderGeneralReleaseRetirementDueInTransaction(tx, input.userId, input.now));
+    if (!hardDestructionDueAt) {
+      throw new Error("Infrastructure Retirement is not due.");
+    }
 
     const existingCandidates = await tx
       .select()
@@ -674,6 +683,7 @@ async function completeFounderInfrastructureRetirement(
         updatedAt: input.now,
       })
       .where(eq(founderInfrastructureRetirements.id, work.receiptId));
+    await markFounderGeneralReleaseRetiredInTransaction(tx, input.userId, input.now);
   });
 }
 

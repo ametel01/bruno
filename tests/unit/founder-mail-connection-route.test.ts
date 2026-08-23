@@ -156,6 +156,7 @@ describe("Founder Gmail reading route", () => {
       getOfferDisposition: vi.fn(async () => null),
       startAuthorization,
       isMailReadingReleased: () => false,
+      hasGeneralReleaseSetupAccess: async () => true,
     };
 
     const getResponse = await GET(
@@ -175,9 +176,23 @@ describe("Founder Gmail reading route", () => {
     expect(getResponse.status).toBe(409);
     expect(startResponse.status).toBe(409);
     expect(await startResponse.json()).toMatchObject({
-      error: { code: "owner_preview_capability_unavailable" },
+      error: { code: "provider_not_released" },
     });
     expect(getConnection).not.toHaveBeenCalled();
     expect(startAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("exposes released Gmail reading during public General Release setup", async () => {
+    const getConnection = vi.fn(async () => CONNECTION);
+    const response = await GET(new Request("http://localhost/api/operator/mail"), undefined, {
+      requireApplicationUser: async () => ({ ok: true, userId: USER_ID }),
+      getConnection,
+      getOfferDisposition: async () => "enabled" as const,
+      isMailReadingReleased: () => true,
+      hasGeneralReleaseSetupAccess: async () => true,
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ connection: CONNECTION });
+    expect(getConnection).toHaveBeenCalledWith(USER_ID);
   });
 });

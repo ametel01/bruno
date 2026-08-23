@@ -41,6 +41,8 @@ export function FounderOperatorPreparation({
   trustedPreviewInvitationToken,
   timezoneOptions = DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
   openAiReleased = false,
+  anthropicReleased = false,
+  generalReleaseSetupAvailable = false,
   calendarReadingReleased = false,
   mailReadingReleased = false,
   mailSendingReleased = false,
@@ -57,6 +59,8 @@ export function FounderOperatorPreparation({
   trustedPreviewInvitationToken?: string;
   timezoneOptions?: ReadonlyArray<FounderTimezoneOption>;
   openAiReleased?: boolean;
+  anthropicReleased?: boolean;
+  generalReleaseSetupAvailable?: boolean;
   calendarReadingReleased?: boolean;
   mailReadingReleased?: boolean;
   mailSendingReleased?: boolean;
@@ -404,6 +408,7 @@ export function FounderOperatorPreparation({
   const runtimeNeedsAttention = runtime?.status === "needs_attention";
   const activated = onboarding?.activated === true;
   const workspaceAvailable = admitted;
+  const setupWorkspaceAvailable = workspaceAvailable || generalReleaseSetupAvailable;
 
   return (
     <div className={styles.content}>
@@ -634,29 +639,36 @@ export function FounderOperatorPreparation({
         <FounderMailSendingConnection />
       ) : null}
 
-      {workspaceAvailable &&
+      {setupWorkspaceAvailable &&
       openAiReleased &&
-      (!ownerPreviewExperience || previewStatus.availableCapabilities.includes("OpenAI")) ? (
-        <FounderAiConnection />
+      (generalReleaseSetupAvailable ||
+        !ownerPreviewExperience ||
+        previewStatus.availableCapabilities.includes("OpenAI")) ? (
+        <FounderAiConnection provider="openai" />
       ) : null}
 
-      {workspaceAvailable &&
+      {setupWorkspaceAvailable && generalReleaseSetupAvailable && anthropicReleased ? (
+        <FounderAiConnection provider="anthropic" />
+      ) : null}
+
+      {setupWorkspaceAvailable &&
       calendarReadingReleased &&
-      (!ownerPreviewExperience ||
+      (generalReleaseSetupAvailable ||
+        !ownerPreviewExperience ||
         previewStatus.availableCapabilities.includes("Calendar reading")) ? (
         <FounderCalendarConnection />
       ) : null}
 
-      {!ownerPreviewExperience &&
-      workspaceAvailable &&
+      {(generalReleaseSetupAvailable || !ownerPreviewExperience) &&
+      setupWorkspaceAvailable &&
       mailReadingReleased &&
       mailReleaseControls ? (
         <FounderMailConnection releaseControls={mailReleaseControls} />
       ) : null}
 
       {!activated &&
-      workspaceAvailable &&
-      !ownerPreviewExperience &&
+      setupWorkspaceAvailable &&
+      (generalReleaseSetupAvailable || !ownerPreviewExperience) &&
       onboarding?.operation === "core" ? (
         <FounderCoreOperation />
       ) : null}

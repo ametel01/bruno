@@ -46,6 +46,9 @@ export async function createFounderProductContractFixture(
   const runtimeId = randomUUID();
   const runnerId = randomUUID();
   const credentialId = randomUUID();
+  const aiConnectionId = randomUUID();
+  const calendarConnectionId = randomUUID();
+  const mailConnectionId = randomUUID();
   const expiredArchiveId = randomUUID();
   const checkoutCorrelation = `${randomUUID()}.${randomUUID()}`;
   const createdAt = clock.now().toISOString();
@@ -60,6 +63,11 @@ export async function createFounderProductContractFixture(
     await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${runtimeId}, ${operatorId}, 'ready', 'connected', 'verified', 'founder-contract-v1', 'founder-contract-runtime', 1, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
     await sql`insert into runners (id, user_id, name, kind, status, provider, provider_resource_id, provider_firewall_id, region, size_slug, image, provisioning_status, provisioning_operation_key, provisioning_started_at, provisioning_completed_at, created_at, updated_at) values (${runnerId}, ${userId}, ${`founder-${runnerId}`}, 'digitalocean', 'online', 'digitalocean', ${`droplet-${runnerId}`}, ${`firewall-${runnerId}`}, 'sfo3', 's-1vcpu-1gb', 'ubuntu-24-04-x64', 'ready', ${`bruno-deploy-${runnerId.replaceAll("-", "")}`}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
     await sql`insert into runner_credentials (id, runner_id, credential_hash, credential_prefix, status, created_at, updated_at) values (${credentialId}, ${runnerId}, ${`sha256:${runnerId.replaceAll("-", "")}`}, 'fpct', 'active', ${createdAt}, ${readyAt})`;
+    await sql`insert into runner_provisioning_events (runner_id, phase, status, message, metadata, created_at) values (${runnerId}, 'creating', 'completed', 'Provider creation confirmed.', ${sql.json({ providerCreatedAt: readyAt })}, ${readyAt})`;
+    await sql`insert into operator_ai_connections (id, operator_id, provider, provider_subject_id, account_label, status, authorization_state, capacity_state, inference_state, eligible_account, authorization_persisted, approved_model_assignment, authorized_at, last_verified_at, created_at, updated_at) values (${aiConnectionId}, ${operatorId}, 'openai', ${`openai-${userId}`}, 'Founder OpenAI', 'ready', 'authorized', 'available', 'passed', true, true, 'openai-codex', ${readyAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
+    await sql`insert into operator_calendar_connections (id, operator_id, provider, provider_subject_id, account_label, status, authorization_state, access_token_ciphertext, access_token_iv, access_token_auth_tag, refresh_token_ciphertext, refresh_token_iv, refresh_token_auth_tag, secret_key_version, granted_scopes, authorized_at, last_verified_at, last_evidence_at, last_evidence_count, evidence_state, created_at, updated_at) values (${calendarConnectionId}, ${operatorId}, 'google_calendar', ${`google-${userId}`}, 'founder@example.com', 'ready', 'authorized', 'a', 'b', 'c', 'd', 'e', 'f', 'test-v1', ${sql.json(["calendar.readonly"])}, ${readyAt}, ${readyAt}, ${readyAt}, 1, 'current', ${createdAt}, ${readyAt})`;
+    await sql`insert into operator_mail_connections (id, operator_id, provider, provider_subject_id, account_label, status, authorization_state, access_token_ciphertext, access_token_iv, access_token_auth_tag, refresh_token_ciphertext, refresh_token_iv, refresh_token_auth_tag, secret_key_version, granted_scopes, authorized_at, last_verified_at, last_evidence_at, last_evidence_count, evidence_state, suite_status, created_at, updated_at) values (${mailConnectionId}, ${operatorId}, 'google_gmail', ${`google-${userId}`}, 'founder@example.com', 'ready', 'authorized', 'a', 'b', 'c', 'd', 'e', 'f', 'test-v1', ${sql.json(["gmail.readonly"])}, ${readyAt}, ${readyAt}, ${readyAt}, 1, 'current', 'matched', ${createdAt}, ${readyAt})`;
+    await sql`insert into operator_primary_communications_suites (operator_id, calendar_connection_id, mail_connection_id, provider_subject_id, status, created_at, updated_at) values (${operatorId}, ${calendarConnectionId}, ${mailConnectionId}, ${`google-${userId}`}, 'active', ${createdAt}, ${readyAt})`;
     await sql`insert into founder_checkout_correlations (user_id, correlation_digest, status, created_at, expires_at) values (${userId}, ${`sha256:${createHash("sha256").update(checkoutCorrelation).digest("hex")}`}, 'pending', ${createdAt}, ${new Date(clock.now().valueOf() + 60 * 60 * 1_000).toISOString()})`;
     await sql`insert into founder_recovery_archives (id, user_id, operator_id, status, format_version, storage_object_key, recovery_credential_object_key, ciphertext_digest, recovery_credential_digest, state_digest, restorable_verified, restore_verified_at, failure_code, observed_at, expires_at, created_at, deleted_at) values (${expiredArchiveId}, ${userId}, ${operatorId}, 'verified', 1, ${`founder-recovery/expired/${expiredArchiveId}.age`}, ${`founder-recovery/expired/${expiredArchiveId}.key`}, ${`sha256:${createHash("sha256").update(`expired:${userId}`).digest("hex")}`}, ${`sha256:${createHash("sha256").update(`expired-credential:${userId}`).digest("hex")}`}, ${`sha256:${createHash("sha256").update(`expired-state:${userId}`).digest("hex")}`}, true, ${expiredArchiveObservedAt.toISOString()}, null, ${expiredArchiveObservedAt.toISOString()}, ${expiredArchiveExpiresAt.toISOString()}, ${expiredArchiveObservedAt.toISOString()}, null)`;
   });
@@ -72,28 +80,48 @@ export async function deleteFounderProductContractFixture(
   options: { retainScenarioExecutions?: boolean } = {},
 ): Promise<void> {
   await withFounderProductContractDatabase(async (sql) => {
-    const contractRunId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID;
-    if (contractRunId) {
-      await sql`delete from founder_preview_qualifications where cohort = ${`external-beta-contract:${contractRunId}`}`;
-    }
-    if (!options.retainScenarioExecutions) {
-      await sql`delete from founder_product_contract_scenario_executions where user_id = ${fixture.userId}`;
-    }
-    await sql`delete from founder_infrastructure_retirements where user_id = ${fixture.userId}`;
-    await sql`delete from founder_product_entitlements where user_id = ${fixture.userId}`;
-    await sql`delete from founder_commerce_events where user_id = ${fixture.userId}`;
-    await sql`delete from founder_checkout_correlations where user_id = ${fixture.userId}`;
-    await sql`delete from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId}`;
-    await sql`delete from founder_recovery_archives where user_id = ${fixture.userId}`;
-    await sql`delete from founder_release_decisions where user_id = ${fixture.userId}`;
-    await sql`delete from runner_credentials where runner_id in (select id from runners where user_id = ${fixture.userId})`;
-    await sql`delete from runners where user_id = ${fixture.userId}`;
-    await sql`delete from operator_conversations where operator_id = ${fixture.operatorId}`;
-    await sql`delete from operator_runtimes where operator_id = ${fixture.operatorId}`;
-    await sql`delete from operator_preparations where operator_id = ${fixture.operatorId}`;
-    await sql`delete from operators where id = ${fixture.operatorId}`;
-    await sql`delete from users where id = ${fixture.userId}`;
-    await sql`delete from app_metadata where key = 'founder_owner_preview_owner_user_id:v1' and value = ${fixture.userId}`;
+    await sql.begin(async (tx) => {
+      // The signed lifecycle deliberately creates immutable audit rows. The FPC
+      // database is an isolated test database, so suppress user triggers only
+      // for this fixture-cleanup transaction and restore them automatically at
+      // commit.
+      await tx`set local session_replication_role = replica`;
+      const contractRunId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID;
+      if (contractRunId) {
+        await tx`delete from founder_preview_qualifications where cohort = ${`external-beta-contract:${contractRunId}`}`;
+      }
+      if (!options.retainScenarioExecutions) {
+        await tx`delete from founder_product_contract_scenario_executions where user_id = ${fixture.userId}`;
+      }
+      await tx`delete from founder_infrastructure_retirements where user_id = ${fixture.userId}`;
+      await tx`delete from founder_general_release_activations where user_id = ${fixture.userId}`;
+      await tx`delete from founder_product_entitlements where user_id = ${fixture.userId}`;
+      await tx`delete from founder_commerce_events where user_id = ${fixture.userId}`;
+      await tx`delete from founder_checkout_correlations where user_id = ${fixture.userId}`;
+      await tx`delete from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId}`;
+      await tx`delete from founder_recovery_archives where user_id = ${fixture.userId}`;
+      await tx`delete from founder_release_decisions where user_id = ${fixture.userId}`;
+      await tx`delete from runner_credentials where runner_id in (select id from runners where user_id = ${fixture.userId})`;
+      await tx`delete from runner_provisioning_events where runner_id in (select id from runners where user_id = ${fixture.userId})`;
+      await tx`delete from runners where user_id = ${fixture.userId}`;
+      await tx`delete from operator_conversations where operator_id = ${fixture.operatorId}`;
+      await tx`delete from operator_founder_activations where operator_id = ${fixture.operatorId}`;
+      await tx`delete from operator_limited_operations where operator_id = ${fixture.operatorId}`;
+      await tx`delete from operator_morning_brief_items where brief_id in (select id from operator_morning_briefs where operator_id = ${fixture.operatorId})`;
+      await tx`delete from operator_morning_briefs where operator_id = ${fixture.operatorId}`;
+      await tx`delete from operator_governance_receipts where operator_id = ${fixture.operatorId}`;
+      await tx`delete from operator_processing_consents where operator_id = ${fixture.operatorId}`;
+      await tx`delete from operator_authority_policies where operator_id = ${fixture.operatorId}`;
+      await tx`delete from operator_primary_communications_suites where operator_id = ${fixture.operatorId}`;
+      await tx`delete from operator_mail_connections where operator_id = ${fixture.operatorId}`;
+      await tx`delete from operator_calendar_connections where operator_id = ${fixture.operatorId}`;
+      await tx`delete from operator_ai_connections where operator_id = ${fixture.operatorId}`;
+      await tx`delete from operator_runtimes where operator_id = ${fixture.operatorId}`;
+      await tx`delete from operator_preparations where operator_id = ${fixture.operatorId}`;
+      await tx`delete from operators where id = ${fixture.operatorId}`;
+      await tx`delete from users where id = ${fixture.userId}`;
+      await tx`delete from app_metadata where key = 'founder_owner_preview_owner_user_id:v1' and value = ${fixture.userId}`;
+    });
   });
 }
 
@@ -142,7 +170,7 @@ export async function assertPersistedFounderLifecycleAuthority(
     expect(authority).toMatchObject({
       release_decisions: 3,
       release_decision_outcomes: ["enter", "hold", "resume"],
-      scenario_executions: 4,
+      scenario_executions: 5,
       commerce_events: 2,
       terminal_entitlements: 1,
       consumed_correlations: 1,

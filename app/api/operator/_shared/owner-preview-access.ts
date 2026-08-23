@@ -1,4 +1,5 @@
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
+import { hasFounderGeneralReleaseSetupAccessForUser } from "@/src/server/founder-product-contract/initial-general-release";
 import {
   type FounderOwnerPreviewAccessRequirement,
   FounderReleaseStageAccessError,
@@ -13,6 +14,8 @@ export async function requireFounderOperatorWorkspaceAccess(
     authMode?: Parameters<typeof requiresFounderReleaseStageAuthority>[0];
     now?: () => Date;
     requireAccess?: typeof requireFounderOwnerPreviewAccessForUser;
+    allowGeneralReleaseSetup?: boolean;
+    hasGeneralReleaseSetupAccess?: typeof hasFounderGeneralReleaseSetupAccessForUser;
   } = {},
 ): Promise<Response | null> {
   const authMode = dependencies.authMode ?? resolveAuthMode(process.env).mode;
@@ -27,7 +30,14 @@ export async function requireFounderOperatorWorkspaceAccess(
     return null;
   } catch (error) {
     const response = founderOperatorAccessErrorResponse(error);
-    if (response) return response;
+    if (response && dependencies.allowGeneralReleaseSetup) {
+      const hasSetupAccess =
+        dependencies.hasGeneralReleaseSetupAccess ?? hasFounderGeneralReleaseSetupAccessForUser;
+      if (await hasSetupAccess(userId)) return null;
+    }
+    if (response) {
+      return response;
+    }
     throw error;
   }
 }

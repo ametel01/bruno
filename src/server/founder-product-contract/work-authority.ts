@@ -9,6 +9,10 @@ import {
 } from "./operator-authority";
 import type { FounderOwnerPreviewCapabilityRequirement } from "./preview-qualification";
 import {
+  founderGeneralReleaseAuthorizesWorkAuthorityInTransaction,
+  founderGeneralReleaseSetupAuthorizesInTransaction,
+} from "./initial-general-release";
+import {
   FounderReleaseStageAccessError,
   reconcileFounderPreviewQualificationExpiryInTransaction,
   requireFounderOwnerPreviewAccessForUser,
@@ -21,6 +25,7 @@ export type FounderOwnerPreviewWorkAuthorityDependencies = {
   env?: Record<string, string | undefined>;
   requireReleaseStageAccess?: typeof requireFounderOwnerPreviewAccessInTransaction;
   requireReleaseStageAccessForUser?: typeof requireFounderOwnerPreviewAccessForUser;
+  generalReleaseAuthority?: "setup" | "work";
 };
 
 async function preflightFounderOwnerPreviewWorkAuthority(
@@ -71,15 +76,24 @@ export async function withFounderOwnerPreviewWorkAuthority<T>(
   const applicationRevision = readFounderApplicationRevision(dependencies) ?? "";
 
   try {
-    await preflightFounderOwnerPreviewWorkAuthority(
-      input.userId,
-      input.now(),
-      input.requiredCapabilities,
-      {
-        ...dependencies,
-        createConnection: () => connection,
-      },
-    );
+    try {
+      await preflightFounderOwnerPreviewWorkAuthority(
+        input.userId,
+        input.now(),
+        input.requiredCapabilities,
+        {
+          ...dependencies,
+          createConnection: () => connection,
+        },
+      );
+    } catch (error) {
+      if (
+        !(error instanceof FounderReleaseStageAccessError) ||
+        !dependencies.generalReleaseAuthority
+      ) {
+        throw error;
+      }
+    }
 
     const outcome = await connection.db.transaction(async (tx) => {
       const now = input.now();
@@ -102,9 +116,16 @@ export async function withFounderOwnerPreviewWorkAuthority<T>(
         });
       } catch (error) {
         if (error instanceof FounderReleaseStageAccessError) {
-          return { ok: false as const, error };
+          const generalReleaseAuthorized =
+            dependencies.generalReleaseAuthority === "setup"
+              ? await founderGeneralReleaseSetupAuthorizesInTransaction(tx, input.userId, now)
+              : dependencies.generalReleaseAuthority === "work"
+                ? await founderGeneralReleaseAuthorizesWorkAuthorityInTransaction(tx, input.userId)
+                : false;
+          if (!generalReleaseAuthorized) return { ok: false as const, error };
+        } else {
+          throw error;
         }
-        throw error;
       }
       return { ok: true as const, value: await work(tx, now) };
     });
