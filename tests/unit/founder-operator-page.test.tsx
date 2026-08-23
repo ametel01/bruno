@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getOnboarding: vi.fn(),
   getOperator: vi.fn(),
   getInfrastructureRetirementStatus: vi.fn(),
+  getExternalBetaPrivacyStatus: vi.fn(),
   getExternalBetaStatus: vi.fn(),
   getOwnerPreviewAccess: vi.fn(),
   getRecoveryArchiveStatus: vi.fn(),
@@ -41,6 +42,10 @@ vi.mock("@/src/server/founder-product-contract/infrastructure-retirement", () =>
 
 vi.mock("@/src/server/founder-product-contract/external-beta-manifest", () => ({
   getFounderExternalBetaManifestStatusForUser: mocks.getExternalBetaStatus,
+}));
+
+vi.mock("@/src/server/founder-product-contract/external-beta-privacy", () => ({
+  getFounderExternalBetaPrivacyStatusForUser: mocks.getExternalBetaPrivacyStatus,
 }));
 
 vi.mock("@/src/server/founder-product-contract/release-stage-access", () => ({
@@ -84,6 +89,7 @@ describe("Founder Operator page", () => {
     });
     mocks.getOnboarding.mockResolvedValue(undefined);
     mocks.getInfrastructureRetirementStatus.mockResolvedValue({ state: "unavailable" });
+    mocks.getExternalBetaPrivacyStatus.mockResolvedValue({ state: "unavailable" });
     mocks.getExternalBetaStatus.mockResolvedValue({
       stage: "External Beta",
       state: "limited",

@@ -181,7 +181,9 @@ object identities are persisted before provider upload, so interrupted, partial,
 creations remain eligible for 30-day deletion and a bounded receipt rather than becoming orphaned
 objects. Each archive intent persists its trusted runtime revision before upload; reuse, admission,
 and work authorization require that revision to match, while migrated archives without provable
-revision identity fail closed. Completed Infrastructure Retirement ends daily replacement creation until later admission
+revision identity fail closed. External Beta recording cleanup persists verified late deletion as a
+terminal breach receipt and reports the breach without suppressing Infrastructure Retirement; both
+cleanup outcomes remain independently observable from the scheduled run. Completed Infrastructure Retirement ends daily replacement creation until later admission
 authority restores the Operator; the final retained archive still reaches the same expiry boundary.
 Retirement also invalidates the destroyed Operator runtime in the same completion transaction, so
 the runtime cannot remain Ready after its Droplet and firewall are absent. Archive restore proof

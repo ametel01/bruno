@@ -6,6 +6,11 @@ import {
 import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 import { createEncryptedFounderRecoveryArchiveProvider } from "@/src/server/founder-product-contract/encrypted-recovery-archive-provider";
 import { reconcileFounderExternalBetaRetirements } from "@/src/server/founder-product-contract/external-beta-retirement";
+import {
+  createFounderExternalBetaRecordingProvider,
+  reconcileFounderExternalBetaRecordingRetention,
+  type FounderExternalBetaRecordingProvider,
+} from "@/src/server/founder-product-contract/external-beta-privacy";
 import type { FounderInfrastructureRetirementProvider } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import { DigitalOceanApiProvider } from "@/src/server/runners/digitalocean-provider";
 
@@ -17,7 +22,9 @@ type RouteDependencies = {
   authorize?: typeof isAuthorizedCronRequest;
   readApplicationRevision?: () => string | null;
   createProviders?: () => FounderInfrastructureRetirementProvider | null;
+  createRecordingProvider?: () => FounderExternalBetaRecordingProvider | null;
   reconcile?: typeof reconcileFounderExternalBetaRetirements;
+  reconcileRecordings?: typeof reconcileFounderExternalBetaRecordingRetention;
   now?: () => Date;
 };
 
@@ -39,29 +46,61 @@ export async function GET(
   if (new URL(request.url).search.length > 0 || request.body !== null) {
     return errorResponse(400, "external_beta_retirement_request_invalid");
   }
+  const now = dependencies.now?.() ?? new Date();
+  let recordingDeletion: { deleted: number; late: number; failed: number };
+  try {
+    recordingDeletion = await (
+      dependencies.reconcileRecordings ?? reconcileFounderExternalBetaRecordingRetention
+    )(now, (dependencies.createRecordingProvider ?? createFounderExternalBetaRecordingProvider)());
+  } catch {
+    recordingDeletion = { deleted: 0, late: 0, failed: 1 };
+  }
   const applicationRevision = (
     dependencies.readApplicationRevision ?? readFounderApplicationRevision
   )();
   if (!applicationRevision) {
-    return errorResponse(503, "external_beta_retirement_configuration_invalid");
+    return errorResponse(503, "external_beta_retirement_configuration_invalid", {
+      recordingDeletion,
+    });
   }
   let providers: FounderInfrastructureRetirementProvider | null;
   try {
     providers = (dependencies.createProviders ?? createConfiguredProviders)();
   } catch {
-    return errorResponse(503, "external_beta_retirement_configuration_invalid");
+    return errorResponse(503, "external_beta_retirement_configuration_invalid", {
+      recordingDeletion,
+    });
   }
-  if (!providers) return errorResponse(503, "external_beta_retirement_configuration_invalid");
+  if (!providers) {
+    return errorResponse(503, "external_beta_retirement_configuration_invalid", {
+      recordingDeletion,
+    });
+  }
 
   try {
     const result = await (dependencies.reconcile ?? reconcileFounderExternalBetaRetirements)({
       applicationRevision,
-      now: dependencies.now?.() ?? new Date(),
+      now,
       providers,
     });
-    return Response.json({ ok: true, ...result }, { headers: noStoreHeaders() });
+    if (recordingDeletion.failed > 0 || recordingDeletion.late > 0) {
+      return errorResponse(
+        500,
+        recordingDeletion.failed > 0
+          ? "external_beta_recording_deletion_failed"
+          : "external_beta_recording_retention_breached",
+        { retirement: { ok: true, ...result }, recordingDeletion },
+      );
+    }
+    return Response.json({ ok: true, ...result, recordingDeletion }, { headers: noStoreHeaders() });
   } catch {
-    return errorResponse(500, "external_beta_retirement_processing_failed");
+    return errorResponse(
+      500,
+      recordingDeletion.failed > 0 || recordingDeletion.late > 0
+        ? "external_beta_retirement_and_recording_deletion_failed"
+        : "external_beta_retirement_processing_failed",
+      { retirement: { ok: false }, recordingDeletion },
+    );
   }
 }
 
@@ -78,9 +117,16 @@ function createConfiguredProviders(): FounderInfrastructureRetirementProvider | 
   };
 }
 
-function errorResponse(status: number, code: string): Response {
+function errorResponse(
+  status: number,
+  code: string,
+  outcomes: Record<string, unknown> = {},
+): Response {
   return Response.json(
-    { error: { code, message: "External Beta retirement processing failed safely." } },
+    {
+      ...outcomes,
+      error: { code, message: "External Beta retirement processing failed safely." },
+    },
     { status, headers: noStoreHeaders() },
   );
 }

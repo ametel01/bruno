@@ -676,6 +676,7 @@ describe("Founder Infrastructure Retirement deadline", () => {
           customerPause: false,
         },
       }),
+      deleteExternalBetaRecording: async () => ({ absent: true }),
       createRecoveryArchive:
         input.createRecoveryArchive ??
         ((archiveInput) => archiveProvider.createRecoveryArchive(archiveInput)),

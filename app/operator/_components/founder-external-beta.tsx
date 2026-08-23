@@ -3,16 +3,23 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { FounderExternalBetaStatus } from "@/src/server/founder-product-contract/external-beta-admission";
+import type {
+  FounderExternalBetaConsentDecision,
+  FounderExternalBetaConsentPurpose,
+  FounderExternalBetaPrivacyStatus,
+} from "@/src/server/founder-product-contract/external-beta-privacy";
 import { founderExternalBetaCapabilityLabel } from "@/src/shared/founder-external-beta";
 
 const EXTERNAL_BETA_COMPACT_VERSION = "bruno.external-beta-compact.v1" as const;
 
 export function FounderExternalBeta({
   initialStatus,
+  initialPrivacy = { state: "unavailable" },
   invitationToken,
   workspaceReference,
 }: {
   initialStatus: FounderExternalBetaStatus;
+  initialPrivacy?: FounderExternalBetaPrivacyStatus;
   invitationToken?: string;
   workspaceReference?: string;
 }) {
@@ -164,11 +171,165 @@ export function FounderExternalBeta({
         {" · "}
         <Link href="/operator/privacy#bruno-data-deletion">Request Bruno Data Deletion</Link>
       </p>
+      {initialPrivacy.state === "available" ? (
+        <FounderExternalBetaPrivacyControls initialStatus={initialPrivacy} />
+      ) : null}
       {status.withdrawalAvailable ? (
         <button type="button" disabled={busy} onClick={() => void withdraw()}>
           {busy ? "Stopping…" : "Withdraw from External Beta"}
         </button>
       ) : null}
+      {message ? <p role="status">{message}</p> : null}
+    </section>
+  );
+}
+
+const CONSENT_LABELS: Record<FounderExternalBetaConsentPurpose, string> = {
+  measurement: "Operational measurement",
+  feedback: "Beta feedback",
+  recording: "Research recording",
+  testimonial: "Testimonial use",
+  identity: "Identity use",
+  name: "Name use",
+  logo: "Logo use",
+  quotation: "Quotation use",
+  case_study: "Case-study use",
+};
+
+function FounderExternalBetaPrivacyControls({
+  initialStatus,
+}: {
+  initialStatus: Extract<FounderExternalBetaPrivacyStatus, { state: "available" }>;
+}) {
+  const [status, setStatus] = useState(initialStatus);
+  const [busyPurpose, setBusyPurpose] = useState<FounderExternalBetaConsentPurpose | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function decide(
+    purpose: FounderExternalBetaConsentPurpose,
+    decision: FounderExternalBetaConsentDecision,
+  ) {
+    setBusyPurpose(purpose);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/operator/external-beta/privacy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "decide_consent", purpose, decision }),
+      });
+      if (!response.ok) throw new Error("This privacy choice could not be saved.");
+      const body = (await response.json()) as {
+        privacy: Extract<FounderExternalBetaPrivacyStatus, { state: "available" }>;
+      };
+      setStatus(body.privacy);
+      setMessage("Your External Beta privacy choice was saved without changing product access.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "This privacy choice could not be saved.",
+      );
+    } finally {
+      setBusyPurpose(null);
+    }
+  }
+
+  async function exportPrivacyData() {
+    setMessage(null);
+    const response = await fetch("/api/operator/external-beta/privacy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ action: "export" }),
+    });
+    if (!response.ok) {
+      setMessage("External Beta privacy data could not be exported.");
+      return;
+    }
+    const payload = await response.json();
+    const url = URL.createObjectURL(
+      new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "bruno-external-beta-privacy.json";
+    link.click();
+    URL.revokeObjectURL(url);
+    setMessage("External Beta privacy export created.");
+  }
+
+  async function deleteMeasurements() {
+    setMessage(null);
+    const response = await fetch("/api/operator/external-beta/privacy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ action: "delete_measurements" }),
+    });
+    setMessage(
+      response.ok
+        ? "Your External Beta measurements were deleted. Product access is unchanged."
+        : "External Beta measurements could not be deleted.",
+    );
+  }
+
+  return (
+    <section aria-labelledby="external-beta-privacy-title">
+      <h3 id="external-beta-privacy-title">External Beta privacy</h3>
+      <p>
+        Nothing is measured until you opt in. Bruno.Ai never uses autocapture, session replay, or
+        person profiles for External Beta learning.
+      </p>
+      <p>
+        Collected only with measurement consent: {status.collection.allowlistedFacts.join(", ")}.
+      </p>
+      <p>Never collected: {status.collection.neverCollected.join(", ")}.</p>
+      <p>
+        Recordings are a separate choice and are deleted within {status.recordingRetentionDays} days
+        with verified deletion. Every marketing use is also a separate choice.
+      </p>
+      <p>{status.evidenceClassification}.</p>
+      <dl>
+        {Object.entries(CONSENT_LABELS).map(([purpose, label]) => {
+          const typedPurpose = purpose as FounderExternalBetaConsentPurpose;
+          const consent = status.consent[typedPurpose];
+          return (
+            <div key={purpose}>
+              <dt>{label}</dt>
+              <dd>{consent.replace("_", " ")}</dd>
+              <dd>
+                <button
+                  type="button"
+                  disabled={busyPurpose === typedPurpose}
+                  onClick={() => void decide(typedPurpose, "grant")}
+                >
+                  Allow
+                </button>{" "}
+                <button
+                  type="button"
+                  disabled={busyPurpose === typedPurpose}
+                  onClick={() => void decide(typedPurpose, "refuse")}
+                >
+                  Refuse
+                </button>{" "}
+                <button
+                  type="button"
+                  disabled={busyPurpose === typedPurpose || consent === "not_granted"}
+                  onClick={() => void decide(typedPurpose, "withdraw")}
+                >
+                  Withdraw
+                </button>
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+      <p>Refusing feedback, recording, or marketing never reduces your 14-day access.</p>
+      <button type="button" onClick={() => void exportPrivacyData()}>
+        Export External Beta privacy data
+      </button>{" "}
+      <button type="button" onClick={() => void deleteMeasurements()}>
+        Delete External Beta measurements
+      </button>
       {message ? <p role="status">{message}</p> : null}
     </section>
   );

@@ -108,6 +108,8 @@ describe("Founder External Beta retirement route", () => {
       calls: () => [],
     };
     const reconcile = vi.fn(async () => ({ expired: 1, retired: 1, failed: 0 }));
+    const reconcileRecordings = vi.fn(async () => ({ deleted: 1, late: 0, failed: 0 }));
+    const recordingProvider = { deleteAndVerifyAbsent: vi.fn() };
     const response = await GET_RETIREMENTS(
       new Request("http://localhost/api/internal/operator/external-beta"),
       undefined,
@@ -117,6 +119,8 @@ describe("Founder External Beta retirement route", () => {
         readApplicationRevision: () => REVISION,
         createProviders: () => providers,
         reconcile,
+        reconcileRecordings,
+        createRecordingProvider: () => recordingProvider,
         now: () => now,
       },
     );
@@ -126,11 +130,73 @@ describe("Founder External Beta retirement route", () => {
       now,
       providers,
     });
+    expect(reconcileRecordings).toHaveBeenCalledWith(now, recordingProvider);
     await expect(response.json()).resolves.toEqual({
       ok: true,
       expired: 1,
       retired: 1,
       failed: 0,
+      recordingDeletion: { deleted: 1, late: 0, failed: 0 },
+    });
+  });
+
+  it("does not couple recording deletion to infrastructure retirement configuration", async () => {
+    const now = new Date("2026-09-06T00:00:00.000Z");
+    const reconcileRecordings = vi.fn(async () => ({ deleted: 1, late: 0, failed: 0 }));
+    const recordingProvider = { deleteAndVerifyAbsent: vi.fn() };
+    const response = await GET_RETIREMENTS(
+      new Request("http://localhost/api/internal/operator/external-beta"),
+      undefined,
+      {
+        readCron: () => ({ ok: true as const, secret: "a".repeat(32) }),
+        authorize: () => true,
+        readApplicationRevision: () => null,
+        createProviders: () => null,
+        reconcileRecordings,
+        createRecordingProvider: () => recordingProvider,
+        now: () => now,
+      },
+    );
+    expect(response.status).toBe(503);
+    expect(reconcileRecordings).toHaveBeenCalledWith(now, recordingProvider);
+    await expect(response.json()).resolves.toEqual({
+      recordingDeletion: { deleted: 1, late: 0, failed: 0 },
+      error: {
+        code: "external_beta_retirement_configuration_invalid",
+        message: "External Beta retirement processing failed safely.",
+      },
+    });
+  });
+
+  it("runs Infrastructure Retirement and reports both outcomes when recording deletion fails", async () => {
+    const now = new Date("2026-09-06T00:00:00.000Z");
+    const providers = {
+      createRecoveryArchive: vi.fn(),
+      deleteRecoveryArchive: vi.fn(),
+      digitalOcean: {} as never,
+      calls: () => [],
+    };
+    const reconcile = vi.fn(async () => ({ expired: 1, retired: 1, failed: 0 }));
+    const response = await GET_RETIREMENTS(
+      new Request("http://localhost/api/internal/operator/external-beta"),
+      undefined,
+      {
+        readCron: () => ({ ok: true as const, secret: "a".repeat(32) }),
+        authorize: () => true,
+        readApplicationRevision: () => REVISION,
+        createProviders: () => providers,
+        reconcile,
+        reconcileRecordings: async () => ({ deleted: 0, late: 0, failed: 1 }),
+        createRecordingProvider: () => ({ deleteAndVerifyAbsent: vi.fn() }),
+        now: () => now,
+      },
+    );
+    expect(response.status).toBe(500);
+    expect(reconcile).toHaveBeenCalledWith({ applicationRevision: REVISION, now, providers });
+    await expect(response.json()).resolves.toMatchObject({
+      retirement: { ok: true, expired: 1, retired: 1, failed: 0 },
+      recordingDeletion: { deleted: 0, late: 0, failed: 1 },
+      error: { code: "external_beta_recording_deletion_failed" },
     });
   });
 });

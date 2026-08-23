@@ -140,6 +140,13 @@ export function deterministicFounderLifecycleProviders(input: {
         },
       };
     },
+    async deleteExternalBetaRecording({ artifactReferenceDigest }) {
+      calls.push("recording.delete_and_verify_absent");
+      if (!/^sha256:[a-f0-9]{64}$/.test(artifactReferenceDigest)) {
+        throw new Error("External Beta recording reference is invalid.");
+      }
+      return { absent: true };
+    },
     async createRecoveryArchive(archiveInput) {
       calls.push("archive.create");
       failIfConfigured(failures, "archive.create");
