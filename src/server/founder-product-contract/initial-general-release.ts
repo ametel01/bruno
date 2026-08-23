@@ -958,7 +958,12 @@ export async function declineFounderGeneralReleaseOffer(
           : now;
       await tx
         .update(founderGeneralReleaseActivations)
-        .set({ status: "retirement_due", retirementDueAt, updatedAt: now })
+        .set({
+          status: "retirement_due",
+          workStoppedAt: activation.workStoppedAt ?? activation.activatedAt,
+          retirementDueAt,
+          updatedAt: now,
+        })
         .where(eq(founderGeneralReleaseActivations.id, activation.id));
     });
   } finally {

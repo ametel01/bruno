@@ -3,10 +3,10 @@ import {
   GET as coreOperationGET,
   POST as coreOperationPOST,
 } from "@/app/api/operator/core-operation/route";
-import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
-import { buildTestGoogleMailSendingAcceptanceRelease } from "@/scripts/founder-google-mail-sending-test-release";
-import { buildTestOpenAiConnectedAcceptanceRelease } from "@/scripts/founder-openai-test-release";
 import { buildTestAnthropicAcceptanceRelease } from "@/scripts/founder-anthropic-test-release";
+import { buildTestGoogleMailSendingAcceptanceRelease } from "@/scripts/founder-google-mail-sending-test-release";
+import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
+import { buildTestOpenAiConnectedAcceptanceRelease } from "@/scripts/founder-openai-test-release";
 import { createFounderCheckout } from "@/src/server/commerce/founder-commerce";
 import type { LemonSqueezyCommerceProvider } from "@/src/server/commerce/lemon-squeezy-provider";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
@@ -405,12 +405,19 @@ describe("Founder Core Operation", () => {
         externalActionPauseReason: "Product Entitlement does not authorize new work.",
       }),
     ]);
+    await connection.db
+      .update(founderGeneralReleaseActivations)
+      .set({ workStoppedAt: null, updatedAt: NOW });
     const declinedAt = new Date(NOW.valueOf() + 2_000);
     await declineFounderGeneralReleaseOffer(OWNER_ID, declinedAt, {
       createConnection: () => connection,
     });
     expect(await connection.db.select().from(founderGeneralReleaseActivations)).toEqual([
-      expect.objectContaining({ status: "retirement_due", retirementDueAt: declinedAt }),
+      expect.objectContaining({
+        status: "retirement_due",
+        retirementDueAt: declinedAt,
+        workStoppedAt: NOW,
+      }),
     ]);
     const entitlementDueAt = new Date(NOW.valueOf() + 24 * 60 * 60 * 1_000);
     const lateDeclineAt = new Date(entitlementDueAt.valueOf() + 60_000);
