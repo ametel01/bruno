@@ -36,6 +36,11 @@ import { persistFounderOwnerPreviewDenialInTransaction } from "./owner-preview-r
 import { FOUNDER_PREVIEW_QUALIFICATION_MAX_AGE_MS } from "./preview-qualification";
 import { createDurableRecoveryArchive } from "./recovery-archive";
 import type { FounderRecoveryArchiveProvider } from "./recovery-archive-provider";
+import {
+  executeFounderReturningRestoration,
+  type FounderReturningRestorationOutcome,
+  type FounderReturningRestorationProvider,
+} from "./returning-founder-restoration";
 import { persistFounderOwnerPreviewHoldInTransaction } from "./release-stage-hold";
 
 export type FounderProductContractLifecycleAction =
@@ -64,31 +69,32 @@ export type FounderCommerceStatus =
   | "expired"
   | "refunded";
 
-export type FounderLifecycleProviderBoundary = FounderRecoveryArchiveProvider & {
-  authenticateIdentity(input: { userId: string }): Promise<{ subject: string }>;
-  verifyCapabilityProviders(): Promise<{
-    openAI: true;
-    anthropic: true;
-    calendarReading: true;
-    gmailReading: true;
-    gmailSending: true;
-  }>;
-  readSubscription(input: { subscriptionId: string }): Promise<{ status: FounderCommerceStatus }>;
-  createCustomerPortal(input: { subscriptionId: string; now: Date }): Promise<{
-    url: string;
-    expiresAt: Date;
-    actions: {
-      paymentMethods: true;
-      billingHistory: true;
-      cancellation: true;
-      eligibleResumption: true;
-      planSwitching: false;
-      customerPause: false;
-    };
-  }>;
-  digitalOcean: DigitalOceanOwnedSetProvider;
-  calls(): readonly string[];
-};
+export type FounderLifecycleProviderBoundary = FounderRecoveryArchiveProvider &
+  Partial<Omit<FounderReturningRestorationProvider, "calls">> & {
+    authenticateIdentity(input: { userId: string }): Promise<{ subject: string }>;
+    verifyCapabilityProviders(): Promise<{
+      openAI: true;
+      anthropic: true;
+      calendarReading: true;
+      gmailReading: true;
+      gmailSending: true;
+    }>;
+    readSubscription(input: { subscriptionId: string }): Promise<{ status: FounderCommerceStatus }>;
+    createCustomerPortal(input: { subscriptionId: string; now: Date }): Promise<{
+      url: string;
+      expiresAt: Date;
+      actions: {
+        paymentMethods: true;
+        billingHistory: true;
+        cancellation: true;
+        eligibleResumption: true;
+        planSwitching: false;
+        customerPause: false;
+      };
+    }>;
+    digitalOcean: DigitalOceanOwnedSetProvider;
+    calls(): readonly string[];
+  };
 
 export type FounderLifecycleCleanup = {
   resourcesBefore: number;
@@ -131,6 +137,12 @@ export type FounderLifecycleOutcome = {
     refundRetirementHours: 24;
     reorderedActiveCanRestartTerminalClock: false;
   };
+  returningFounderRestoration?: {
+    success: FounderReturningRestorationOutcome;
+    partialFailure: FounderReturningRestorationOutcome;
+    lateEventAfterDeletion: FounderReturningRestorationOutcome;
+    postExpiryRejoin: FounderReturningRestorationOutcome;
+  };
 };
 
 type LifecycleInput = {
@@ -143,6 +155,16 @@ type LifecycleInput = {
     cohortOwnerUserId: string;
     participantUserId: string;
     invitedClerkSubject: string;
+  };
+  restorationContract?: {
+    successUserId: string;
+    successSourceEventId: string;
+    partialFailureUserId: string;
+    partialFailureSourceEventId: string;
+    deletedArchiveUserId: string;
+    deletedArchiveSourceEventId: string;
+    expiredArchiveUserId: string;
+    expiredArchiveSourceEventId: string;
   };
 };
 
@@ -190,7 +212,7 @@ export async function executeFounderProductContractLifecycleAction(
       return lifecycleOutcome(input, dependencies.providers, cleanup);
     }
     const lifecycleArchiveId =
-      input.action === "release_stage_admission" || input.action === "recovery_archive_lifecycle"
+      input.action === "release_stage_admission"
         ? await createDurableRecoveryArchive(
             { ...input, applicationRevision: dependencies.applicationRevision },
             dependencies.providers,
@@ -207,6 +229,9 @@ export async function executeFounderProductContractLifecycleAction(
         input.externalBetaContract,
         dependencies,
       );
+    }
+    if (input.action === "recovery_archive_lifecycle") {
+      return await executeFounderReturningRestorationContract(input, dependencies, connection);
     }
     return await connection.db.transaction(async (tx) => {
       const { operatorId, runtimeRevision } =
@@ -347,8 +372,7 @@ export async function executeFounderProductContractLifecycleAction(
           break;
         }
         case "recovery_archive_lifecycle": {
-          if (!lifecycleArchiveId) throw new Error("A verified Recovery Archive is required.");
-          break;
+          throw new Error("Returning Founder restoration must use its durable execution path.");
         }
         case "infrastructure_retirement":
           throw new Error("Infrastructure Retirement must use its durable execution path.");
@@ -404,6 +428,99 @@ export async function executeFounderProductContractLifecycleAction(
   } finally {
     if (ownsConnection) await connection.close();
   }
+}
+
+async function executeFounderReturningRestorationContract(
+  input: LifecycleInput,
+  dependencies: LifecycleDependencies,
+  connection: DatabaseConnection,
+): Promise<FounderLifecycleOutcome> {
+  if (!input.restorationContract) {
+    throw new Error("Returning Founder restoration contract identities are required.");
+  }
+  const execute = (userId: string, sourceEventId: string, now = input.now) =>
+    executeFounderReturningRestoration(
+      { userId, sourceEventId, now },
+      {
+        provider: requireReturningFounderProvider(dependencies.providers),
+        createConnection: () => connection,
+      },
+    );
+  for (const [branch, userId] of [
+    ["success", input.restorationContract.successUserId],
+    ["partial", input.restorationContract.partialFailureUserId],
+    ["deleted", input.restorationContract.deletedArchiveUserId],
+    ["expired", input.restorationContract.expiredArchiveUserId],
+  ] as const) {
+    await executeFounderInfrastructureRetirement(
+      {
+        action: "infrastructure_retirement",
+        runId: `${input.runId}:restoration:${branch}`,
+        userId,
+        now: input.now,
+      },
+      {
+        providers: dependencies.providers,
+        applicationRevision: dependencies.applicationRevision,
+      },
+      connection,
+    );
+  }
+  const success = await execute(
+    input.restorationContract.successUserId,
+    input.restorationContract.successSourceEventId,
+  );
+  const partialFailure = await execute(
+    input.restorationContract.partialFailureUserId,
+    input.restorationContract.partialFailureSourceEventId,
+  );
+  const afterRetention = new Date(input.now.valueOf() + 31 * 24 * 60 * 60 * 1_000);
+  await expireFounderRecoveryArchivesForUser(
+    input.restorationContract.deletedArchiveUserId,
+    afterRetention,
+    dependencies.providers,
+    connection,
+  );
+  const lateEventAfterDeletion = await execute(
+    input.restorationContract.deletedArchiveUserId,
+    input.restorationContract.deletedArchiveSourceEventId,
+    afterRetention,
+  );
+  const postExpiryRejoin = await execute(
+    input.restorationContract.expiredArchiveUserId,
+    input.restorationContract.expiredArchiveSourceEventId,
+    afterRetention,
+  );
+  return {
+    action: input.action,
+    status: "passed",
+    observedAt: input.now.toISOString(),
+    providerCalls: dependencies.providers.calls(),
+    cleanup: emptyCleanup(input.now),
+    returningFounderRestoration: {
+      success,
+      partialFailure,
+      lateEventAfterDeletion,
+      postExpiryRejoin,
+    },
+  };
+}
+
+function requireReturningFounderProvider(
+  provider: FounderLifecycleProviderBoundary,
+): FounderReturningRestorationProvider {
+  if (
+    !provider.verifyRecoveryArchive ||
+    !provider.provisionNewInfrastructure ||
+    !provider.observeNewInfrastructure ||
+    !provider.reauthorizeAiProviders ||
+    !provider.reauthorizeCompanyProviders ||
+    !provider.retireRestorationInfrastructure ||
+    !provider.refundRestorationPayment
+  ) {
+    throw new Error("Returning Founder restoration provider boundary is unavailable.");
+  }
+  return provider as FounderReturningRestorationProvider;
 }
 
 async function executeFounderExternalBetaContractLifecycle(

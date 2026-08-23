@@ -15,6 +15,15 @@ export type FounderProductContractFixture = {
   externalBetaParticipantUserId: string;
   externalBetaParticipantOperatorId: string;
   externalBetaParticipantRunnerId: string;
+  restorationSuccessUserId: string;
+  restorationSuccessOperatorId: string;
+  restorationSuccessSourceEventId: string;
+  restorationPartialFailureUserId: string;
+  restorationPartialFailureSourceEventId: string;
+  restorationDeletedArchiveUserId: string;
+  restorationDeletedArchiveSourceEventId: string;
+  restorationExpiredArchiveUserId: string;
+  restorationExpiredArchiveSourceEventId: string;
 };
 
 export function signedFounderCommerceEvent(
@@ -58,6 +67,19 @@ export async function createFounderProductContractFixture(
   const externalBetaParticipantUserId = randomUUID();
   const externalBetaParticipantOperatorId = randomUUID();
   const externalBetaParticipantRunnerId = randomUUID();
+  const restorationBranches = ["success", "partial", "deleted", "expired"].map((kind) => ({
+    kind,
+    userId: randomUUID(),
+    operatorId: randomUUID(),
+    preparationId: randomUUID(),
+    runtimeId: randomUUID(),
+    runnerId: randomUUID(),
+    credentialId: randomUUID(),
+    oldCorrelationId: randomUUID(),
+    oldEventId: randomUUID(),
+    freshCorrelationId: randomUUID(),
+    freshEventId: randomUUID(),
+  }));
   const createdAt = clock.now().toISOString();
   const readyAt = clock.advance(1_000).toISOString();
   const expiredArchiveObservedAt = new Date(clock.now().valueOf() - 31 * 24 * 60 * 60 * 1_000);
@@ -68,11 +90,35 @@ export async function createFounderProductContractFixture(
     await sql`insert into operators (id, user_id, status, created_at, updated_at) values (${operatorId}, ${userId}, 'active', ${createdAt}, ${readyAt})`;
     await sql`insert into operator_preparations (id, operator_id, status, timezone, timezone_confirmed_at, started_at, completed_at, created_at, updated_at) values (${preparationId}, ${operatorId}, 'ready', 'Asia/Manila', ${createdAt}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
     await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${runtimeId}, ${operatorId}, 'ready', 'connected', 'verified', 'founder-contract-v1', 'founder-contract-runtime', 1, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
-    await sql`insert into runners (id, user_id, name, kind, status, provider, provider_resource_id, provider_firewall_id, region, size_slug, image, provisioning_status, provisioning_operation_key, provisioning_started_at, provisioning_completed_at, created_at, updated_at) values (${runnerId}, ${userId}, ${`founder-${runnerId}`}, 'digitalocean', 'online', 'digitalocean', ${`droplet-${runnerId}`}, ${`firewall-${runnerId}`}, 'sfo3', 's-1vcpu-1gb', 'ubuntu-24-04-x64', 'ready', ${`bruno-deploy-${runnerId.replaceAll("-", "")}`}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
+    await sql`insert into runners (id, user_id, name, kind, endpoint_url, status, provider, provider_resource_id, provider_firewall_id, region, size_slug, image, provisioning_status, provisioning_operation_key, provisioning_started_at, provisioning_completed_at, created_at, updated_at) values (${runnerId}, ${userId}, ${`founder-${runnerId}`}, 'digitalocean', 'https://203.0.113.10', 'online', 'digitalocean', ${`droplet-${runnerId}`}, ${`firewall-${runnerId}`}, 'sfo3', 's-1vcpu-1gb', 'ubuntu-24-04-x64', 'ready', ${`bruno-deploy-${runnerId.replaceAll("-", "")}`}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
     await sql`insert into runner_credentials (id, runner_id, credential_hash, credential_prefix, status, created_at, updated_at) values (${credentialId}, ${runnerId}, ${`sha256:${runnerId.replaceAll("-", "")}`}, 'fpct', 'active', ${createdAt}, ${readyAt})`;
     await sql`insert into founder_checkout_correlations (user_id, correlation_digest, status, created_at, expires_at) values (${userId}, ${`sha256:${createHash("sha256").update(checkoutCorrelation).digest("hex")}`}, 'pending', ${createdAt}, ${new Date(clock.now().valueOf() + 60 * 60 * 1_000).toISOString()})`;
     await sql`insert into founder_recovery_archives (id, user_id, operator_id, status, format_version, storage_object_key, recovery_credential_object_key, ciphertext_digest, recovery_credential_digest, state_digest, restorable_verified, restore_verified_at, failure_code, observed_at, expires_at, created_at, deleted_at) values (${expiredArchiveId}, ${userId}, ${operatorId}, 'verified', 1, ${`founder-recovery/expired/${expiredArchiveId}.age`}, ${`founder-recovery/expired/${expiredArchiveId}.key`}, ${`sha256:${createHash("sha256").update(`expired:${userId}`).digest("hex")}`}, ${`sha256:${createHash("sha256").update(`expired-credential:${userId}`).digest("hex")}`}, ${`sha256:${createHash("sha256").update(`expired-state:${userId}`).digest("hex")}`}, true, ${expiredArchiveObservedAt.toISOString()}, null, ${expiredArchiveObservedAt.toISOString()}, ${expiredArchiveExpiresAt.toISOString()}, ${expiredArchiveObservedAt.toISOString()}, null)`;
+    for (const branch of restorationBranches) {
+      const oldSubscriptionId = `restoration-${branch.kind}-old-subscription`;
+      const oldOrderId = `restoration-${branch.kind}-old-order`;
+      const freshSubscriptionId = `restoration-${branch.kind}-fresh-subscription`;
+      const freshOrderId = `restoration-${branch.kind}-fresh-order`;
+      const dueAt = new Date(clock.now().valueOf() - 1).toISOString();
+      const checkoutExpiry = new Date(clock.now().valueOf() + 60 * 60 * 1_000).toISOString();
+      await sql`insert into users (id, created_at, updated_at) values (${branch.userId}, ${createdAt}, ${readyAt})`;
+      await sql`insert into operators (id, user_id, status, created_at, updated_at) values (${branch.operatorId}, ${branch.userId}, 'active', ${createdAt}, ${readyAt})`;
+      await sql`insert into operator_preparations (id, operator_id, status, timezone, timezone_confirmed_at, started_at, completed_at, created_at, updated_at) values (${branch.preparationId}, ${branch.operatorId}, 'ready', 'Asia/Manila', ${createdAt}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
+      await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${branch.runtimeId}, ${branch.operatorId}, 'ready', 'connected', 'verified', 'founder-contract-v1', ${`restoration-old-runtime-${branch.kind}`}, 1, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
+      await sql`insert into runners (id, user_id, name, kind, endpoint_url, status, provider, provider_resource_id, provider_firewall_id, region, size_slug, image, provisioning_status, provisioning_operation_key, provisioning_started_at, provisioning_completed_at, created_at, updated_at) values (${branch.runnerId}, ${branch.userId}, ${`restoration-${branch.kind}-${branch.runnerId}`}, 'digitalocean', ${`https://203.0.113.${30 + restorationBranches.indexOf(branch)}`}, 'online', 'digitalocean', ${`restoration-old-droplet-${branch.kind}`}, ${`restoration-old-firewall-${branch.kind}`}, 'sfo3', 's-1vcpu-1gb', 'ubuntu-24-04-x64', 'ready', ${`bruno-deploy-${branch.runnerId.replaceAll("-", "")}`}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
+      await sql`insert into runner_credentials (id, runner_id, credential_hash, credential_prefix, status, created_at, updated_at) values (${branch.credentialId}, ${branch.runnerId}, ${`sha256:${branch.runnerId.replaceAll("-", "")}`}, 'fpct', 'active', ${createdAt}, ${readyAt})`;
+      await sql`insert into founder_checkout_correlations (id, user_id, correlation_digest, generation, status, provider_subscription_id, provider_order_id, payment_detected_at, reconciliation_due_at, consumed_at, created_at, expires_at) values (${branch.oldCorrelationId}, ${branch.userId}, ${`sha256:${createHash("sha256").update(`old:${branch.userId}`).digest("hex")}`}, 1, 'consumed', ${oldSubscriptionId}, ${oldOrderId}, ${createdAt}, ${new Date(new Date(createdAt).valueOf() + 60 * 60 * 1_000).toISOString()}, ${createdAt}, ${createdAt}, ${checkoutExpiry})`;
+      await sql`insert into founder_commerce_events (id, provider_event_id, user_id, checkout_correlation_id, provider_subscription_id, provider_order_id, event_type, payload_digest, signature_verified, occurred_at, recorded_at, application_status, last_attempt_at, applied_at) values (${branch.oldEventId}, ${`restoration-${branch.kind}-old-event`}, ${branch.userId}, ${branch.oldCorrelationId}, ${oldSubscriptionId}, ${oldOrderId}, 'subscription_cancelled', ${`sha256:${createHash("sha256").update(`old-event:${branch.userId}`).digest("hex")}`}, true, ${createdAt}, ${createdAt}, 'applied', ${createdAt}, ${createdAt})`;
+      await sql`insert into founder_product_entitlements (user_id, source_event_id, provider_subscription_id, status, reconciled_provider_status, provider_state_updated_at, reconciled_at, retirement_due_at, updated_at) values (${branch.userId}, ${branch.oldEventId}, ${oldSubscriptionId}, 'cancelled', 'cancelled', ${createdAt}, ${createdAt}, ${dueAt}, ${createdAt})`;
+      await sql`insert into founder_checkout_correlations (id, user_id, correlation_digest, generation, status, provider_subscription_id, provider_order_id, payment_detected_at, reconciliation_due_at, consumed_at, created_at, expires_at) values (${branch.freshCorrelationId}, ${branch.userId}, ${`sha256:${createHash("sha256").update(`fresh:${branch.userId}`).digest("hex")}`}, 2, 'consumed', ${freshSubscriptionId}, ${freshOrderId}, ${readyAt}, ${new Date(new Date(readyAt).valueOf() + 60 * 60 * 1_000).toISOString()}, ${readyAt}, ${readyAt}, ${checkoutExpiry})`;
+      await sql`insert into founder_commerce_events (id, provider_event_id, user_id, checkout_correlation_id, provider_subscription_id, provider_order_id, event_type, payload_digest, signature_verified, occurred_at, recorded_at, application_status) values (${branch.freshEventId}, ${`restoration-${branch.kind}-fresh-event`}, ${branch.userId}, ${branch.freshCorrelationId}, ${freshSubscriptionId}, ${freshOrderId}, 'subscription_active', ${`sha256:${createHash("sha256").update(`fresh-event:${branch.userId}`).digest("hex")}`}, true, ${readyAt}, ${readyAt}, 'pending')`;
+    }
   });
+
+  const [success, partial, deleted, expired] = restorationBranches;
+  if (!success || !partial || !deleted || !expired) {
+    throw new Error("Restoration fixtures were not created.");
+  }
 
   return {
     userId,
@@ -84,6 +130,15 @@ export async function createFounderProductContractFixture(
     externalBetaParticipantUserId,
     externalBetaParticipantOperatorId,
     externalBetaParticipantRunnerId,
+    restorationSuccessUserId: success.userId,
+    restorationSuccessOperatorId: success.operatorId,
+    restorationSuccessSourceEventId: success.freshEventId,
+    restorationPartialFailureUserId: partial.userId,
+    restorationPartialFailureSourceEventId: partial.freshEventId,
+    restorationDeletedArchiveUserId: deleted.userId,
+    restorationDeletedArchiveSourceEventId: deleted.freshEventId,
+    restorationExpiredArchiveUserId: expired.userId,
+    restorationExpiredArchiveSourceEventId: expired.freshEventId,
   };
 }
 
@@ -177,6 +232,10 @@ export async function deleteFounderProductContractFixture(
       fixture.userId,
       fixture.externalBetaOwnerUserId,
       fixture.externalBetaParticipantUserId,
+      fixture.restorationSuccessUserId,
+      fixture.restorationPartialFailureUserId,
+      fixture.restorationDeletedArchiveUserId,
+      fixture.restorationExpiredArchiveUserId,
     ];
     const contractRunId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID;
     if (contractRunId) {
@@ -185,25 +244,24 @@ export async function deleteFounderProductContractFixture(
     if (!options.retainScenarioExecutions) {
       await sql`delete from founder_product_contract_scenario_executions where user_id = ${fixture.userId}`;
     }
-    await sql`delete from founder_infrastructure_retirements where user_id = any(${allUserIds})`;
+    await sql`delete from founder_operator_restorations where user_id = any(${allUserIds})`;
     await sql`delete from founder_external_beta_invitations where cohort_owner_user_id = ${fixture.externalBetaOwnerUserId} or participant_user_id = any(${[fixture.userId, fixture.externalBetaParticipantUserId]})`;
-    await sql`delete from founder_product_entitlements where user_id = ${fixture.userId}`;
-    await sql`delete from founder_commerce_events where user_id = ${fixture.userId}`;
-    await sql`delete from founder_checkout_correlations where user_id = ${fixture.userId}`;
-    await sql`delete from founder_recovery_archive_deletion_receipts where user_id = ${fixture.userId}`;
+    await sql`delete from founder_product_entitlements where user_id = any(${allUserIds})`;
+    await sql`delete from founder_commerce_lifecycle_receipts where user_id = any(${allUserIds})`;
+    await sql`delete from founder_infrastructure_retirements where user_id = any(${allUserIds})`;
+    await sql`delete from founder_commerce_events where user_id = any(${allUserIds})`;
+    await sql`delete from founder_checkout_correlations where user_id = any(${allUserIds})`;
+    await sql`delete from founder_recovery_archive_deletion_receipts where user_id = any(${allUserIds})`;
     await sql`delete from founder_recovery_archives where user_id = any(${allUserIds})`;
     await sql`delete from founder_release_decisions where user_id = any(${allUserIds})`;
     await sql`delete from runner_credentials where runner_id in (select id from runners where user_id = any(${allUserIds}))`;
     await sql`delete from runners where user_id = any(${allUserIds})`;
-    await sql`delete from operator_conversations where operator_id = ${fixture.operatorId}`;
-    await sql`delete from operator_runtimes where operator_id = ${fixture.operatorId}`;
-    await sql`delete from operator_preparations where operator_id = ${fixture.operatorId}`;
-    await sql`delete from operators where id = ${fixture.operatorId}`;
-    await sql`delete from users where id = ${fixture.userId}`;
-    await sql`delete from operator_runtimes where operator_id in (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaParticipantOperatorId})`;
-    await sql`delete from operator_preparations where operator_id in (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaParticipantOperatorId})`;
-    await sql`delete from operators where id in (${fixture.externalBetaOwnerOperatorId}, ${fixture.externalBetaParticipantOperatorId})`;
-    await sql`delete from users where id in (${fixture.externalBetaOwnerUserId}, ${fixture.externalBetaParticipantUserId})`;
+    await sql`delete from operator_conversation_messages where conversation_id in (select id from operator_conversations where operator_id in (select id from operators where user_id = any(${allUserIds})))`;
+    await sql`delete from operator_conversations where operator_id in (select id from operators where user_id = any(${allUserIds}))`;
+    await sql`delete from operator_runtimes where operator_id in (select id from operators where user_id = any(${allUserIds}))`;
+    await sql`delete from operator_preparations where operator_id in (select id from operators where user_id = any(${allUserIds}))`;
+    await sql`delete from operators where user_id = any(${allUserIds})`;
+    await sql`delete from users where id = any(${allUserIds})`;
     await sql`delete from app_metadata where key = 'founder_owner_preview_owner_user_id:v1' and value = any(${allUserIds})`;
   });
 }
@@ -231,6 +289,10 @@ export async function assertPersistedFounderLifecycleAuthority(
         active_credentials: number;
         active_runners: number;
         paused: boolean;
+        completed_restorations: number;
+        restored_operator_id: string | null;
+        source_operator_id: string | null;
+        new_identity_distinct: boolean | null;
       }[]
     >`select
       (select count(*)::int from founder_release_decisions where user_id = ${fixture.userId}) as release_decisions,
@@ -249,7 +311,11 @@ export async function assertPersistedFounderLifecycleAuthority(
       (select status from runners where id = ${fixture.runnerId}) as runner_status,
       (select count(*)::int from runner_credentials where runner_id in (select id from runners where user_id = ${fixture.userId}) and status = 'active') as active_credentials,
       (select count(*)::int from runners where user_id = ${fixture.userId} and deleted_at is null) as active_runners,
-      (select external_action_pause from operators where id = ${fixture.operatorId}) as paused`;
+      (select external_action_pause from operators where id = ${fixture.operatorId}) as paused,
+      (select count(*)::int from founder_operator_restorations where user_id = ${fixture.restorationSuccessUserId} and status = 'completed') as completed_restorations,
+      (select restored_operator_id from founder_operator_restorations where user_id = ${fixture.restorationSuccessUserId} order by created_at desc limit 1) as restored_operator_id,
+      (select source_operator_id from founder_operator_restorations where user_id = ${fixture.restorationSuccessUserId} order by created_at desc limit 1) as source_operator_id,
+      (select new_provider_resource_id <> old_provider_resource_id and new_provider_firewall_id <> old_provider_firewall_id and new_runtime_identity <> old_runtime_identity from founder_operator_restorations where user_id = ${fixture.restorationSuccessUserId} order by created_at desc limit 1) as new_identity_distinct`;
     expect(authority).toMatchObject({
       release_decisions: 3,
       release_decision_outcomes: ["enter", "hold", "resume"],
@@ -259,7 +325,7 @@ export async function assertPersistedFounderLifecycleAuthority(
       consumed_correlations: 1,
       safe_release_decisions: 3,
       external_beta_qualifications: 5,
-      archives: 2,
+      archives: 1,
       failed_archives: 1,
       deleted_archives: 1,
       archive_deletions: 1,
@@ -268,6 +334,10 @@ export async function assertPersistedFounderLifecycleAuthority(
       active_credentials: 0,
       active_runners: 0,
       paused: true,
+      completed_restorations: 1,
+      restored_operator_id: fixture.restorationSuccessOperatorId,
+      source_operator_id: fixture.restorationSuccessOperatorId,
+      new_identity_distinct: true,
     });
   });
 }

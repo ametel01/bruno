@@ -1,4 +1,5 @@
 import { createConfiguredFounderInfrastructureRetirementProvider } from "@/src/server/commerce/founder-commerce-retirement";
+import { createConfiguredFounderReturningRestorationProvider } from "@/src/server/commerce/founder-commerce-restoration";
 import { reconcileNextFounderCommerce } from "@/src/server/commerce/founder-commerce-reconciler";
 import {
   LemonSqueezyApiProvider,
@@ -19,6 +20,9 @@ type RouteDependencies = {
     commerceProvider: LemonSqueezyApiProvider;
     retirementProvider: NonNullable<
       ReturnType<typeof createConfiguredFounderInfrastructureRetirementProvider>
+    >;
+    restorationProvider?: NonNullable<
+      ReturnType<typeof createConfiguredFounderReturningRestorationProvider>
     >;
   } | null;
   now?: () => Date;
@@ -53,12 +57,16 @@ export async function GET(
       (() => {
         const commerceConfig = readLemonSqueezyConfig();
         const retirementProvider = createConfiguredFounderInfrastructureRetirementProvider();
-        return commerceConfig && retirementProvider
-          ? {
-              commerceProvider: new LemonSqueezyApiProvider({ config: commerceConfig }),
-              retirementProvider,
-            }
-          : null;
+        if (!commerceConfig || !retirementProvider) return null;
+        const commerceProvider = new LemonSqueezyApiProvider({ config: commerceConfig });
+        const restorationProvider = createConfiguredFounderReturningRestorationProvider({
+          commerceProvider,
+        });
+        return {
+          commerceProvider,
+          retirementProvider,
+          ...(restorationProvider ? { restorationProvider } : {}),
+        };
       })();
   } catch {
     return errorResponse(503, "commerce_configuration_invalid");

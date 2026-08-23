@@ -43,6 +43,12 @@ const FAILURE_OPERATIONS = new Set<FounderLifecycleFailureOperation>([
   "digitalOcean.delete_firewall",
   "digitalOcean.delete_droplet",
   "digitalOcean.observe_owned_resources_absent",
+  "digitalOcean.create_restoration_droplet",
+  "digitalOcean.configure_restoration_firewall",
+  "openAI.reauthorize",
+  "anthropic.reauthorize",
+  "google.reauthorize_company",
+  "lemonSqueezy.refund_restoration",
 ]);
 const COMMERCE_STATUSES = new Set<FounderCommerceStatus>([
   "active",
@@ -126,6 +132,9 @@ export async function POST(request: Request): Promise<Response> {
     now,
     failures: body.providerFailures,
     subscriptionStatus: body.providerSubscriptionStatus,
+    ...(body.restorationContract
+      ? { partialRestorationUserId: body.restorationContract.partialFailureUserId }
+      : {}),
   });
   const evidenceIdentity = {
     runId: identity.runId,
@@ -146,6 +155,7 @@ export async function POST(request: Request): Promise<Response> {
         now,
         ...(body.commerceEvent ? { commerceEvent: body.commerceEvent } : {}),
         ...(body.externalBetaContract ? { externalBetaContract: body.externalBetaContract } : {}),
+        ...(body.restorationContract ? { restorationContract: body.restorationContract } : {}),
       },
       { providers, commerceWebhookSecret, applicationRevision: identity.sourceRevision },
     );
@@ -214,6 +224,16 @@ async function readBody(request: Request): Promise<{
     participantUserId: string;
     invitedClerkSubject: string;
   };
+  restorationContract?: {
+    successUserId: string;
+    successSourceEventId: string;
+    partialFailureUserId: string;
+    partialFailureSourceEventId: string;
+    deletedArchiveUserId: string;
+    deletedArchiveSourceEventId: string;
+    expiredArchiveUserId: string;
+    expiredArchiveSourceEventId: string;
+  };
   providerSubscriptionStatus: FounderCommerceStatus;
   providerFailures: readonly FounderLifecycleFailureOperation[];
 } | null> {
@@ -242,15 +262,18 @@ async function readBody(request: Request): Promise<{
     }
     const commerceEvent = isCommerceEvent(value.commerceEvent) ? value.commerceEvent : undefined;
     const externalBetaContract = readExternalBetaContract(value.externalBetaContract);
+    const restorationContract = readRestorationContract(value.restorationContract);
     if (value.action === "product_entitlement_lifecycle" && !commerceEvent) return null;
     if (value.action === "infrastructure_retirement" && !commerceEvent) return null;
     if (value.action === "external_beta_cohort_lifecycle" && !externalBetaContract) return null;
+    if (value.action === "recovery_archive_lifecycle" && !restorationContract) return null;
     return {
       action: value.action as FounderProductContractLifecycleAction,
       runId: value.runId,
       now: value.now,
       ...(commerceEvent ? { commerceEvent } : {}),
       ...(externalBetaContract ? { externalBetaContract } : {}),
+      ...(restorationContract ? { restorationContract } : {}),
       providerSubscriptionStatus:
         (value.providerSubscriptionStatus as FounderCommerceStatus | undefined) ?? "active",
       providerFailures: [
@@ -263,6 +286,51 @@ async function readBody(request: Request): Promise<{
   } catch {
     return null;
   }
+}
+
+function readRestorationContract(value: unknown): {
+  successUserId: string;
+  successSourceEventId: string;
+  partialFailureUserId: string;
+  partialFailureSourceEventId: string;
+  deletedArchiveUserId: string;
+  deletedArchiveSourceEventId: string;
+  expiredArchiveUserId: string;
+  expiredArchiveSourceEventId: string;
+} | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const fields = [
+    "successUserId",
+    "successSourceEventId",
+    "partialFailureUserId",
+    "partialFailureSourceEventId",
+    "deletedArchiveUserId",
+    "deletedArchiveSourceEventId",
+    "expiredArchiveUserId",
+    "expiredArchiveSourceEventId",
+  ] as const;
+  if (
+    fields.some(
+      (field) =>
+        typeof record[field] !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          record[field] as string,
+        ),
+    )
+  ) {
+    return null;
+  }
+  return Object.fromEntries(fields.map((field) => [field, record[field]])) as {
+    successUserId: string;
+    successSourceEventId: string;
+    partialFailureUserId: string;
+    partialFailureSourceEventId: string;
+    deletedArchiveUserId: string;
+    deletedArchiveSourceEventId: string;
+    expiredArchiveUserId: string;
+    expiredArchiveSourceEventId: string;
+  };
 }
 
 function readExternalBetaContract(value: unknown): {

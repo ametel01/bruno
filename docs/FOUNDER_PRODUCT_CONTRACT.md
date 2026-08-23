@@ -189,6 +189,20 @@ includes the complete external-action pause state—boolean, a closed non-secret
 timestamp—rather than a flag that cannot be persisted safely after restoration. Raw
 Founder-controlled pause text is excluded from the archive allowlist.
 
+A fresh eligible payment after completed Infrastructure Retirement enters Returning Founder
+restoration instead of applying Product Entitlement directly. Within the verified archive's 30-day
+retention window, the restoration preserves the same logical Operator and durable state while the
+canonical runner provisioner creates a new exact Droplet, firewall, runtime identity, and endpoint;
+the old infrastructure identity and IP address are never a compatibility promise. Work stays paused
+while provisioning is pending and until fresh `reauthorized` receipts make both AI Provider accounts
+and the Calendar and Gmail Company Connections Ready after the new infrastructure became Ready.
+Only then does the same transaction verify Product Entitlement and resume work. Provider ambiguity
+keeps the signed payment receipt pending. A terminal or partial restoration failure verifies absence
+of the exact new owned-resource set before closing a full Lemon Squeezy refund. Once the linked
+archive expires, or a completed archive-deletion receipt exists, delayed payment events cannot
+revive it: the former Operator is archived, a distinct new Operator environment is created, and the
+ineligible restoration payment is refunded.
+
 The same exact-candidate lifecycle seam records the External Beta Preview Qualifications as five
 independent, immutable capability records: OpenAI, Anthropic, Calendar reading, Gmail reading, and
 one-to-one Gmail sending. Every record binds the named cohort, application revision, runtime

@@ -17,6 +17,10 @@ import {
 } from "@/src/server/founder-product-contract/infrastructure-retirement";
 import { lockFounderProductContractLifecycleInTransaction } from "@/src/server/founder-product-contract/operator-authority";
 import {
+  executeFounderReturningRestoration,
+  type FounderReturningRestorationProvider,
+} from "@/src/server/founder-product-contract/returning-founder-restoration";
+import {
   reconcileFounderCommerceReceipt,
   recordFounderCommerceLifecycleDecisionReceiptInTransaction,
 } from "./founder-commerce";
@@ -41,6 +45,8 @@ export type FounderCommerceReconciliationResult = {
     | "idle"
     | "receipt_applied"
     | "receipt_pending"
+    | "restoration_completed"
+    | "restoration_refunded"
     | "refund_confirmed"
     | "refund_retrying"
     | "retirement_completed"
@@ -53,13 +59,14 @@ export async function reconcileNextFounderCommerce(input: {
   applicationRevision: string;
   commerceProvider: LemonSqueezyCommerceProvider;
   retirementProvider: FounderInfrastructureRetirementProvider;
+  restorationProvider?: FounderReturningRestorationProvider;
   createConnection?: () => DatabaseConnection;
 }): Promise<FounderCommerceReconciliationResult> {
   const connection = input.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !input.createConnection;
   try {
     const [pendingReceipt] = await connection.db
-      .select({ id: founderCommerceEvents.id })
+      .select({ id: founderCommerceEvents.id, userId: founderCommerceEvents.userId })
       .from(founderCommerceEvents)
       .where(eq(founderCommerceEvents.applicationStatus, "pending"))
       .orderBy(asc(founderCommerceEvents.recordedAt))
@@ -73,6 +80,21 @@ export async function reconcileNextFounderCommerce(input: {
       });
       if (outcome === "applied" || outcome === "ignored") {
         return { processed: 1, outcome: "receipt_applied" };
+      }
+      if (outcome === "restoration_required") {
+        if (input.restorationProvider) {
+          const restoration = await executeFounderReturningRestoration(
+            { userId: pendingReceipt.userId, sourceEventId: pendingReceipt.id, now: input.now },
+            { provider: input.restorationProvider, createConnection: () => connection },
+          );
+          if (restoration.status === "completed") {
+            return { processed: 1, outcome: "restoration_completed" };
+          }
+          if (restoration.status === "refunded") {
+            return { processed: 1, outcome: "restoration_refunded" };
+          }
+        }
+        return { processed: 1, outcome: "receipt_pending" };
       }
     }
 
