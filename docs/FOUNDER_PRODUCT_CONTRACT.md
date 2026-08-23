@@ -34,15 +34,16 @@ project, or incomplete unit result stops the whole pack before an evidence summa
 
 Automated accessibility uses axe-core WCAG 2.0, 2.1, and 2.2 rules plus a keyboard-focus journey.
 Browser device profiles do not claim screen-reader evidence. A release-mode dispatch also requires
-the SHA-256 digests of separately reviewed VoiceOver/Safari and TalkBack/Chrome evidence, together
-with the OS and browser versions used. Each attended record is bound to the app source revision,
-exact runtime, and the canonical resume, review, approve, and deny tasks. Its separately reviewed
-result metadata must report exactly one attempt with zero failures, flakes, or skips. Each record
-must also identify exactly one independent attended human reviewer and zero automated runs, Owner,
-friend-or-family, Trusted Preview, External Beta, coached, or build-team participants, self-tests, support
-interventions, or facilitator rescues. The workflow rejects release mode if either attended record
-is absent, malformed, incomplete, not clean, or crosses that participant boundary. Numeric claims
-use blank-preserving string dispatch inputs so an omitted zero claim cannot become synthetic proof.
+two strict sanitized JSON summaries for separately reviewed VoiceOver/Safari and TalkBack/Chrome
+evidence. Each summary uses `bruno.founder-attended-accessibility-summary.v1` and must include the
+assistive technology and browser, exact application and runtime revisions, SHA-256 evidence digest,
+OS and browser versions, exact observation time, and exactly one attempt with zero failures, flakes,
+or skips. Its complete participant boundary must report exactly one independent attended human
+reviewer and zero automated runs, Owner, friend-or-family, Trusted Preview, External Beta, coached,
+or build-team participants, self-tests, support interventions, or facilitator rescues. Blank summary
+inputs remain absent. A malformed, extended, incomplete, non-clean, mismatched, or boundary-crossing
+summary fails closed; every count must be explicitly present in the JSON and no omitted count is
+defaulted or synthesized.
 
 The retained JSON is an allowlisted summary bound to the source revision, exact runtime revision,
 and GitHub run identity. The lifecycle fixture persists that runtime revision in the exercised
@@ -56,8 +57,9 @@ allowlist.
 
 The same run also emits `founder-initial-general-release-decision.json`. In ordinary CI this is an
 explicit denied decision because attended evidence is absent. A release-mode dispatch may provide
-four JSON inputs containing only allowlisted aggregate counts, exact timestamps, release outcomes,
-retention controls, and SHA-256 evidence digests:
+six JSON inputs containing only allowlisted aggregate counts, exact timestamps, release outcomes,
+retention controls, and SHA-256 evidence digests. The VoiceOver and TalkBack summaries are defined
+above; the remaining four are:
 
 - `moderated_founder_summary_json` records the 4/4 desktop/phone cohort, cross-device day-two count,
   exactly one study attempt with zero failures, flakes, or skips,

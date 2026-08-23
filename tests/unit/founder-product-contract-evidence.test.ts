@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
 import {
+  FOUNDER_ATTENDED_ACCESSIBILITY_SUMMARY_SCHEMA,
+  type FounderAttendedAccessibilitySummary,
+  parseFounderAttendedAccessibilitySummary,
+} from "@/scripts/founder-attended-accessibility-summary";
+import {
   FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS,
   FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
 } from "@/src/shared/founder-product-contract";
@@ -12,7 +17,7 @@ import {
 } from "@/src/testing/founder-product-contract";
 
 const REVISION = "a".repeat(40);
-const DIGEST = `sha256:${"b".repeat(64)}`;
+const DIGEST = `sha256:${"b".repeat(64)}` as `sha256:${string}`;
 const SIGNING_SECRET = "founder-contract-test-secret";
 const RUNTIME_REVISION = "runtime-release-v1";
 
@@ -211,64 +216,107 @@ describe("Founder Product Contract evidence", () => {
     ).toThrow("cleanup was not verified");
   });
 
-  it("refuses attended evidence whose environment metadata is incomplete", () => {
-    expect(() =>
-      buildFounderProductContractEvidence({
-        ...validInput(),
-        voiceOverDigest: DIGEST,
-      }),
-    ).toThrow("VoiceOver evidence metadata is incomplete.");
-  });
-
   it("requires each attended record to preserve its exact observation time and runtime", () => {
-    expect(() =>
-      buildFounderProductContractEvidence({
-        ...validInput(),
-        voiceOverDigest: DIGEST,
-        voiceOverOsVersion: "macOS 15.6",
-        voiceOverBrowserVersion: "Safari 26.0",
-      }),
-    ).toThrow("VoiceOver evidence metadata is incomplete");
-    expect(() =>
-      buildFounderProductContractEvidence({
-        ...validAttendedInput(),
-        voiceOverObservedAt: "not-a-time",
-      }),
-    ).toThrow("VoiceOver observed time is invalid");
-  });
-
-  it("does not synthesize an omitted zero claim into complete attended evidence", () => {
-    const { voiceOverFailures: _omitted, ...incomplete } = validAttendedInput();
-
-    expect(() => buildFounderProductContractEvidence(incomplete)).toThrow(
-      "VoiceOver evidence metadata is incomplete",
+    const input = validAttendedInput();
+    input.voiceOverSummary.observedAt = "not-a-time";
+    expect(() => buildFounderProductContractEvidence(input)).toThrow(
+      "VoiceOver observed time is invalid",
     );
   });
 
+  it("does not synthesize an omitted zero claim into complete attended evidence", () => {
+    const summary = attendedSummary("VoiceOver");
+    const serialized = JSON.parse(JSON.stringify(summary)) as Record<string, unknown>;
+    delete serialized.failures;
+
+    expect(() =>
+      parseFounderAttendedAccessibilitySummary({
+        raw: JSON.stringify(serialized),
+        assistiveTechnology: "VoiceOver",
+        browser: "Safari",
+      }),
+    ).toThrow("VoiceOver attended accessibility summary is invalid");
+  });
+
+  it("parses only the strict sanitized attended summary and preserves every supplied count", () => {
+    const summary = attendedSummary("VoiceOver");
+
+    expect(
+      parseFounderAttendedAccessibilitySummary({
+        raw: JSON.stringify(summary),
+        assistiveTechnology: "VoiceOver",
+        browser: "Safari",
+      }),
+    ).toEqual(summary);
+    expect(
+      parseFounderAttendedAccessibilitySummary({
+        raw: "   ",
+        assistiveTechnology: "VoiceOver",
+        browser: "Safari",
+      }),
+    ).toBeNull();
+  });
+
   it.each([
-    ["VoiceOver", "voiceOverRuntimeRevision"],
-    ["TalkBack", "talkBackRuntimeRevision"],
-  ] as const)("rejects %s evidence from a different contract runtime", (label, field) => {
+    ["malformed JSON", "not-json-do-not-print"],
+    ["wrong technology", JSON.stringify(attendedSummary("TalkBack"))],
+    [
+      "extended payload",
+      JSON.stringify({ ...attendedSummary("VoiceOver"), participantIdentity: "do-not-retain" }),
+    ],
+    [
+      "extended participant boundary",
+      JSON.stringify({
+        ...attendedSummary("VoiceOver"),
+        participantBoundary: {
+          ...attendedSummary("VoiceOver").participantBoundary,
+          participantIdentity: "do-not-retain",
+        },
+      }),
+    ],
+  ])("fails closed on a %s without echoing supplied content", (_case, raw) => {
+    expect(() =>
+      parseFounderAttendedAccessibilitySummary({
+        raw,
+        assistiveTechnology: "VoiceOver",
+        browser: "Safari",
+      }),
+    ).toThrow("VoiceOver attended accessibility summary is invalid.");
+  });
+
+  it.each([
+    ["VoiceOver", "voiceOverSummary"],
+    ["TalkBack", "talkBackSummary"],
+  ] as const)("rejects %s evidence from a different contract runtime", (label, summaryField) => {
     const input = validAttendedInput();
-    input[field] = "runtime-release-v2";
+    input[summaryField].runtimeRevision = "runtime-release-v2";
 
     expect(() => buildFounderProductContractEvidence(input)).toThrow(
       `${label} runtime revision does not match the contract`,
     );
   });
 
-  it.each([
-    ["VoiceOver", "voiceOverAttempts", 2],
-    ["VoiceOver", "voiceOverFailures", 1],
-    ["VoiceOver", "voiceOverFlakes", 1],
-    ["VoiceOver", "voiceOverSkips", 1],
-    ["TalkBack", "talkBackAttempts", 2],
-    ["TalkBack", "talkBackFailures", 1],
-    ["TalkBack", "talkBackFlakes", 1],
-    ["TalkBack", "talkBackSkips", 1],
-  ] as const)("rejects a non-clean %s attended result", (label, field, value) => {
+  it("rejects attended evidence from a different application revision", () => {
     const input = validAttendedInput();
-    input[field] = value;
+    input.voiceOverSummary.applicationRevision = "c".repeat(40);
+
+    expect(() => buildFounderProductContractEvidence(input)).toThrow(
+      "VoiceOver source revision does not match the contract",
+    );
+  });
+
+  it.each([
+    ["VoiceOver", "voiceOverSummary", "attempts", 2],
+    ["VoiceOver", "voiceOverSummary", "failures", 1],
+    ["VoiceOver", "voiceOverSummary", "flakes", 1],
+    ["VoiceOver", "voiceOverSummary", "skips", 1],
+    ["TalkBack", "talkBackSummary", "attempts", 2],
+    ["TalkBack", "talkBackSummary", "failures", 1],
+    ["TalkBack", "talkBackSummary", "flakes", 1],
+    ["TalkBack", "talkBackSummary", "skips", 1],
+  ] as const)("rejects a non-clean %s attended result", (label, summaryField, field, value) => {
+    const input = validAttendedInput();
+    input[summaryField][field] = value;
 
     expect(() => buildFounderProductContractEvidence(input)).toThrow(
       `${label} evidence must have exactly one clean attempt`,
@@ -276,31 +324,31 @@ describe("Founder Product Contract evidence", () => {
   });
 
   it.each([
-    ["VoiceOver", "voiceOverIndependentHumanReviewers", 0],
-    ["VoiceOver", "voiceOverAutomatedRuns", 1],
-    ["VoiceOver", "voiceOverOwnerParticipants", 1],
-    ["VoiceOver", "voiceOverSelfTests", 1],
-    ["VoiceOver", "voiceOverFriendOrFamilyParticipants", 1],
-    ["VoiceOver", "voiceOverSupportInterventions", 1],
-    ["VoiceOver", "voiceOverExternalBetaParticipants", 1],
-    ["VoiceOver", "voiceOverCoachedParticipants", 1],
-    ["VoiceOver", "voiceOverFacilitatorRescues", 1],
-    ["VoiceOver", "voiceOverTrustedPreviewParticipants", 1],
-    ["VoiceOver", "voiceOverBuildTeamParticipants", 1],
-    ["TalkBack", "talkBackIndependentHumanReviewers", 0],
-    ["TalkBack", "talkBackAutomatedRuns", 1],
-    ["TalkBack", "talkBackOwnerParticipants", 1],
-    ["TalkBack", "talkBackSelfTests", 1],
-    ["TalkBack", "talkBackFriendOrFamilyParticipants", 1],
-    ["TalkBack", "talkBackSupportInterventions", 1],
-    ["TalkBack", "talkBackExternalBetaParticipants", 1],
-    ["TalkBack", "talkBackCoachedParticipants", 1],
-    ["TalkBack", "talkBackFacilitatorRescues", 1],
-    ["TalkBack", "talkBackTrustedPreviewParticipants", 1],
-    ["TalkBack", "talkBackBuildTeamParticipants", 1],
-  ] as const)("rejects a prohibited %s participant/source boundary", (label, field, value) => {
+    ["VoiceOver", "voiceOverSummary", "independentHumanReviewers", 0],
+    ["VoiceOver", "voiceOverSummary", "automatedRuns", 1],
+    ["VoiceOver", "voiceOverSummary", "ownerParticipants", 1],
+    ["VoiceOver", "voiceOverSummary", "selfTests", 1],
+    ["VoiceOver", "voiceOverSummary", "friendOrFamilyParticipants", 1],
+    ["VoiceOver", "voiceOverSummary", "supportInterventions", 1],
+    ["VoiceOver", "voiceOverSummary", "externalBetaParticipants", 1],
+    ["VoiceOver", "voiceOverSummary", "coachedParticipants", 1],
+    ["VoiceOver", "voiceOverSummary", "facilitatorRescues", 1],
+    ["VoiceOver", "voiceOverSummary", "trustedPreviewParticipants", 1],
+    ["VoiceOver", "voiceOverSummary", "buildTeamParticipants", 1],
+    ["TalkBack", "talkBackSummary", "independentHumanReviewers", 0],
+    ["TalkBack", "talkBackSummary", "automatedRuns", 1],
+    ["TalkBack", "talkBackSummary", "ownerParticipants", 1],
+    ["TalkBack", "talkBackSummary", "selfTests", 1],
+    ["TalkBack", "talkBackSummary", "friendOrFamilyParticipants", 1],
+    ["TalkBack", "talkBackSummary", "supportInterventions", 1],
+    ["TalkBack", "talkBackSummary", "externalBetaParticipants", 1],
+    ["TalkBack", "talkBackSummary", "coachedParticipants", 1],
+    ["TalkBack", "talkBackSummary", "facilitatorRescues", 1],
+    ["TalkBack", "talkBackSummary", "trustedPreviewParticipants", 1],
+    ["TalkBack", "talkBackSummary", "buildTeamParticipants", 1],
+  ] as const)("rejects a prohibited %s participant/source boundary", (label, summaryField, field, value) => {
     const input = validAttendedInput();
-    input[field] = value;
+    input[summaryField].participantBoundary[field] = value;
 
     expect(() => buildFounderProductContractEvidence(input)).toThrow(
       `${label} evidence must come from one independent attended human review with no prohibited participant or source`,
@@ -426,46 +474,42 @@ function validAttendedInput() {
   return {
     ...validInput(),
     mode: "release" as const,
-    voiceOverDigest: DIGEST,
-    voiceOverOsVersion: "macOS 15.6",
-    voiceOverBrowserVersion: "Safari 26.0",
-    voiceOverObservedAt: "2026-08-20T00:00:00.000Z",
-    voiceOverRuntimeRevision: RUNTIME_REVISION,
-    voiceOverAttempts: 1,
-    voiceOverFailures: 0,
-    voiceOverFlakes: 0,
-    voiceOverSkips: 0,
-    voiceOverIndependentHumanReviewers: 1,
-    voiceOverAutomatedRuns: 0,
-    voiceOverOwnerParticipants: 0,
-    voiceOverSelfTests: 0,
-    voiceOverFriendOrFamilyParticipants: 0,
-    voiceOverSupportInterventions: 0,
-    voiceOverExternalBetaParticipants: 0,
-    voiceOverCoachedParticipants: 0,
-    voiceOverFacilitatorRescues: 0,
-    voiceOverTrustedPreviewParticipants: 0,
-    voiceOverBuildTeamParticipants: 0,
-    talkBackDigest: DIGEST,
-    talkBackOsVersion: "Android 16",
-    talkBackBrowserVersion: "Chrome 140",
-    talkBackObservedAt: "2026-08-20T00:00:00.000Z",
-    talkBackRuntimeRevision: RUNTIME_REVISION,
-    talkBackAttempts: 1,
-    talkBackFailures: 0,
-    talkBackFlakes: 0,
-    talkBackSkips: 0,
-    talkBackIndependentHumanReviewers: 1,
-    talkBackAutomatedRuns: 0,
-    talkBackOwnerParticipants: 0,
-    talkBackSelfTests: 0,
-    talkBackFriendOrFamilyParticipants: 0,
-    talkBackSupportInterventions: 0,
-    talkBackExternalBetaParticipants: 0,
-    talkBackCoachedParticipants: 0,
-    talkBackFacilitatorRescues: 0,
-    talkBackTrustedPreviewParticipants: 0,
-    talkBackBuildTeamParticipants: 0,
+    voiceOverSummary: attendedSummary("VoiceOver"),
+    talkBackSummary: attendedSummary("TalkBack"),
+  };
+}
+
+function attendedSummary(
+  assistiveTechnology: "VoiceOver" | "TalkBack",
+): FounderAttendedAccessibilitySummary {
+  return {
+    schemaVersion: FOUNDER_ATTENDED_ACCESSIBILITY_SUMMARY_SCHEMA,
+    assistiveTechnology,
+    browser: assistiveTechnology === "VoiceOver" ? "Safari" : "Chrome",
+    applicationRevision: REVISION,
+    runtimeRevision: RUNTIME_REVISION,
+    evidenceDigest: DIGEST,
+    osVersion: assistiveTechnology === "VoiceOver" ? "macOS 15.6" : "Android 16",
+    browserVersion: assistiveTechnology === "VoiceOver" ? "Safari 26.0" : "Chrome 140",
+    observedAt: "2026-08-20T00:00:00.000Z",
+    attempts: 1,
+    failures: 0,
+    flakes: 0,
+    skips: 0,
+    participantBoundary: {
+      independentHumanReviewers: 1,
+      automatedRuns: 0,
+      ownerParticipants: 0,
+      selfTests: 0,
+      friendOrFamilyParticipants: 0,
+      supportInterventions: 0,
+      externalBetaParticipants: 0,
+      coachedParticipants: 0,
+      facilitatorRescues: 0,
+      trustedPreviewParticipants: 0,
+      buildTeamParticipants: 0,
+    },
+    sanitized: true,
   };
 }
 

@@ -39,4 +39,14 @@ describe("Founder Product Contract runner topology", () => {
     expect(runner).not.toMatch(/CLERK_(SECRET|PUBLISHABLE)_KEY/);
     expect(runner).not.toMatch(/LEMON_SQUEEZY_(API_KEY|WEBHOOK_SECRET)/);
   });
+
+  it("parses two structured attended summaries without synthesizing scalar claims", () => {
+    expect(runner.match(/parseFounderAttendedAccessibilitySummary\(/g)).toHaveLength(2);
+    expect(runner).toContain("process.env.BRUNO_FOUNDER_CONTRACT_VOICEOVER_ATTENDED_SUMMARY_JSON");
+    expect(runner).toContain("process.env.BRUNO_FOUNDER_CONTRACT_TALKBACK_ATTENDED_SUMMARY_JSON");
+    expect(runner).not.toMatch(
+      /BRUNO_FOUNDER_CONTRACT_(VOICEOVER|TALKBACK)_(ATTEMPTS|FAILURES|FLAKES|SKIPS)/,
+    );
+    expect(runner).not.toContain("optionalNonnegativeIntegerEnvironment");
+  });
 });

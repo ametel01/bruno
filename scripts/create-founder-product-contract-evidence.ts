@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import type { FounderAttendedAccessibilitySummary } from "@/scripts/founder-attended-accessibility-summary";
 import { isGitRevision, isRuntimeRevision } from "@/scripts/founder-release-evidence-validation";
 import {
   FOUNDER_PRODUCT_CONTRACT_ATTENDED_TASKS,
@@ -48,46 +49,8 @@ export async function createFounderProductContractEvidence(input: {
   runAttempt: number;
   mode: ContractMode;
   observedAt: string;
-  voiceOverDigest?: string;
-  voiceOverOsVersion?: string;
-  voiceOverBrowserVersion?: string;
-  voiceOverObservedAt?: string;
-  voiceOverRuntimeRevision?: string;
-  voiceOverAttempts?: number;
-  voiceOverFailures?: number;
-  voiceOverFlakes?: number;
-  voiceOverSkips?: number;
-  voiceOverIndependentHumanReviewers?: number;
-  voiceOverAutomatedRuns?: number;
-  voiceOverOwnerParticipants?: number;
-  voiceOverSelfTests?: number;
-  voiceOverFriendOrFamilyParticipants?: number;
-  voiceOverSupportInterventions?: number;
-  voiceOverExternalBetaParticipants?: number;
-  voiceOverCoachedParticipants?: number;
-  voiceOverFacilitatorRescues?: number;
-  voiceOverTrustedPreviewParticipants?: number;
-  voiceOverBuildTeamParticipants?: number;
-  talkBackDigest?: string;
-  talkBackOsVersion?: string;
-  talkBackBrowserVersion?: string;
-  talkBackObservedAt?: string;
-  talkBackRuntimeRevision?: string;
-  talkBackAttempts?: number;
-  talkBackFailures?: number;
-  talkBackFlakes?: number;
-  talkBackSkips?: number;
-  talkBackIndependentHumanReviewers?: number;
-  talkBackAutomatedRuns?: number;
-  talkBackOwnerParticipants?: number;
-  talkBackSelfTests?: number;
-  talkBackFriendOrFamilyParticipants?: number;
-  talkBackSupportInterventions?: number;
-  talkBackExternalBetaParticipants?: number;
-  talkBackCoachedParticipants?: number;
-  talkBackFacilitatorRescues?: number;
-  talkBackTrustedPreviewParticipants?: number;
-  talkBackBuildTeamParticipants?: number;
+  voiceOverSummary?: FounderAttendedAccessibilitySummary;
+  talkBackSummary?: FounderAttendedAccessibilitySummary;
   scenarioLedger: FounderProductContractScenarioLedger;
   scenarioSigningSecret: string;
 }): Promise<FounderProductContractEvidence> {
@@ -105,46 +68,8 @@ export function buildFounderProductContractEvidence(input: {
   runAttempt: number;
   mode: ContractMode;
   observedAt: string;
-  voiceOverDigest?: string;
-  voiceOverOsVersion?: string;
-  voiceOverBrowserVersion?: string;
-  voiceOverObservedAt?: string;
-  voiceOverRuntimeRevision?: string;
-  voiceOverAttempts?: number;
-  voiceOverFailures?: number;
-  voiceOverFlakes?: number;
-  voiceOverSkips?: number;
-  voiceOverIndependentHumanReviewers?: number;
-  voiceOverAutomatedRuns?: number;
-  voiceOverOwnerParticipants?: number;
-  voiceOverSelfTests?: number;
-  voiceOverFriendOrFamilyParticipants?: number;
-  voiceOverSupportInterventions?: number;
-  voiceOverExternalBetaParticipants?: number;
-  voiceOverCoachedParticipants?: number;
-  voiceOverFacilitatorRescues?: number;
-  voiceOverTrustedPreviewParticipants?: number;
-  voiceOverBuildTeamParticipants?: number;
-  talkBackDigest?: string;
-  talkBackOsVersion?: string;
-  talkBackBrowserVersion?: string;
-  talkBackObservedAt?: string;
-  talkBackRuntimeRevision?: string;
-  talkBackAttempts?: number;
-  talkBackFailures?: number;
-  talkBackFlakes?: number;
-  talkBackSkips?: number;
-  talkBackIndependentHumanReviewers?: number;
-  talkBackAutomatedRuns?: number;
-  talkBackOwnerParticipants?: number;
-  talkBackSelfTests?: number;
-  talkBackFriendOrFamilyParticipants?: number;
-  talkBackSupportInterventions?: number;
-  talkBackExternalBetaParticipants?: number;
-  talkBackCoachedParticipants?: number;
-  talkBackFacilitatorRescues?: number;
-  talkBackTrustedPreviewParticipants?: number;
-  talkBackBuildTeamParticipants?: number;
+  voiceOverSummary?: FounderAttendedAccessibilitySummary;
+  talkBackSummary?: FounderAttendedAccessibilitySummary;
   scenarioLedger: FounderProductContractScenarioLedger;
   scenarioSigningSecret: string;
 }) {
@@ -191,56 +116,18 @@ export function buildFounderProductContractEvidence(input: {
   }
 
   const voiceOverEvidence = optionalAttendedEvidence({
-    digest: input.voiceOverDigest,
-    osVersion: input.voiceOverOsVersion,
-    browserVersion: input.voiceOverBrowserVersion,
-    observedAt: input.voiceOverObservedAt,
-    runtimeRevision: input.voiceOverRuntimeRevision,
+    summary: input.voiceOverSummary,
     assistiveTechnology: "VoiceOver",
     browser: "Safari",
     sourceRevision: input.sourceRevision,
     expectedRuntimeRevision: input.runtimeRevision,
-    attempts: input.voiceOverAttempts,
-    failures: input.voiceOverFailures,
-    flakes: input.voiceOverFlakes,
-    skips: input.voiceOverSkips,
-    independentHumanReviewers: input.voiceOverIndependentHumanReviewers,
-    automatedRuns: input.voiceOverAutomatedRuns,
-    ownerParticipants: input.voiceOverOwnerParticipants,
-    selfTests: input.voiceOverSelfTests,
-    friendOrFamilyParticipants: input.voiceOverFriendOrFamilyParticipants,
-    supportInterventions: input.voiceOverSupportInterventions,
-    externalBetaParticipants: input.voiceOverExternalBetaParticipants,
-    coachedParticipants: input.voiceOverCoachedParticipants,
-    facilitatorRescues: input.voiceOverFacilitatorRescues,
-    trustedPreviewParticipants: input.voiceOverTrustedPreviewParticipants,
-    buildTeamParticipants: input.voiceOverBuildTeamParticipants,
   });
   const talkBackEvidence = optionalAttendedEvidence({
-    digest: input.talkBackDigest,
-    osVersion: input.talkBackOsVersion,
-    browserVersion: input.talkBackBrowserVersion,
-    observedAt: input.talkBackObservedAt,
-    runtimeRevision: input.talkBackRuntimeRevision,
+    summary: input.talkBackSummary,
     assistiveTechnology: "TalkBack",
     browser: "Chrome",
     sourceRevision: input.sourceRevision,
     expectedRuntimeRevision: input.runtimeRevision,
-    attempts: input.talkBackAttempts,
-    failures: input.talkBackFailures,
-    flakes: input.talkBackFlakes,
-    skips: input.talkBackSkips,
-    independentHumanReviewers: input.talkBackIndependentHumanReviewers,
-    automatedRuns: input.talkBackAutomatedRuns,
-    ownerParticipants: input.talkBackOwnerParticipants,
-    selfTests: input.talkBackSelfTests,
-    friendOrFamilyParticipants: input.talkBackFriendOrFamilyParticipants,
-    supportInterventions: input.talkBackSupportInterventions,
-    externalBetaParticipants: input.talkBackExternalBetaParticipants,
-    coachedParticipants: input.talkBackCoachedParticipants,
-    facilitatorRescues: input.talkBackFacilitatorRescues,
-    trustedPreviewParticipants: input.talkBackTrustedPreviewParticipants,
-    buildTeamParticipants: input.talkBackBuildTeamParticipants,
   });
   if (input.mode === "release" && (!voiceOverEvidence || !talkBackEvidence)) {
     throw new Error("Release evidence requires bound VoiceOver and TalkBack evidence digests.");
@@ -366,145 +253,100 @@ export function buildFounderProductContractEvidence(input: {
 }
 
 function optionalAttendedEvidence(input: {
-  digest: string | undefined;
-  osVersion: string | undefined;
-  browserVersion: string | undefined;
-  observedAt: string | undefined;
-  runtimeRevision: string | undefined;
+  summary: FounderAttendedAccessibilitySummary | undefined;
   assistiveTechnology: "VoiceOver" | "TalkBack";
   browser: "Safari" | "Chrome";
   sourceRevision: string;
   expectedRuntimeRevision: string;
-  attempts: number | undefined;
-  failures: number | undefined;
-  flakes: number | undefined;
-  skips: number | undefined;
-  independentHumanReviewers: number | undefined;
-  automatedRuns: number | undefined;
-  ownerParticipants: number | undefined;
-  selfTests: number | undefined;
-  friendOrFamilyParticipants: number | undefined;
-  supportInterventions: number | undefined;
-  externalBetaParticipants: number | undefined;
-  coachedParticipants: number | undefined;
-  facilitatorRescues: number | undefined;
-  trustedPreviewParticipants: number | undefined;
-  buildTeamParticipants: number | undefined;
 }) {
+  const summary = input.summary;
+  if (!summary) return null;
   if (
-    !input.digest &&
-    !input.osVersion &&
-    !input.browserVersion &&
-    !input.observedAt &&
-    !input.runtimeRevision &&
-    input.attempts === undefined &&
-    input.failures === undefined &&
-    input.flakes === undefined &&
-    input.skips === undefined &&
-    input.independentHumanReviewers === undefined &&
-    input.automatedRuns === undefined &&
-    input.ownerParticipants === undefined &&
-    input.selfTests === undefined &&
-    input.friendOrFamilyParticipants === undefined &&
-    input.supportInterventions === undefined &&
-    input.externalBetaParticipants === undefined &&
-    input.coachedParticipants === undefined &&
-    input.facilitatorRescues === undefined &&
-    input.trustedPreviewParticipants === undefined &&
-    input.buildTeamParticipants === undefined
-  )
-    return null;
-  if (
-    !input.digest ||
-    !input.osVersion ||
-    !input.browserVersion ||
-    !input.observedAt ||
-    !input.runtimeRevision ||
-    input.attempts === undefined ||
-    input.failures === undefined ||
-    input.flakes === undefined ||
-    input.skips === undefined ||
-    input.independentHumanReviewers === undefined ||
-    input.automatedRuns === undefined ||
-    input.ownerParticipants === undefined ||
-    input.selfTests === undefined ||
-    input.friendOrFamilyParticipants === undefined ||
-    input.supportInterventions === undefined ||
-    input.externalBetaParticipants === undefined ||
-    input.coachedParticipants === undefined ||
-    input.facilitatorRescues === undefined ||
-    input.trustedPreviewParticipants === undefined ||
-    input.buildTeamParticipants === undefined
+    summary.assistiveTechnology !== input.assistiveTechnology ||
+    summary.browser !== input.browser
   ) {
-    throw new Error(`${input.assistiveTechnology} evidence metadata is incomplete.`);
+    throw new Error(`${input.assistiveTechnology} evidence technology or browser is invalid.`);
   }
-  requirePattern(input.digest, /^sha256:[a-f0-9]{64}$/, `${input.assistiveTechnology} digest`);
+  if (summary.applicationRevision !== input.sourceRevision) {
+    throw new Error(`${input.assistiveTechnology} source revision does not match the contract.`);
+  }
   requirePattern(
-    input.osVersion,
+    summary.evidenceDigest,
+    /^sha256:[a-f0-9]{64}$/,
+    `${input.assistiveTechnology} digest`,
+  );
+  requirePattern(
+    summary.osVersion,
     /^[A-Za-z0-9 ._()+/-]{1,80}$/,
     `${input.assistiveTechnology} OS version`,
   );
-  const observedAt = new Date(input.observedAt);
-  if (Number.isNaN(observedAt.valueOf()) || observedAt.toISOString() !== input.observedAt) {
+  const observedAt = new Date(summary.observedAt);
+  if (Number.isNaN(observedAt.valueOf()) || observedAt.toISOString() !== summary.observedAt) {
     throw new Error(`${input.assistiveTechnology} observed time is invalid.`);
   }
-  if (!isRuntimeRevision(input.runtimeRevision)) {
+  if (!isRuntimeRevision(summary.runtimeRevision)) {
     throw new Error(`${input.assistiveTechnology} runtime revision is invalid.`);
   }
-  if (input.runtimeRevision !== input.expectedRuntimeRevision) {
+  if (summary.runtimeRevision !== input.expectedRuntimeRevision) {
     throw new Error(`${input.assistiveTechnology} runtime revision does not match the contract.`);
   }
-  if (input.attempts !== 1 || input.failures !== 0 || input.flakes !== 0 || input.skips !== 0) {
+  if (
+    summary.attempts !== 1 ||
+    summary.failures !== 0 ||
+    summary.flakes !== 0 ||
+    summary.skips !== 0
+  ) {
     throw new Error(`${input.assistiveTechnology} evidence must have exactly one clean attempt.`);
   }
+  const boundary = summary.participantBoundary;
   if (
-    input.independentHumanReviewers !== 1 ||
-    input.automatedRuns !== 0 ||
-    input.ownerParticipants !== 0 ||
-    input.selfTests !== 0 ||
-    input.friendOrFamilyParticipants !== 0 ||
-    input.supportInterventions !== 0 ||
-    input.externalBetaParticipants !== 0 ||
-    input.coachedParticipants !== 0 ||
-    input.facilitatorRescues !== 0 ||
-    input.trustedPreviewParticipants !== 0 ||
-    input.buildTeamParticipants !== 0
+    boundary.independentHumanReviewers !== 1 ||
+    boundary.automatedRuns !== 0 ||
+    boundary.ownerParticipants !== 0 ||
+    boundary.selfTests !== 0 ||
+    boundary.friendOrFamilyParticipants !== 0 ||
+    boundary.supportInterventions !== 0 ||
+    boundary.externalBetaParticipants !== 0 ||
+    boundary.coachedParticipants !== 0 ||
+    boundary.facilitatorRescues !== 0 ||
+    boundary.trustedPreviewParticipants !== 0 ||
+    boundary.buildTeamParticipants !== 0
   ) {
     throw new Error(
       `${input.assistiveTechnology} evidence must come from one independent attended human review with no prohibited participant or source.`,
     );
   }
   requirePattern(
-    input.browserVersion,
+    summary.browserVersion,
     /^[A-Za-z0-9 ._()+/-]{1,80}$/,
     `${input.assistiveTechnology} browser version`,
   );
   return {
-    digest: input.digest,
+    digest: summary.evidenceDigest,
     assistiveTechnology: input.assistiveTechnology,
-    osVersion: input.osVersion,
+    osVersion: summary.osVersion,
     browser: input.browser,
-    browserVersion: input.browserVersion,
-    appSourceRevision: input.sourceRevision,
-    appRuntimeRevision: input.runtimeRevision,
-    observedAt: input.observedAt,
-    attempts: input.attempts,
-    failures: input.failures,
-    flakes: input.flakes,
-    skips: input.skips,
+    browserVersion: summary.browserVersion,
+    appSourceRevision: summary.applicationRevision,
+    appRuntimeRevision: summary.runtimeRevision,
+    observedAt: summary.observedAt,
+    attempts: summary.attempts,
+    failures: summary.failures,
+    flakes: summary.flakes,
+    skips: summary.skips,
     evidenceClass: "independent_attended_human_accessibility_review",
     participantBoundary: {
-      independentHumanReviewers: 1,
-      automatedRuns: 0,
-      ownerParticipants: 0,
-      selfTests: 0,
-      friendOrFamilyParticipants: 0,
-      supportInterventions: 0,
-      externalBetaParticipants: 0,
-      coachedParticipants: 0,
-      facilitatorRescues: 0,
-      trustedPreviewParticipants: 0,
-      buildTeamParticipants: 0,
+      independentHumanReviewers: boundary.independentHumanReviewers,
+      automatedRuns: boundary.automatedRuns,
+      ownerParticipants: boundary.ownerParticipants,
+      selfTests: boundary.selfTests,
+      friendOrFamilyParticipants: boundary.friendOrFamilyParticipants,
+      supportInterventions: boundary.supportInterventions,
+      externalBetaParticipants: boundary.externalBetaParticipants,
+      coachedParticipants: boundary.coachedParticipants,
+      facilitatorRescues: boundary.facilitatorRescues,
+      trustedPreviewParticipants: boundary.trustedPreviewParticipants,
+      buildTeamParticipants: boundary.buildTeamParticipants,
     },
     tasks: [...FOUNDER_PRODUCT_CONTRACT_ATTENDED_TASKS],
     outcome: "passed",

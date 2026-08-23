@@ -73,58 +73,22 @@ describe("Founder Product Contract workflow", () => {
     expect(workflow).not.toContain("|| 'founder-contract-v1'");
     expect(workflow).not.toMatch(/^\s+runtime_revision:/m);
     expect(workflow).not.toContain("inputs.runtime_revision");
+    const dispatchInputs = parsedWorkflow.on.workflow_dispatch.inputs;
+    expect(Object.keys(dispatchInputs)).toHaveLength(7);
+    expect(Object.keys(dispatchInputs).length).toBeLessThanOrEqual(25);
+    expect(dispatchInputs.voiceover_attended_summary_json?.type).toBe("string");
+    expect(dispatchInputs.talkback_attended_summary_json?.type).toBe("string");
     expect(workflow).toContain(
-      "BRUNO_FOUNDER_CONTRACT_VOICEOVER_ATTEMPTS: $" + "{{ inputs.voiceover_attempts }}",
+      "BRUNO_FOUNDER_CONTRACT_VOICEOVER_ATTENDED_SUMMARY_JSON: $" +
+        "{{ inputs.voiceover_attended_summary_json }}",
     );
     expect(workflow).toContain(
-      "BRUNO_FOUNDER_CONTRACT_TALKBACK_ATTEMPTS: $" + "{{ inputs.talkback_attempts }}",
+      "BRUNO_FOUNDER_CONTRACT_TALKBACK_ATTENDED_SUMMARY_JSON: $" +
+        "{{ inputs.talkback_attended_summary_json }}",
     );
-    expect(workflow).toContain(
-      "BRUNO_FOUNDER_CONTRACT_VOICEOVER_INDEPENDENT_HUMAN_REVIEWERS: $" +
-        "{{ inputs.voiceover_independent_human_reviewers }}",
-    );
-    expect(workflow).toContain(
-      "BRUNO_FOUNDER_CONTRACT_TALKBACK_INDEPENDENT_HUMAN_REVIEWERS: $" +
-        "{{ inputs.talkback_independent_human_reviewers }}",
-    );
-    for (const prohibitedSource of [
-      "AUTOMATED_RUNS",
-      "OWNER_PARTICIPANTS",
-      "SELF_TESTS",
-      "FRIEND_OR_FAMILY_PARTICIPANTS",
-      "SUPPORT_INTERVENTIONS",
-      "EXTERNAL_BETA_PARTICIPANTS",
-      "COACHED_PARTICIPANTS",
-      "FACILITATOR_RESCUES",
-      "TRUSTED_PREVIEW_PARTICIPANTS",
-      "BUILD_TEAM_PARTICIPANTS",
-    ]) {
-      expect(workflow).toContain(`BRUNO_FOUNDER_CONTRACT_VOICEOVER_${prohibitedSource}:`);
-      expect(workflow).toContain(`BRUNO_FOUNDER_CONTRACT_TALKBACK_${prohibitedSource}:`);
-    }
-    for (const technology of ["voiceover", "talkback"]) {
-      for (const claim of [
-        "attempts",
-        "failures",
-        "flakes",
-        "skips",
-        "independent_human_reviewers",
-        "automated_runs",
-        "owner_participants",
-        "self_tests",
-        "friend_or_family_participants",
-        "support_interventions",
-        "external_beta_participants",
-        "coached_participants",
-        "facilitator_rescues",
-        "trusted_preview_participants",
-        "build_team_participants",
-      ]) {
-        expect(parsedWorkflow.on.workflow_dispatch.inputs[`${technology}_${claim}`]?.type).toBe(
-          "string",
-        );
-      }
-    }
+    expect(workflow).not.toMatch(/^\s+(voiceover|talkback)_(attempts|failures|flakes|skips):/m);
+    expect(workflow).not.toContain("BRUNO_FOUNDER_CONTRACT_VOICEOVER_ATTEMPTS:");
+    expect(workflow).not.toContain("BRUNO_FOUNDER_CONTRACT_TALKBACK_ATTEMPTS:");
     expect(workflow).toContain(
       "BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST: $" +
         "{{ vars.BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST }}",

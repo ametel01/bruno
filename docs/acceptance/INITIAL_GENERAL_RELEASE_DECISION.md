@@ -107,5 +107,6 @@ Then resolve all External Beta findings before freezing the candidate. Conduct t
 moderated cohort and attended VoiceOver/TalkBack journeys without coaching, self/friend testing, or
 facilitator rescue; separately review and sanitize the operational/privacy/billing/recovery/retirement
 evidence; and dispatch the Founder Product Contract in `release` mode with only the four allowlisted
-summaries and accessibility digests. General Release remains denied until that exact run emits
+General Release summaries plus the two strict sanitized attended-accessibility summaries. General
+Release remains denied until that exact run emits
 `outcome: approved` and the protected Owner import persists it for the matching deployed candidate.

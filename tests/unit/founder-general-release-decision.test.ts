@@ -8,6 +8,10 @@ import {
 import { buildFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
 import { parseFounderProductionProviderQualificationSummary } from "@/scripts/create-founder-production-provider-qualification";
 import {
+  FOUNDER_ATTENDED_ACCESSIBILITY_SUMMARY_SCHEMA,
+  parseFounderAttendedAccessibilitySummary,
+} from "@/scripts/founder-attended-accessibility-summary";
+import {
   FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS,
   FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
 } from "@/src/shared/founder-product-contract";
@@ -549,49 +553,53 @@ function productContract(mode: "ci" | "release", attendedObservedAt = "2026-08-2
     scenarioSigningSecret: SIGNING_SECRET,
     ...(mode === "release"
       ? {
-          voiceOverDigest: `sha256:${"ab".repeat(32)}`,
-          voiceOverOsVersion: "macOS 15.6",
-          voiceOverBrowserVersion: "Safari 26.0",
-          voiceOverObservedAt: attendedObservedAt,
-          voiceOverRuntimeRevision: RUNTIME_REVISION,
-          voiceOverAttempts: 1,
-          voiceOverFailures: 0,
-          voiceOverFlakes: 0,
-          voiceOverSkips: 0,
-          voiceOverIndependentHumanReviewers: 1,
-          voiceOverAutomatedRuns: 0,
-          voiceOverOwnerParticipants: 0,
-          voiceOverSelfTests: 0,
-          voiceOverFriendOrFamilyParticipants: 0,
-          voiceOverSupportInterventions: 0,
-          voiceOverExternalBetaParticipants: 0,
-          voiceOverCoachedParticipants: 0,
-          voiceOverFacilitatorRescues: 0,
-          voiceOverTrustedPreviewParticipants: 0,
-          voiceOverBuildTeamParticipants: 0,
-          talkBackDigest: `sha256:${"ac".repeat(32)}`,
-          talkBackOsVersion: "Android 16",
-          talkBackBrowserVersion: "Chrome 140",
-          talkBackObservedAt: attendedObservedAt,
-          talkBackRuntimeRevision: RUNTIME_REVISION,
-          talkBackAttempts: 1,
-          talkBackFailures: 0,
-          talkBackFlakes: 0,
-          talkBackSkips: 0,
-          talkBackIndependentHumanReviewers: 1,
-          talkBackAutomatedRuns: 0,
-          talkBackOwnerParticipants: 0,
-          talkBackSelfTests: 0,
-          talkBackFriendOrFamilyParticipants: 0,
-          talkBackSupportInterventions: 0,
-          talkBackExternalBetaParticipants: 0,
-          talkBackCoachedParticipants: 0,
-          talkBackFacilitatorRescues: 0,
-          talkBackTrustedPreviewParticipants: 0,
-          talkBackBuildTeamParticipants: 0,
+          voiceOverSummary: attendedSummary("VoiceOver", attendedObservedAt),
+          talkBackSummary: attendedSummary("TalkBack", attendedObservedAt),
         }
       : {}),
   });
+}
+
+function attendedSummary(assistiveTechnology: "VoiceOver" | "TalkBack", observedAt: string) {
+  const browser = assistiveTechnology === "VoiceOver" ? "Safari" : "Chrome";
+  const parsed = parseFounderAttendedAccessibilitySummary({
+    raw: JSON.stringify({
+      schemaVersion: FOUNDER_ATTENDED_ACCESSIBILITY_SUMMARY_SCHEMA,
+      assistiveTechnology,
+      browser,
+      applicationRevision: REVISION,
+      runtimeRevision: RUNTIME_REVISION,
+      evidenceDigest:
+        assistiveTechnology === "VoiceOver"
+          ? `sha256:${"ab".repeat(32)}`
+          : `sha256:${"ac".repeat(32)}`,
+      osVersion: assistiveTechnology === "VoiceOver" ? "macOS 15.6" : "Android 16",
+      browserVersion: assistiveTechnology === "VoiceOver" ? "Safari 26.0" : "Chrome 140",
+      observedAt,
+      attempts: 1,
+      failures: 0,
+      flakes: 0,
+      skips: 0,
+      participantBoundary: {
+        independentHumanReviewers: 1,
+        automatedRuns: 0,
+        ownerParticipants: 0,
+        selfTests: 0,
+        friendOrFamilyParticipants: 0,
+        supportInterventions: 0,
+        externalBetaParticipants: 0,
+        coachedParticipants: 0,
+        facilitatorRescues: 0,
+        trustedPreviewParticipants: 0,
+        buildTeamParticipants: 0,
+      },
+      sanitized: true,
+    }),
+    assistiveTechnology,
+    browser,
+  });
+  if (!parsed) throw new Error("Expected attended summary fixture.");
+  return parsed;
 }
 
 function lifecycleScenarioResults() {
