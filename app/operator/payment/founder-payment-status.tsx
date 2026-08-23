@@ -12,7 +12,13 @@ export function FounderPaymentStatus({
   const [status, setStatus] = useState(initialStatus);
 
   useEffect(() => {
-    if (status.state !== "confirming_payment") return;
+    if (
+      status.state !== "confirming_payment" &&
+      status.state !== "restoring" &&
+      status.state !== "provider_reauthorization_required"
+    ) {
+      return;
+    }
     const refresh = async () => {
       try {
         const response = await fetch("/api/operator/commerce/status", { cache: "no-store" });
@@ -77,6 +83,38 @@ export function FounderPaymentStatus({
         <a className={styles.primary} href="/operator">
           Return to Bruno
         </a>
+      </section>
+    );
+  }
+
+  if (status.state === "restoring" || status.state === "provider_reauthorization_required") {
+    return (
+      <section className={styles.card} aria-labelledby="payment-title" aria-live="polite">
+        <p className={styles.eyebrow}>Restoring your Operator</p>
+        <h2 id="payment-title">
+          {status.state === "provider_reauthorization_required"
+            ? "Reconnect your providers to resume"
+            : "New infrastructure is being verified"}
+        </h2>
+        <p>
+          Your same logical Operator is being rebuilt on a new Droplet and firewall. The old IP
+          address and infrastructure identity are not preserved. New work remains paused until the
+          Recovery Archive, infrastructure, provider access, and Product Entitlement are all ready.
+        </p>
+      </section>
+    );
+  }
+
+  if (status.state === "new_operator_environment") {
+    return (
+      <section className={styles.card} aria-labelledby="payment-title" aria-live="polite">
+        <p className={styles.eyebrow}>New Operator environment</p>
+        <h2 id="payment-title">The Recovery Archive window has ended</h2>
+        <p>
+          The expired archive and its recovery access remain deleted. Bruno.Ai refunded this paid
+          attempt and started a clearly new Operator setup; old provider access was not carried
+          forward.
+        </p>
       </section>
     );
   }

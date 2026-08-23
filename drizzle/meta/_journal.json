@@ -729,6 +729,20 @@
       "when": 1787439468844,
       "tag": "0103_issue_382_subscription_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1787442703324,
+      "tag": "0104_issue_383_returning_founder_restoration",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1787442935722,
+      "tag": "0105_issue_383_restoration_fences",
+      "breakpoints": true
     }
   ]
 }

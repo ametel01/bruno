@@ -101,4 +101,37 @@ describe("Founder payment status", () => {
     expect(completed).toContain("provider absence was verified");
     expect(completed).toContain("separate actions");
   });
+
+  it("keeps returning-Founder infrastructure, provider, and refund truth explicit", () => {
+    const restoring = renderToStaticMarkup(
+      <FounderPaymentStatus
+        initialStatus={{
+          state: "provider_reauthorization_required",
+          environment: "same Operator, new infrastructure",
+          providerAccess: "reauthorization required",
+          work: "paused",
+        }}
+      />,
+    );
+    expect(restoring).toContain("Reconnect your providers to resume");
+    expect(restoring).toContain("same logical Operator");
+    expect(restoring).toContain("old IP address and infrastructure identity are not preserved");
+    expect(restoring).toContain("New work remains paused");
+    expect(restoring).not.toMatch(/droplet-[a-z0-9]|firewall-[a-z0-9]|runtimeIdentity/i);
+
+    const expired = renderToStaticMarkup(
+      <FounderPaymentStatus
+        initialStatus={{
+          state: "new_operator_environment",
+          payment: "refunded",
+          providerAccess: "not carried forward",
+          work: "paused",
+        }}
+      />,
+    );
+    expect(expired).toContain("Recovery Archive window has ended");
+    expect(expired).toContain("remain deleted");
+    expect(expired).toContain("refunded this paid attempt");
+    expect(expired).toContain("clearly new Operator setup");
+  });
 });

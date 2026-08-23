@@ -278,7 +278,10 @@ async function prepareFounderInfrastructureRetirement(
       input.userId,
     );
     const [runtime] = await tx
-      .select({ configRevision: operatorRuntimes.configRevision })
+      .select({
+        configRevision: operatorRuntimes.configRevision,
+        runtimeIdentity: operatorRuntimes.runtimeIdentity,
+      })
       .from(operatorRuntimes)
       .where(eq(operatorRuntimes.operatorId, operatorId))
       .orderBy(desc(operatorRuntimes.updatedAt))
@@ -412,6 +415,7 @@ async function prepareFounderInfrastructureRetirement(
         providerRegion: expectation.expectedRegion,
         providerSizeSlug: expectation.expectedSizeSlug,
         providerFirewallName: expectation.expectedFirewallName,
+        retiredRuntimeIdentity: runtime.runtimeIdentity,
         hardDestructionDueAt,
         status: "in_progress",
         resourcesBefore: 0,

@@ -8,6 +8,7 @@ import {
   founderCommerceEvents,
   founderCommerceLifecycleReceipts,
   founderInfrastructureRetirements,
+  founderOperatorRestorations,
   founderProductEntitlements,
   operators,
 } from "@/src/server/db/schema";
@@ -58,6 +59,24 @@ export type FounderCommerceStatusDto =
       state: "retirement_completed";
       reason: "unpaid" | "expired" | "refunded" | "cancelled" | "past_due";
       completedAt: string;
+    }
+  | {
+      state: "restoring";
+      environment: "same Operator, new infrastructure";
+      providerAccess: "reauthorization required";
+      work: "paused";
+    }
+  | {
+      state: "provider_reauthorization_required";
+      environment: "same Operator, new infrastructure";
+      providerAccess: "reauthorization required";
+      work: "paused";
+    }
+  | {
+      state: "new_operator_environment";
+      payment: "refunded";
+      providerAccess: "not carried forward";
+      work: "paused";
     };
 
 export async function createFounderCheckout(input: {
@@ -124,41 +143,71 @@ export async function getFounderCommerceStatusForUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
-    const [[attempt], [entitlement], [retirement], [entitlementAuthority]] = await Promise.all([
-      connection.db
-        .select()
-        .from(founderCheckoutCorrelations)
-        .where(eq(founderCheckoutCorrelations.userId, userId))
-        .orderBy(desc(founderCheckoutCorrelations.generation))
-        .limit(1),
-      connection.db
-        .select()
-        .from(founderProductEntitlements)
-        .where(eq(founderProductEntitlements.userId, userId))
-        .limit(1),
-      connection.db
-        .select({
-          status: founderInfrastructureRetirements.status,
-          absenceVerifiedAt: founderInfrastructureRetirements.absenceVerifiedAt,
-        })
-        .from(founderInfrastructureRetirements)
-        .where(eq(founderInfrastructureRetirements.userId, userId))
-        .orderBy(desc(founderInfrastructureRetirements.updatedAt))
-        .limit(1),
-      connection.db
-        .select({ generation: founderCheckoutCorrelations.generation })
-        .from(founderProductEntitlements)
-        .innerJoin(
-          founderCommerceEvents,
-          eq(founderCommerceEvents.id, founderProductEntitlements.sourceEventId),
-        )
-        .innerJoin(
-          founderCheckoutCorrelations,
-          eq(founderCheckoutCorrelations.id, founderCommerceEvents.checkoutCorrelationId),
-        )
-        .where(eq(founderProductEntitlements.userId, userId))
-        .limit(1),
-    ]);
+    const [[attempt], [entitlement], [retirement], [entitlementAuthority], [restoration]] =
+      await Promise.all([
+        connection.db
+          .select()
+          .from(founderCheckoutCorrelations)
+          .where(eq(founderCheckoutCorrelations.userId, userId))
+          .orderBy(desc(founderCheckoutCorrelations.generation))
+          .limit(1),
+        connection.db
+          .select()
+          .from(founderProductEntitlements)
+          .where(eq(founderProductEntitlements.userId, userId))
+          .limit(1),
+        connection.db
+          .select({
+            status: founderInfrastructureRetirements.status,
+            absenceVerifiedAt: founderInfrastructureRetirements.absenceVerifiedAt,
+          })
+          .from(founderInfrastructureRetirements)
+          .where(eq(founderInfrastructureRetirements.userId, userId))
+          .orderBy(desc(founderInfrastructureRetirements.updatedAt))
+          .limit(1),
+        connection.db
+          .select({ generation: founderCheckoutCorrelations.generation })
+          .from(founderProductEntitlements)
+          .innerJoin(
+            founderCommerceEvents,
+            eq(founderCommerceEvents.id, founderProductEntitlements.sourceEventId),
+          )
+          .innerJoin(
+            founderCheckoutCorrelations,
+            eq(founderCheckoutCorrelations.id, founderCommerceEvents.checkoutCorrelationId),
+          )
+          .where(eq(founderProductEntitlements.userId, userId))
+          .limit(1),
+        connection.db
+          .select()
+          .from(founderOperatorRestorations)
+          .where(eq(founderOperatorRestorations.userId, userId))
+          .orderBy(desc(founderOperatorRestorations.createdAt))
+          .limit(1),
+      ]);
+    if (
+      restoration?.mode === "same_logical_operator" &&
+      (restoration.status === "in_progress" ||
+        restoration.status === "provider_reauthorization_required")
+    ) {
+      return {
+        state:
+          restoration.status === "provider_reauthorization_required"
+            ? "provider_reauthorization_required"
+            : "restoring",
+        environment: "same Operator, new infrastructure",
+        providerAccess: "reauthorization required",
+        work: "paused",
+      };
+    }
+    if (restoration?.mode === "new_operator_environment" && restoration.status === "refunded") {
+      return {
+        state: "new_operator_environment",
+        payment: "refunded",
+        providerAccess: "not carried forward",
+        work: "paused",
+      };
+    }
     if (
       (attempt?.status === "pending" ||
         attempt?.status === "consumed" ||
@@ -362,7 +411,7 @@ export async function reconcileFounderCommerceReceipt(input: {
   now: Date;
   provider: LemonSqueezyCommerceProvider;
   createConnection?: () => DatabaseConnection;
-}): Promise<"applied" | "ignored" | "confirming_payment"> {
+}): Promise<"applied" | "ignored" | "confirming_payment" | "restoration_required"> {
   const connection = input.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !input.createConnection;
   try {
@@ -454,6 +503,32 @@ export async function reconcileFounderCommerceReceipt(input: {
           .set({ lastAttemptAt: input.now, lastErrorCode: "payment_reconciliation_timeout" })
           .where(eq(founderCommerceEvents.id, lockedReceipt.id));
         return "confirming_payment";
+      }
+      if (providerStatus === "active") {
+        const [completedRetirement] = await tx
+          .select({
+            id: founderInfrastructureRetirements.id,
+            absenceVerifiedAt: founderInfrastructureRetirements.absenceVerifiedAt,
+          })
+          .from(founderInfrastructureRetirements)
+          .where(
+            and(
+              eq(founderInfrastructureRetirements.userId, receipt.userId),
+              eq(founderInfrastructureRetirements.status, "completed"),
+            ),
+          )
+          .orderBy(desc(founderInfrastructureRetirements.absenceVerifiedAt))
+          .limit(1);
+        if (completedRetirement?.absenceVerifiedAt) {
+          await tx
+            .update(founderCommerceEvents)
+            .set({
+              lastAttemptAt: input.now,
+              lastErrorCode: "returning_founder_restoration_required",
+            })
+            .where(eq(founderCommerceEvents.id, lockedReceipt.id));
+          return "restoration_required";
+        }
       }
       if (
         providerStatus === "active" &&

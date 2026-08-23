@@ -77,6 +77,17 @@ export const founderInfrastructureRetirementStatusEnum = pgEnum(
   "founder_infrastructure_retirement_status",
   ["in_progress", "completed", "failed"],
 );
+export const founderOperatorRestorationStatusEnum = pgEnum("founder_operator_restoration_status", [
+  "in_progress",
+  "provider_reauthorization_required",
+  "completed",
+  "refunded",
+  "failed",
+]);
+export const founderOperatorRestorationModeEnum = pgEnum("founder_operator_restoration_mode", [
+  "same_logical_operator",
+  "new_operator_environment",
+]);
 export const operatorDeletionRequestKindEnum = pgEnum("operator_deletion_request_kind", [
   "retained_data",
   "account_closure",
@@ -850,7 +861,9 @@ export const operators = pgTable(
       "operators_external_action_pause_pair_check",
       sql`(${table.externalActionPause} = false AND ${table.externalActionPauseReason} IS NULL AND ${table.externalActionPausedAt} IS NULL) OR (${table.externalActionPause} = true AND ${table.externalActionPauseReason} IS NOT NULL AND ${table.externalActionPausedAt} IS NOT NULL)`,
     ),
-    uniqueIndex("operators_user_id_idx").on(table.userId),
+    uniqueIndex("operators_active_user_id_idx")
+      .on(table.userId)
+      .where(sql`${table.status} = 'active'`),
     index("operators_status_idx").on(table.status),
   ],
 );
@@ -1470,6 +1483,7 @@ export const founderInfrastructureRetirements = pgTable(
     providerSizeSlug: text("provider_size_slug"),
     providerFirewallName: text("provider_firewall_name"),
     providerResourceCreatedAt: timestamp("provider_resource_created_at", { withTimezone: true }),
+    retiredRuntimeIdentity: text("retired_runtime_identity"),
     hardDestructionDueAt: timestamp("hard_destruction_due_at", { withTimezone: true }),
     status: founderInfrastructureRetirementStatusEnum("status").notNull(),
     resourcesBefore: integer("resources_before").notNull(),
@@ -1520,6 +1534,79 @@ export const founderInfrastructureRetirements = pgTable(
       sql`${table.status} <> 'completed' OR (${table.providerOperationTag} IS NOT NULL AND ${table.providerResourceName} IS NOT NULL AND ${table.providerRegion} IS NOT NULL AND ${table.providerSizeSlug} IS NOT NULL AND ${table.providerFirewallName} IS NOT NULL AND ${table.providerResourceCreatedAt} IS NOT NULL AND ${table.hardDestructionDueAt} IS NOT NULL AND ${table.resourcesAfter} = 0 AND ${table.providerDropletState} = 'absent' AND ${table.providerFirewallState} = 'absent' AND ${table.providerObservedAt} IS NOT NULL AND ${table.workStoppedAt} IS NOT NULL AND ${table.credentialsDisabledAt} IS NOT NULL AND ${table.archiveOutcome} <> 'pending' AND ${table.firewallDeletedAt} IS NOT NULL AND ${table.dropletDeletedAt} IS NOT NULL AND ${table.absenceVerifiedAt} IS NOT NULL AND ${table.billableRuntimeSeconds} IS NOT NULL AND ${table.failureCode} IS NULL)`,
     ),
     index("founder_infrastructure_retirements_user_status_idx").on(table.userId, table.status),
+  ],
+);
+
+export const founderOperatorRestorations = pgTable(
+  "founder_operator_restorations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    sourceOperatorId: uuid("source_operator_id")
+      .notNull()
+      .references(() => operators.id),
+    restoredOperatorId: uuid("restored_operator_id")
+      .notNull()
+      .references(() => operators.id),
+    recoveryArchiveId: uuid("recovery_archive_id").references(() => founderRecoveryArchives.id),
+    sourceRetirementId: uuid("source_retirement_id")
+      .notNull()
+      .references(() => founderInfrastructureRetirements.id),
+    sourceEventId: uuid("source_event_id")
+      .notNull()
+      .references(() => founderCommerceEvents.id),
+    newRunnerId: uuid("new_runner_id").references(() => runners.id),
+    mode: founderOperatorRestorationModeEnum("mode").notNull(),
+    status: founderOperatorRestorationStatusEnum("status").notNull(),
+    oldProviderResourceId: text("old_provider_resource_id").notNull(),
+    oldProviderFirewallId: text("old_provider_firewall_id").notNull(),
+    oldRuntimeIdentity: text("old_runtime_identity").notNull(),
+    newProviderResourceId: text("new_provider_resource_id"),
+    newProviderFirewallId: text("new_provider_firewall_id"),
+    newRuntimeIdentity: text("new_runtime_identity"),
+    archiveVerifiedAt: timestamp("archive_verified_at", { withTimezone: true }),
+    infrastructureReadyAt: timestamp("infrastructure_ready_at", { withTimezone: true }),
+    providersReadyAt: timestamp("providers_ready_at", { withTimezone: true }),
+    entitlementVerifiedAt: timestamp("entitlement_verified_at", { withTimezone: true }),
+    workResumedAt: timestamp("work_resumed_at", { withTimezone: true }),
+    refundConfirmedAt: timestamp("refund_confirmed_at", { withTimezone: true }),
+    cleanupConfirmedAt: timestamp("cleanup_confirmed_at", { withTimezone: true }),
+    failureCode: text("failure_code"),
+    attemptCount: integer("attempt_count").notNull().default(1),
+    leaseToken: text("lease_token").notNull(),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("founder_operator_restorations_source_event_idx").on(table.sourceEventId),
+    uniqueIndex("founder_operator_restorations_active_user_idx")
+      .on(table.userId)
+      .where(sql`${table.status} IN ('in_progress', 'provider_reauthorization_required')`),
+    check(
+      "founder_operator_restorations_identity_check",
+      sql`(${table.mode} = 'same_logical_operator' AND ${table.recoveryArchiveId} IS NOT NULL AND ${table.sourceOperatorId} = ${table.restoredOperatorId}) OR (${table.mode} = 'new_operator_environment' AND ${table.recoveryArchiveId} IS NULL AND ${table.sourceOperatorId} <> ${table.restoredOperatorId})`,
+    ),
+    check(
+      "founder_operator_restorations_resource_identity_check",
+      sql`${table.newProviderResourceId} IS NULL OR (${table.newProviderFirewallId} IS NOT NULL AND ${table.newRuntimeIdentity} IS NOT NULL AND ${table.newProviderResourceId} <> ${table.oldProviderResourceId} AND ${table.newProviderFirewallId} <> ${table.oldProviderFirewallId} AND ${table.newRuntimeIdentity} <> ${table.oldRuntimeIdentity})`,
+    ),
+    check(
+      "founder_operator_restorations_completed_check",
+      sql`${table.status} <> 'completed' OR (${table.newRunnerId} IS NOT NULL AND ${table.newProviderResourceId} IS NOT NULL AND ${table.newProviderFirewallId} IS NOT NULL AND ${table.newRuntimeIdentity} IS NOT NULL AND ${table.infrastructureReadyAt} IS NOT NULL AND ${table.providersReadyAt} IS NOT NULL AND ${table.entitlementVerifiedAt} IS NOT NULL AND ${table.workResumedAt} IS NOT NULL AND ${table.refundConfirmedAt} IS NULL AND ${table.cleanupConfirmedAt} IS NULL AND ${table.failureCode} IS NULL AND ((${table.mode} = 'same_logical_operator' AND ${table.archiveVerifiedAt} IS NOT NULL) OR (${table.mode} = 'new_operator_environment' AND ${table.archiveVerifiedAt} IS NULL)))`,
+    ),
+    check(
+      "founder_operator_restorations_refunded_check",
+      sql`${table.status} <> 'refunded' OR (${table.refundConfirmedAt} IS NOT NULL AND ${table.cleanupConfirmedAt} IS NOT NULL AND ${table.workResumedAt} IS NULL AND ${table.failureCode} IS NOT NULL)`,
+    ),
+    check("founder_operator_restorations_attempt_check", sql`${table.attemptCount} > 0`),
+    check(
+      "founder_operator_restorations_lease_check",
+      sql`length(trim(${table.leaseToken})) > 0 AND ${table.leaseExpiresAt} >= ${table.createdAt}`,
+    ),
+    index("founder_operator_restorations_user_created_idx").on(table.userId, table.createdAt),
   ],
 );
 

@@ -35,12 +35,19 @@ export type FounderLifecycleFailureOperation =
   | "digitalOcean.observe_owned_resources"
   | "digitalOcean.delete_firewall"
   | "digitalOcean.delete_droplet"
-  | "digitalOcean.observe_owned_resources_absent";
+  | "digitalOcean.observe_owned_resources_absent"
+  | "digitalOcean.create_restoration_droplet"
+  | "digitalOcean.configure_restoration_firewall"
+  | "openAI.reauthorize"
+  | "anthropic.reauthorize"
+  | "google.reauthorize_company"
+  | "lemonSqueezy.refund_restoration";
 
 type ProviderState = {
   digitalOcean: FakeDigitalOceanProvider;
   archiveStorage: FakeBackupObjectStorage;
   seededResourceIds: Set<string>;
+  restorationCounter: number;
 };
 
 const globalProviders = globalThis as typeof globalThis & {
@@ -53,6 +60,7 @@ export function deterministicFounderLifecycleProviders(input: {
   now: Date;
   failures: readonly FounderLifecycleFailureOperation[];
   subscriptionStatus: FounderCommerceStatus;
+  partialRestorationUserId?: string;
 }): FounderLifecycleProviderBoundary {
   if (!globalProviders.__brunoFounderLifecycleProviders) {
     globalProviders.__brunoFounderLifecycleProviders = new Map();
@@ -63,6 +71,7 @@ export function deterministicFounderLifecycleProviders(input: {
     digitalOcean: new FakeDigitalOceanProvider({ now: () => input.now }),
     archiveStorage: new FakeBackupObjectStorage("founder-product-contract-recovery"),
     seededResourceIds: new Set(),
+    restorationCounter: 0,
   };
   registry.set(key, state);
   const calls: string[] = [];
@@ -138,6 +147,68 @@ export function deterministicFounderLifecycleProviders(input: {
     },
     async deleteRecoveryArchive(deletion) {
       return archiveProvider.deleteRecoveryArchive(deletion);
+    },
+    async verifyRecoveryArchive(archive) {
+      return archiveProvider.verifyRecoveryArchive(archive);
+    },
+    async provisionNewInfrastructure(provisioning) {
+      state.restorationCounter += 1;
+      calls.push("digitalOcean.create_restoration_droplet");
+      failIfConfigured(failures, "digitalOcean.create_restoration_droplet");
+      const suffix = createHash("sha256")
+        .update(`${input.runId}:${provisioning.userId}:${state.restorationCounter}`)
+        .digest("hex");
+      const value = {
+        runnerId: provisioning.runnerId,
+        persistedRunner: false,
+        providerResourceId: `restored-droplet-${suffix.slice(0, 16)}`,
+        providerFirewallId: `restored-firewall-${suffix.slice(16, 32)}`,
+        endpointUrl: `https://198.51.100.${20 + state.restorationCounter}`,
+        runtimeIdentity: `restored-runtime-${suffix.slice(32, 48)}`,
+        operationTag: `bruno-deploy-${provisioning.runnerId.replaceAll("-", "")}`,
+        name: `restored-${provisioning.runnerId}`,
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-1gb",
+        image: "ubuntu-24-04-x64",
+        createdAt: input.now,
+      };
+      calls.push("digitalOcean.configure_restoration_firewall");
+      if (
+        provisioning.userId === input.partialRestorationUserId ||
+        failures.has("digitalOcean.configure_restoration_firewall")
+      ) {
+        return { state: "failed" as const, code: "restoration_firewall_failed", partial: value };
+      }
+      return { state: "ready" as const, value };
+    },
+    async observeNewInfrastructure() {
+      throw new Error("Deterministic restoration Infrastructure is immediately observable.");
+    },
+    async reauthorizeAiProviders() {
+      calls.push("openAI.reauthorize");
+      failIfConfigured(failures, "openAI.reauthorize");
+      calls.push("anthropic.reauthorize");
+      failIfConfigured(failures, "anthropic.reauthorize");
+      return { openAI: true, anthropic: true };
+    },
+    async reauthorizeCompanyProviders() {
+      calls.push("google.reauthorize_company");
+      failIfConfigured(failures, "google.reauthorize_company");
+      return { calendar: true, mail: true };
+    },
+    async retireRestorationInfrastructure() {
+      calls.push("digitalOcean.delete_firewall");
+      failIfConfigured(failures, "digitalOcean.delete_firewall");
+      calls.push("digitalOcean.delete_droplet");
+      failIfConfigured(failures, "digitalOcean.delete_droplet");
+      calls.push("digitalOcean.observe_owned_resources_absent");
+      failIfConfigured(failures, "digitalOcean.observe_owned_resources_absent");
+      return { dropletAbsent: true, firewallAbsent: true };
+    },
+    async refundRestorationPayment() {
+      calls.push("lemonSqueezy.refund_restoration");
+      failIfConfigured(failures, "lemonSqueezy.refund_restoration");
+      return { fullRefundConfirmed: true };
     },
     digitalOcean: ownedSetProvider(state, calls, failures, input.now),
     calls: () => [...calls],

@@ -108,6 +108,20 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                       },
                     }
                   : {}),
+                ...(id === "recovery_archive_lifecycle"
+                  ? {
+                      restorationContract: {
+                        successUserId: fixture.restorationSuccessUserId,
+                        successSourceEventId: fixture.restorationSuccessSourceEventId,
+                        partialFailureUserId: fixture.restorationPartialFailureUserId,
+                        partialFailureSourceEventId: fixture.restorationPartialFailureSourceEventId,
+                        deletedArchiveUserId: fixture.restorationDeletedArchiveUserId,
+                        deletedArchiveSourceEventId: fixture.restorationDeletedArchiveSourceEventId,
+                        expiredArchiveUserId: fixture.restorationExpiredArchiveUserId,
+                        expiredArchiveSourceEventId: fixture.restorationExpiredArchiveSourceEventId,
+                      },
+                    }
+                  : {}),
               },
             });
             const responseBody = await response.json();
@@ -149,10 +163,16 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                   refundRetirementHours: number;
                   reorderedActiveCanRestartTerminalClock: boolean;
                 };
+                returningFounderRestoration?: {
+                  success: Record<string, unknown>;
+                  partialFailure: Record<string, unknown>;
+                  lateEventAfterDeletion: Record<string, unknown>;
+                  postExpiryRejoin: Record<string, unknown>;
+                };
               };
             };
             expect(body.outcome.providerCalls.length).toBeGreaterThan(0);
-            if (id === "release_stage_admission" || id === "recovery_archive_lifecycle") {
+            if (id === "release_stage_admission") {
               expect(body.outcome.providerCalls).toEqual(
                 expect.arrayContaining(["archive.encrypt", "archive.store", "archive.restore"]),
               );
@@ -228,6 +248,54 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                   needsAttention: false,
                 },
               });
+            }
+            if (id === "recovery_archive_lifecycle") {
+              expect(body.outcome.returningFounderRestoration).toMatchObject({
+                success: {
+                  mode: "same_logical_operator",
+                  status: "completed",
+                  logicalOperatorPreserved: true,
+                  newInfrastructureIdentity: true,
+                  providerReauthorizationCompleted: true,
+                  workResumed: true,
+                  fullRefundConfirmed: false,
+                },
+                partialFailure: {
+                  mode: "same_logical_operator",
+                  status: "refunded",
+                  workResumed: false,
+                  fullRefundConfirmed: true,
+                  cleanupVerified: true,
+                },
+                lateEventAfterDeletion: {
+                  mode: "new_operator_environment",
+                  status: "refunded",
+                  archiveDeletionAuthoritative: true,
+                  workResumed: false,
+                  fullRefundConfirmed: true,
+                },
+                postExpiryRejoin: {
+                  mode: "new_operator_environment",
+                  status: "refunded",
+                  archiveDeletionAuthoritative: true,
+                  workResumed: false,
+                  fullRefundConfirmed: true,
+                },
+              });
+              expect(body.outcome.providerCalls).toEqual(
+                expect.arrayContaining([
+                  "archive.restore",
+                  "digitalOcean.create_restoration_droplet",
+                  "digitalOcean.configure_restoration_firewall",
+                  "openAI.reauthorize",
+                  "anthropic.reauthorize",
+                  "google.reauthorize_company",
+                  "lemonSqueezy.refund_restoration",
+                  "digitalOcean.delete_firewall",
+                  "digitalOcean.delete_droplet",
+                  "digitalOcean.observe_owned_resources_absent",
+                ]),
+              );
             }
             if (id === "external_beta_cohort_lifecycle") {
               expect(body.outcome.providerCalls).toEqual(
