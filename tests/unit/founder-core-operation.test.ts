@@ -322,6 +322,7 @@ describe("Founder Core Operation", () => {
     await expect(
       hasFounderGeneralReleaseBriefAccessForUser(OWNER_ID, {
         createConnection: () => connection,
+        env: GENERAL_RELEASE_ENV,
         now: () => NOW,
       }),
     ).resolves.toBe(true);
