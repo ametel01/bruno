@@ -98,6 +98,7 @@ test("Operator UI remains usable across the required browser matrix", async ({ p
       const browserRunId = `${runId}:${test.info().project.name}`;
       await prepareFounderIdentityRecoveryBrowserPreconditions(fixture, {
         runId: browserRunId,
+        providerRunId: runId,
         now: clock.now(),
       });
       const currentSubject = `clerk:${fixture.userId}`;

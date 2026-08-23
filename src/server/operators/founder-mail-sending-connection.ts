@@ -572,6 +572,7 @@ export async function disconnectFounderGoogleMailSendingForUser(
     const current = await connection.db.transaction((tx) => selectBundle(tx, operator.id, true));
     if (!current?.sending) return null;
     const sending = current.sending;
+    if (sending.authorizationState === "revoked") return toDto(current);
     let accessToken: string | null = null;
     let refreshToken: string | null = null;
     try {

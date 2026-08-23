@@ -927,6 +927,7 @@ export async function disconnectFounderGoogleMailForUser(
       selectConnectionBundle(tx, operator.id, true),
     );
     if (!current) return null;
+    if (current.connection.authorizationState === "revoked") return toDto(current);
     let accessToken: string | null = null;
     let refreshToken: string | null = null;
     try {

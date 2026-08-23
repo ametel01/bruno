@@ -269,6 +269,41 @@ describe("Founder Google Calendar connection application seam", () => {
     );
   });
 
+  it("keeps a confirmed revocation terminal when Account Closure resumes after a crash", async () => {
+    const adapter = calendarAdapter();
+    adapter.revokeAuthorization = vi.fn(adapter.revokeAuthorization);
+    await connect(adapter);
+    const confirmed = await disconnectFounderGoogleCalendarForUser(OWNER_ID, {
+      createConnection: () => connection,
+      adapter,
+      keyring: KEYRING,
+      now: () => NOW,
+      preserveCredentialsOnUnconfirmedRevocation: true,
+    });
+    expect(confirmed).toMatchObject({ status: "disconnected", recoveryMessage: null });
+    expect(adapter.revokeAuthorization).toHaveBeenCalledTimes(1);
+
+    adapter.providerRevoked = false;
+    const resumed = await disconnectFounderGoogleCalendarForUser(OWNER_ID, {
+      createConnection: () => connection,
+      adapter,
+      keyring: KEYRING,
+      now: () => new Date(NOW.valueOf() + 60 * 60 * 1000),
+      preserveCredentialsOnUnconfirmedRevocation: true,
+    });
+
+    expect(adapter.revokeAuthorization).toHaveBeenCalledTimes(1);
+    expect(resumed).toMatchObject({ status: "disconnected", recoveryMessage: null });
+    const [persisted] = await connection.db.select().from(operatorCalendarConnections);
+    expect(persisted).toEqual(
+      expect.objectContaining({
+        authorizationState: "revoked",
+        accessTokenCiphertext: null,
+        refreshTokenCiphertext: null,
+      }),
+    );
+  });
+
   async function connect(adapter: CalendarAdapter): Promise<CalendarDto> {
     const started = await startFounderGoogleCalendarAuthorizationForUser(OWNER_ID, {
       createConnection: () => connection,

@@ -213,7 +213,7 @@ export async function sendFounderIdentityLossWebhook(
 
 export async function prepareFounderIdentityRecoveryBrowserPreconditions(
   fixture: FounderProductContractFixture,
-  input: { runId: string; now: Date },
+  input: { runId: string; providerRunId: string; now: Date },
 ): Promise<void> {
   const occurredAt = input.now.toISOString();
   const digest = (value: string) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
@@ -229,7 +229,10 @@ export async function prepareFounderIdentityRecoveryBrowserPreconditions(
     if (!event) throw new Error("Browser commerce event was not persisted.");
     await sql`insert into founder_product_entitlements (user_id, source_event_id, provider_subscription_id, status, reconciled_provider_status, provider_state_updated_at, reconciled_at, updated_at) values (${fixture.userId}, ${event.id}, ${`${input.runId}:subscription`}, 'verified', 'active', ${occurredAt}, ${occurredAt}, ${occurredAt})`;
   });
-  await prepareFounderRevocableCalendarConnection(fixture, input);
+  await prepareFounderRevocableCalendarConnection(fixture, {
+    runId: input.providerRunId,
+    now: input.now,
+  });
 }
 
 export async function prepareFounderRevocableCalendarConnection(
