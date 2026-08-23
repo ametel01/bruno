@@ -1,7 +1,27 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { founderReleaseDecisions } from "@/src/server/db/schema";
+import {
+  founderCommerceEvents,
+  founderCommerceLifecycleReceipts,
+  founderIdentityRecoveries,
+  founderIdentityRecoveryReceipts,
+  founderInfrastructureRetirements,
+  founderProductEntitlements,
+  founderRecoveryArchiveDeletionReceipts,
+  founderReleaseDecisions,
+  operatorDeletionRequests,
+  operators,
+  users,
+} from "@/src/server/db/schema";
 import type { DigitalOceanOwnedSetProvider } from "@/src/server/runners/digitalocean-provider";
+import { requestFounderDeletionForUser } from "@/src/server/operators/founder-deletion";
+import { requireApplicationUser } from "@/src/server/users/application-user";
+import {
+  FounderIdentityRecoveryError,
+  recordFounderIdentityLoss,
+  recoverFounderIdentity,
+  signFounderIdentityRecoveryAssertion,
+} from "@/src/server/users/founder-identity-recovery";
 import { expireFounderRecoveryArchivesForUser } from "./archive-expiry";
 import { founderProductContractDigest } from "./digest";
 import {
@@ -44,7 +64,8 @@ export type FounderProductContractLifecycleAction =
   | "product_entitlement_lifecycle"
   | "subscription_lifecycle"
   | "recovery_archive_lifecycle"
-  | "infrastructure_retirement";
+  | "infrastructure_retirement"
+  | "identity_recovery_lifecycle";
 
 export type FounderCommerceEvent = {
   eventId: string;
@@ -131,6 +152,24 @@ export type FounderLifecycleOutcome = {
     refundRetirementHours: 24;
     reorderedActiveCanRestartTerminalClock: false;
   };
+  identityRecovery?: {
+    lostIdentityDenied: true;
+    takeoverDenied: true;
+    recoveredSameOwner: true;
+    accountClosureCoordinated: true;
+    commerceChangedByIdentityLoss: false;
+    productEntitlementChangedByIdentityLoss: false;
+    refundStartedByIdentityLoss: false;
+    retirementStartedByIdentityLoss: false;
+    archiveDeletionStartedByIdentityLoss: false;
+    accountClosureStartedByIdentityLoss: false;
+    receiptKinds: readonly [
+      "identity_loss_recorded",
+      "recovery_denied",
+      "identity_rebound",
+      "account_closure_requested",
+    ];
+  };
 };
 
 type LifecycleInput = {
@@ -149,6 +188,7 @@ type LifecycleInput = {
 type LifecycleDependencies = {
   providers: FounderLifecycleProviderBoundary;
   commerceWebhookSecret: string;
+  identityRecoverySigningSecret?: string;
   applicationRevision: string;
   providerRequestTimeoutMilliseconds?: number;
   createConnection?: () => DatabaseConnection;
@@ -188,6 +228,9 @@ export async function executeFounderProductContractLifecycleAction(
         connection,
       );
       return lifecycleOutcome(input, dependencies.providers, cleanup);
+    }
+    if (input.action === "identity_recovery_lifecycle") {
+      return await executeFounderIdentityRecoveryContractLifecycle(input, dependencies, connection);
     }
     const lifecycleArchiveId =
       input.action === "release_stage_admission" || input.action === "recovery_archive_lifecycle"
@@ -352,6 +395,8 @@ export async function executeFounderProductContractLifecycleAction(
         }
         case "infrastructure_retirement":
           throw new Error("Infrastructure Retirement must use its durable execution path.");
+        case "identity_recovery_lifecycle":
+          throw new Error("Identity Recovery must use its complete recovery lifecycle path.");
       }
 
       return {
@@ -404,6 +449,262 @@ export async function executeFounderProductContractLifecycleAction(
   } finally {
     if (ownsConnection) await connection.close();
   }
+}
+
+async function executeFounderIdentityRecoveryContractLifecycle(
+  input: LifecycleInput,
+  dependencies: LifecycleDependencies,
+  connection: DatabaseConnection,
+): Promise<FounderLifecycleOutcome> {
+  const identityRecoverySigningSecret = dependencies.identityRecoverySigningSecret;
+  if (!identityRecoverySigningSecret) {
+    throw new Error("Identity Recovery signing authority is unavailable.");
+  }
+  const identity = await dependencies.providers.authenticateIdentity({ userId: input.userId });
+  const [owner] = await connection.db
+    .select({ clerkUserId: users.clerkUserId })
+    .from(users)
+    .where(eq(users.id, input.userId))
+    .limit(1);
+  if (!owner?.clerkUserId || identity.subject !== owner.clerkUserId) {
+    throw new Error("The current Clerk identity did not match the internal Owner.");
+  }
+
+  const beforeLoss = await identitySeparationSnapshot(connection, input.userId);
+  const loss = await recordFounderIdentityLoss({
+    clerkUserId: owner.clerkUserId,
+    providerEventId: `founder-contract:${input.runId}:clerk-user-deleted`,
+    reason: "clerk_user_deleted",
+    observedAt: input.now,
+    createConnection: () => connection,
+  });
+  if (!loss || loss.ownerId !== input.userId) {
+    throw new Error("Identity loss did not retain the same internal Owner.");
+  }
+
+  const lostIdentity = await requireApplicationUser("clerk", {
+    getClerkUserId: async () => owner.clerkUserId,
+    createConnection: () => connection,
+  });
+  if (lostIdentity.ok) {
+    throw new Error("The lost Clerk identity retained Operator access.");
+  }
+
+  const replacementClerkUserId = `clerk:recovered:${input.userId}`;
+  const attackerClerkUserId = `clerk:attacker:${input.userId}`;
+  const priorClerkSubjectDigest = founderProductContractDigest(`clerk:${owner.clerkUserId}`);
+  const replacementClerkSubjectDigest = founderProductContractDigest(
+    `clerk:${replacementClerkUserId}`,
+  );
+  const issuedAt = new Date(input.now.valueOf() + 1);
+  const expiresAt = new Date(issuedAt.valueOf() + 15 * 60 * 1_000);
+  const assertion = signFounderIdentityRecoveryAssertion(
+    {
+      schema: "bruno.founder-identity-recovery.v1",
+      recoveryId: loss.recoveryId,
+      ownerId: input.userId,
+      priorClerkSubjectDigest,
+      replacementClerkSubjectDigest,
+      evidenceDigest: founderProductContractDigest(
+        `identity-recovery-strong-owner-proof:${input.runId}:${input.userId}`,
+      ),
+      issuedAt: issuedAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    },
+    identityRecoverySigningSecret,
+  );
+
+  let takeoverDenied = false;
+  try {
+    await recoverFounderIdentity({
+      replacementClerkUserId: attackerClerkUserId,
+      assertion,
+      signingSecret: identityRecoverySigningSecret,
+      now: issuedAt,
+      createConnection: () => connection,
+    });
+  } catch (error) {
+    takeoverDenied =
+      error instanceof FounderIdentityRecoveryError && error.code === "recovery_subject_mismatch";
+  }
+  if (!takeoverDenied) {
+    throw new Error("A replacement Clerk identity could claim an unrelated Owner.");
+  }
+
+  const recoveryAt = new Date(issuedAt.valueOf() + 1);
+  const recovered = await recoverFounderIdentity({
+    replacementClerkUserId,
+    assertion,
+    signingSecret: identityRecoverySigningSecret,
+    now: recoveryAt,
+    createConnection: () => connection,
+  });
+  const recoveredIdentity = await requireApplicationUser("clerk", {
+    getClerkUserId: async () => replacementClerkUserId,
+    createConnection: () => connection,
+  });
+  if (
+    !recoveredIdentity.ok ||
+    recoveredIdentity.userId !== input.userId ||
+    recovered.ownerId !== input.userId
+  ) {
+    throw new Error("Identity Recovery did not restore the same internal Owner.");
+  }
+
+  const afterRecovery = await identitySeparationSnapshot(connection, input.userId);
+  if (JSON.stringify(beforeLoss) !== JSON.stringify(afterRecovery)) {
+    throw new Error(
+      "Identity Recovery changed commerce, entitlement, retirement, deletion, or archive authority.",
+    );
+  }
+
+  const receipts = await connection.db
+    .select({ kind: founderIdentityRecoveryReceipts.kind })
+    .from(founderIdentityRecoveryReceipts)
+    .innerJoin(
+      founderIdentityRecoveries,
+      eq(founderIdentityRecoveries.id, founderIdentityRecoveryReceipts.recoveryId),
+    )
+    .where(eq(founderIdentityRecoveries.id, loss.recoveryId))
+    .orderBy(founderIdentityRecoveryReceipts.occurredAt);
+  if (
+    receipts.length !== 3 ||
+    receipts[0]?.kind !== "identity_loss_recorded" ||
+    receipts[1]?.kind !== "recovery_denied" ||
+    receipts[2]?.kind !== "identity_rebound"
+  ) {
+    throw new Error("Identity Recovery receipts did not preserve loss, denial, and rebound truth.");
+  }
+
+  const closureAt = new Date(recoveryAt.valueOf() + 1);
+  const accountClosure = await requestFounderDeletionForUser(
+    input.userId,
+    "account_closure",
+    { coordinator: "recently_reauthenticated_account_closure" },
+    {
+      createConnection: () => connection,
+      now: () => closureAt,
+      cancelCommerce: async () => undefined,
+      revokeConnections: async () => [],
+    },
+  );
+  if (
+    accountClosure?.request.kind !== "account_closure" ||
+    !accountClosure?.stages.some(
+      (stage) => stage.stage === "requested" && stage.details.kind === "account_closure",
+    )
+  ) {
+    throw new Error("Account Closure did not remain the explicit destructive coordinator.");
+  }
+  const afterClosure = await identitySeparationSnapshot(connection, input.userId);
+  if (afterClosure.accountClosureRequests !== beforeLoss.accountClosureRequests + 1) {
+    throw new Error("Account Closure did not create its separate deletion authority.");
+  }
+  if (afterClosure.deletionRequests !== beforeLoss.deletionRequests + 1) {
+    throw new Error("Account Closure did not create exactly one deletion request.");
+  }
+
+  return {
+    action: input.action,
+    status: "passed",
+    observedAt: input.now.toISOString(),
+    providerCalls: dependencies.providers.calls(),
+    cleanup: emptyCleanup(closureAt),
+    identityRecovery: {
+      lostIdentityDenied: true,
+      takeoverDenied: true,
+      recoveredSameOwner: true,
+      accountClosureCoordinated: true,
+      commerceChangedByIdentityLoss: false,
+      productEntitlementChangedByIdentityLoss: false,
+      refundStartedByIdentityLoss: false,
+      retirementStartedByIdentityLoss: false,
+      archiveDeletionStartedByIdentityLoss: false,
+      accountClosureStartedByIdentityLoss: false,
+      receiptKinds: [
+        "identity_loss_recorded",
+        "recovery_denied",
+        "identity_rebound",
+        "account_closure_requested",
+      ],
+    },
+  };
+}
+
+async function identitySeparationSnapshot(
+  connection: DatabaseConnection,
+  userId: string,
+): Promise<{
+  commerceEvents: number;
+  refundReceipts: number;
+  entitlement: unknown;
+  retirements: number;
+  archiveDeletions: number;
+  accountClosureRequests: number;
+  deletionRequests: number;
+}> {
+  const [
+    commerceEvents,
+    refundReceipts,
+    entitlements,
+    retirements,
+    archiveDeletions,
+    deletionRequests,
+    accountClosures,
+  ] = await Promise.all([
+    connection.db
+      .select({ id: founderCommerceEvents.id })
+      .from(founderCommerceEvents)
+      .where(eq(founderCommerceEvents.userId, userId)),
+    connection.db
+      .select({ id: founderCommerceLifecycleReceipts.id })
+      .from(founderCommerceLifecycleReceipts)
+      .where(
+        and(
+          eq(founderCommerceLifecycleReceipts.userId, userId),
+          eq(founderCommerceLifecycleReceipts.kind, "refund"),
+        ),
+      ),
+    connection.db
+      .select({
+        id: founderProductEntitlements.id,
+        status: founderProductEntitlements.status,
+        providerSubscriptionId: founderProductEntitlements.providerSubscriptionId,
+        retirementDueAt: founderProductEntitlements.retirementDueAt,
+        updatedAt: founderProductEntitlements.updatedAt,
+      })
+      .from(founderProductEntitlements)
+      .where(eq(founderProductEntitlements.userId, userId)),
+    connection.db
+      .select({ id: founderInfrastructureRetirements.id })
+      .from(founderInfrastructureRetirements)
+      .where(eq(founderInfrastructureRetirements.userId, userId)),
+    connection.db
+      .select({ id: founderRecoveryArchiveDeletionReceipts.id })
+      .from(founderRecoveryArchiveDeletionReceipts)
+      .where(eq(founderRecoveryArchiveDeletionReceipts.userId, userId)),
+    connection.db
+      .select({ id: operatorDeletionRequests.id })
+      .from(operatorDeletionRequests)
+      .innerJoin(operators, eq(operators.id, operatorDeletionRequests.operatorId))
+      .where(eq(operators.userId, userId)),
+    connection.db
+      .select({ id: operatorDeletionRequests.id })
+      .from(operatorDeletionRequests)
+      .innerJoin(operators, eq(operators.id, operatorDeletionRequests.operatorId))
+      .where(
+        and(eq(operators.userId, userId), eq(operatorDeletionRequests.kind, "account_closure")),
+      ),
+  ]);
+  return {
+    commerceEvents: commerceEvents.length,
+    refundReceipts: refundReceipts.length,
+    entitlement: entitlements,
+    retirements: retirements.length,
+    archiveDeletions: archiveDeletions.length,
+    accountClosureRequests: accountClosures.length,
+    deletionRequests: deletionRequests.length,
+  };
 }
 
 async function executeFounderExternalBetaContractLifecycle(

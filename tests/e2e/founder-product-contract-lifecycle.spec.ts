@@ -58,6 +58,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
           "subscription_lifecycle",
           "recovery_archive_lifecycle",
           "infrastructure_retirement",
+          "identity_recovery_lifecycle",
         ] as const) {
           await runFounderProductContractScenario(harness, id, async ({ application, clock }) => {
             if (id === "external_beta_cohort_lifecycle") {
@@ -148,6 +149,19 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                   expiredRetirementHours: number;
                   refundRetirementHours: number;
                   reorderedActiveCanRestartTerminalClock: boolean;
+                };
+                identityRecovery?: {
+                  lostIdentityDenied: boolean;
+                  takeoverDenied: boolean;
+                  recoveredSameOwner: boolean;
+                  accountClosureCoordinated: boolean;
+                  commerceChangedByIdentityLoss: boolean;
+                  productEntitlementChangedByIdentityLoss: boolean;
+                  refundStartedByIdentityLoss: boolean;
+                  retirementStartedByIdentityLoss: boolean;
+                  archiveDeletionStartedByIdentityLoss: boolean;
+                  accountClosureStartedByIdentityLoss: boolean;
+                  receiptKinds: string[];
                 };
               };
             };
@@ -277,6 +291,27 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                 reorderedActiveCanRestartTerminalClock: false,
               });
             }
+            if (id === "identity_recovery_lifecycle") {
+              expect(body.outcome.providerCalls).toContain("clerk.authenticate");
+              expect(body.outcome.identityRecovery).toEqual({
+                lostIdentityDenied: true,
+                takeoverDenied: true,
+                recoveredSameOwner: true,
+                accountClosureCoordinated: true,
+                commerceChangedByIdentityLoss: false,
+                productEntitlementChangedByIdentityLoss: false,
+                refundStartedByIdentityLoss: false,
+                retirementStartedByIdentityLoss: false,
+                archiveDeletionStartedByIdentityLoss: false,
+                accountClosureStartedByIdentityLoss: false,
+                receiptKinds: [
+                  "identity_loss_recorded",
+                  "recovery_denied",
+                  "identity_rebound",
+                  "account_closure_requested",
+                ],
+              });
+            }
             clock.advance(id === "release_stage_admission" ? 3 : 1);
             return { status: "passed", ...body.outcome.cleanup };
           });
@@ -298,6 +333,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
   }
 
   expect(await readFounderScenarioExecutions(runId, fixture.userId)).toEqual([
+    expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),

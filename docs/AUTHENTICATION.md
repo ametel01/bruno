@@ -94,6 +94,35 @@ Both Clerk variables are required and are read only from the server environment.
 print, or copy their values into diagnostics. `NODE_ENV`, request `Host`, and forwarded-host headers
 cannot downgrade a production or custom deployment to development mode.
 
+### Founder identity recovery
+
+Configure Clerk's `user.deleted` webhook to the exact public endpoint
+`/api/webhooks/clerk` and keep its signing secret in server-only hosted secret storage:
+
+```dotenv
+CLERK_WEBHOOK_SIGNING_SECRET=replace-with-dedicated-clerk-webhook-secret
+BRUNO_IDENTITY_RECOVERY_SIGNING_SECRET=replace-with-generated-secret-at-least-32-characters
+```
+
+Bruno verifies the webhook signature before recording a pending Identity Recovery against the
+existing internal Owner. While that recovery is pending, the old Clerk subject is denied at the
+application-user boundary. The webhook records identity loss only: it does not cancel Lemon
+Squeezy, change Product Entitlement, start a refund, retire infrastructure, delete Recovery
+Archives, begin Bruno Data Deletion, or close the account.
+
+The `/identity-recovery` surface accepts only a short-lived server-signed proof bound to the pending
+recovery, the same internal Owner, the prior Clerk-subject digest, the exact replacement
+Clerk-subject digest, and a strong verification-evidence digest. A checkout email, a new Clerk ID,
+or possession of a browser session cannot claim an existing workspace. Bruno stores only digests
+and the distinct `identity_loss_recorded`, `recovery_denied`, and `identity_rebound` receipts; it
+does not retain the raw proof, email, Clerk profile, or session material.
+
+Identity Recovery only restores the Owner mapping. The existing recently reauthenticated Account
+Closure control remains the sole coordinator of external-action pause, Lemon Squeezy subscription
+cancellation, connection revocation, Bruno Data Deletion, and its own receipts. Refunds remain a
+separate commerce-policy decision. Do not issue a recovery proof from browser-visible state or
+after weak email-only verification.
+
 ## Protected preview opt-in
 
 The safe default for previews is Clerk mode. A registration-free Vercel preview is allowed only

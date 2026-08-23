@@ -1,8 +1,8 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
-import { users } from "@/src/server/db/schema";
+import { founderIdentityRecoveries, users } from "@/src/server/db/schema";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 
 export type ApplicationUserMode = "clerk" | "development" | "operator";
@@ -47,19 +47,32 @@ export async function requireApplicationUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    const userId = await connection.db.transaction(async (tx) => {
+    const resolution = await connection.db.transaction(async (tx) => {
+      let userId: string;
       if (mode === "development" || mode === "operator") {
-        return await getOrCreateDevelopmentUserId(tx);
+        userId = await getOrCreateDevelopmentUserId(tx);
+      } else {
+        if (clerkUserId === null) {
+          throw new Error("Authenticated Clerk identity unexpectedly missing.");
+        }
+        userId = await resolveClerkApplicationUserId(tx, clerkUserId);
       }
-
-      if (clerkUserId === null) {
-        throw new Error("Authenticated Clerk identity unexpectedly missing.");
-      }
-
-      return await resolveClerkApplicationUserId(tx, clerkUserId);
+      const [pendingRecovery] = await tx
+        .select({ id: founderIdentityRecoveries.id })
+        .from(founderIdentityRecoveries)
+        .where(
+          and(
+            eq(founderIdentityRecoveries.userId, userId),
+            eq(founderIdentityRecoveries.status, "pending"),
+          ),
+        )
+        .limit(1);
+      return { userId, identityRecoveryPending: Boolean(pendingRecovery) };
     });
 
-    return { ok: true, userId };
+    return resolution.identityRecoveryPending
+      ? { ok: false, status: 401, code: "unauthenticated" }
+      : { ok: true, userId: resolution.userId };
   } finally {
     if (ownsConnection) {
       await connection.close();

@@ -20,6 +20,7 @@ const INTERNAL_SERVICE_AUTH_PATHS = new Set([
   "/api/internal/runner-release/required",
   "/api/internal/runner-replacements/reconcile",
   "/api/webhooks/lemon-squeezy",
+  "/api/webhooks/clerk",
 ]);
 
 export function isClerkAuthPagePath(pathname: string): boolean {

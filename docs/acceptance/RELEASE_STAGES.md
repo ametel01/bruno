@@ -91,6 +91,15 @@ identity-recovery problem. Only recently reauthenticated Account Closure coordin
 pause, Lemon Squeezy cancellation, connection revocation, Bruno Data Deletion, and receipts; refunds
 remain a separate policy decision.
 
+A signature-verified Clerk `user.deleted` event records an `identity_loss_recorded` receipt and
+denies Operator access while the recovery is pending. Recovery requires a short-lived server-signed
+assertion bound to the same internal Owner plus exact prior and replacement Clerk-subject digests.
+Email, checkout metadata, possession of a new Clerk account, or an authenticated session are not
+ownership proof. Failed takeover attempts record `recovery_denied`; a successful same-Owner rebind
+records `identity_rebound`. These receipts never represent commerce cancellation, Product
+Entitlement change, refund, Infrastructure Retirement, Recovery Archive deletion, Bruno Data
+Deletion, or Account Closure.
+
 Before Initial General Release, billing qualification must prove live checkout, activation-timed
 charging, failed payment, cancellation, refund, entitlement reconciliation, duplicate and reordered
 delivery, cross-device state, receipts, and payment-without-access recovery.
@@ -119,11 +128,15 @@ completed Infrastructure Retirement after provider absence is verified. Cancella
 refund create immutable Commerce Lifecycle Receipts; Infrastructure Retirement and Account Closure
 continue to use their own decisions and receipts.
 
-The deterministic Founder Product Contract includes a required `subscription_lifecycle` scenario.
-It exercises the signed hosted portal boundary and its exact allowed/forbidden actions, all recovery
-and terminal deadlines, cancellation through paid `ends_at`, and the rule that reordered active
-events cannot restart terminal clocks. Deterministic evidence does not prove live Lemon Squeezy
-configuration; attended test- and live-mode provider qualification remains required before release.
+The deterministic Founder Product Contract includes required `subscription_lifecycle` and
+`identity_recovery_lifecycle` scenarios. The subscription scenario exercises the signed hosted
+portal boundary and its exact allowed/forbidden actions, all recovery and terminal deadlines,
+cancellation through paid `ends_at`, and the rule that reordered active events cannot restart
+terminal clocks. The identity scenario proves loss denial, takeover denial, same-Owner rebound,
+separate truthful receipts, unchanged commerce/Product Entitlement/infrastructure/archive state,
+and a later explicit Account Closure as the sole destructive coordinator. Deterministic evidence
+does not prove live Clerk or Lemon Squeezy configuration; attended provider qualification remains
+required before release.
 
 Before retirement, Bruno.Ai creates and verifies an encrypted off-Droplet Recovery Archive containing
 the minimum durable Operator state needed to rebuild. It excludes raw provider credentials, expires

@@ -185,6 +185,12 @@ export async function deleteFounderProductContractFixture(
     if (!options.retainScenarioExecutions) {
       await sql`delete from founder_product_contract_scenario_executions where user_id = ${fixture.userId}`;
     }
+    await sql`delete from founder_identity_recovery_receipts where user_id = ${fixture.userId}`;
+    await sql`delete from founder_identity_recoveries where user_id = ${fixture.userId}`;
+    await sql`delete from operator_deletion_receipts where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
+    await sql`delete from operator_deletion_commerce_cancellations where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
+    await sql`delete from operator_deletion_tombstones where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
+    await sql`delete from operator_deletion_requests where operator_id = ${fixture.operatorId}`;
     await sql`delete from founder_infrastructure_retirements where user_id = any(${allUserIds})`;
     await sql`delete from founder_external_beta_invitations where cohort_owner_user_id = ${fixture.externalBetaOwnerUserId} or participant_user_id = any(${[fixture.userId, fixture.externalBetaParticipantUserId]})`;
     await sql`delete from founder_product_entitlements where user_id = ${fixture.userId}`;
@@ -231,6 +237,10 @@ export async function assertPersistedFounderLifecycleAuthority(
         active_credentials: number;
         active_runners: number;
         paused: boolean;
+        recovered_identities: number;
+        identity_receipts: number;
+        account_closures: number;
+        account_closure_receipts: number;
       }[]
     >`select
       (select count(*)::int from founder_release_decisions where user_id = ${fixture.userId}) as release_decisions,
@@ -249,11 +259,15 @@ export async function assertPersistedFounderLifecycleAuthority(
       (select status from runners where id = ${fixture.runnerId}) as runner_status,
       (select count(*)::int from runner_credentials where runner_id in (select id from runners where user_id = ${fixture.userId}) and status = 'active') as active_credentials,
       (select count(*)::int from runners where user_id = ${fixture.userId} and deleted_at is null) as active_runners,
-      (select external_action_pause from operators where id = ${fixture.operatorId}) as paused`;
+      (select external_action_pause from operators where id = ${fixture.operatorId}) as paused,
+      (select count(*)::int from founder_identity_recoveries where user_id = ${fixture.userId} and status = 'recovered' and recovered_at is not null) as recovered_identities,
+      (select count(*)::int from founder_identity_recovery_receipts where user_id = ${fixture.userId}) as identity_receipts,
+      (select count(*)::int from operator_deletion_requests where operator_id = ${fixture.operatorId} and kind = 'account_closure') as account_closures,
+      (select count(*)::int from operator_deletion_receipts where operator_id = ${fixture.operatorId} and stage in ('requested', 'access_stopped')) as account_closure_receipts`;
     expect(authority).toMatchObject({
       release_decisions: 3,
       release_decision_outcomes: ["enter", "hold", "resume"],
-      scenario_executions: 6,
+      scenario_executions: 7,
       commerce_events: 2,
       terminal_entitlements: 1,
       consumed_correlations: 1,
@@ -268,6 +282,10 @@ export async function assertPersistedFounderLifecycleAuthority(
       active_credentials: 0,
       active_runners: 0,
       paused: true,
+      recovered_identities: 1,
+      identity_receipts: 3,
+      account_closures: 1,
+      account_closure_receipts: 2,
     });
   });
 }

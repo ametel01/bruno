@@ -62,6 +62,10 @@ export function SignInSurface() {
       title="Sign in to Bruno.Ai"
     >
       <SignIn fallbackRedirectUrl="/operator" path="/sign-in" routing="path" signUpUrl="/sign-up" />
+      <p className="auth-state-message">
+        Lost access to the original identity? Use the separate{" "}
+        <Link href="/identity-recovery">identity recovery</Link> path.
+      </p>
     </AuthSurface>
   );
 }

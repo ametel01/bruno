@@ -83,6 +83,16 @@ Decisions, single-use Owner-bound Checkout Correlations, signature-verified and 
 Squeezy event receipts, reconciled Product Entitlements, 30-day restorable Recovery Archives,
 revoked runtime credentials, and exact-provider Infrastructure Retirement receipts.
 
+The `identity_recovery_lifecycle` scenario enters through the same signed application-owned seam.
+It records a verified Clerk identity-loss event, proves the unresolved subject cannot use the
+Operator, rejects a mismatched replacement subject, rebinds only a short-lived strong proof to the
+same internal Owner, and retains separate loss, denial, and rebound receipts. Snapshots on both
+sides of that flow prove it did not mutate commerce events, Product Entitlement, Infrastructure
+Retirement, Recovery Archive deletion, refund, Bruno Data Deletion, or Account Closure authority.
+Only after those checks does the scenario request Account Closure through its existing coordinator
+and verify the distinct closure receipt. The deterministic identity signing secret is scoped to the
+contract process and is not a live Clerk credential or release acceptance.
+
 The Lemon Squeezy production boundary verifies the `X-Signature` HMAC over the exact bounded raw
 request body before decoding JSON. Because Lemon Squeezy does not document a webhook delivery ID,
 Bruno.Ai records the signed payload digest as an explicitly derived delivery key together with the
@@ -262,7 +272,7 @@ sign the complete exact-run ledger from those persisted receipts; the browser te
 response to the producer's fixed artifact path without constructing results or using the signing
 authority. The runner executes an isolated public provider-failure proof first, then one lifecycle
 producer under the candidate run identity, and finally the five-project browser and accessibility
-matrix without lifecycle mutations. Both the failed proof receipt and the candidate's four passing
+matrix without lifecycle mutations. Both the failed proof receipt and the candidate's seven passing
 receipts survive disposable-user cleanup until the workflow database is destroyed. The ledger binds
 the canonical producer, source revision, workflow run ID, observation instant, results digest, and
 HMAC signature using the protected

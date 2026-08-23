@@ -25,6 +25,7 @@ const ACTIONS = new Set<FounderProductContractLifecycleAction>([
   "subscription_lifecycle",
   "recovery_archive_lifecycle",
   "infrastructure_retirement",
+  "identity_recovery_lifecycle",
 ]);
 const FAILURE_OPERATIONS = new Set<FounderLifecycleFailureOperation>([
   "clerk.authenticate",
@@ -118,6 +119,14 @@ export async function POST(request: Request): Promise<Response> {
   if (!commerceWebhookSecret) {
     return Response.json({ error: { code: "commerce_boundary_unavailable" } }, { status: 503 });
   }
+  const identityRecoverySigningSecret =
+    process.env.BRUNO_FOUNDER_CONTRACT_IDENTITY_RECOVERY_SIGNING_SECRET ??
+    (process.env.BRUNO_AUTH_MODE === "development"
+      ? "founder-contract-identity-recovery-signing-secret-v1"
+      : "");
+  if (!identityRecoverySigningSecret) {
+    return Response.json({ error: { code: "identity_boundary_unavailable" } }, { status: 503 });
+  }
 
   const now = new Date(body.now);
   const providers = deterministicFounderLifecycleProviders({
@@ -147,7 +156,12 @@ export async function POST(request: Request): Promise<Response> {
         ...(body.commerceEvent ? { commerceEvent: body.commerceEvent } : {}),
         ...(body.externalBetaContract ? { externalBetaContract: body.externalBetaContract } : {}),
       },
-      { providers, commerceWebhookSecret, applicationRevision: identity.sourceRevision },
+      {
+        providers,
+        commerceWebhookSecret,
+        identityRecoverySigningSecret,
+        applicationRevision: identity.sourceRevision,
+      },
     );
     await completeFounderProductContractScenarioExecution({ identity: evidenceIdentity, outcome });
     return Response.json({ outcome }, { headers: { "cache-control": "no-store" } });

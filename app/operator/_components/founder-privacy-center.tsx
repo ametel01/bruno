@@ -86,7 +86,7 @@ export function FounderPrivacyCenter({
       setDeletion(body.deletion ?? null);
       setMessage(
         isClosure
-          ? "Account closure requested. Access is stopped and provider revocation results are tracked below."
+          ? "Account closure requested. Access is stopped; commerce cancellation and provider revocation are tracked separately below."
           : "Deletion requested. Access is stopped; purge and backup expiry remain staged below.",
       );
     } catch (error) {
@@ -111,7 +111,9 @@ export function FounderPrivacyCenter({
       };
       if (!response.ok) throw new Error(body.error?.message ?? "Revocation retry failed.");
       setDeletion(body.deletion ?? null);
-      setMessage("Provider revocation was retried. Review each connection result below.");
+      setMessage(
+        "Account Closure cleanup was retried. Review commerce cancellation and each connection result below.",
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Revocation retry failed.");
     } finally {
@@ -315,8 +317,9 @@ export function FounderPrivacyCenter({
           <div>
             <h3>Close account</h3>
             <p>
-              Revokes every connected account, cancels unstarted effects, and starts staged
-              deletion.
+              The only control that coordinates external-action pause, subscription cancellation,
+              connected-account revocation, and staged Bruno Data Deletion. It does not imply a
+              refund.
             </p>
             <button
               className={styles.danger}
@@ -402,6 +405,7 @@ function DeletionReceipt({
   busy: boolean;
 }) {
   const hasFailedRevocation = receipt.revocations.some((item) => item.status === "failed");
+  const hasFailedCommerceCancellation = receipt.commerceCancellation?.status === "failed";
   return (
     <div className={styles.aiPanel} aria-live="polite">
       <h3>Deletion Receipt · {receipt.request.status}</h3>
@@ -413,6 +417,18 @@ function DeletionReceipt({
         <li>Active purge complete: {formatDate(receipt.request.activePurgeCompletedAt)}</li>
         <li>Backup expiry complete: {formatDate(receipt.request.backupExpiredAt)}</li>
       </ul>
+      {receipt.commerceCancellation ? (
+        <>
+          <strong>Commerce cancellation</strong>
+          <p>
+            Lemon Squeezy subscription: {receipt.commerceCancellation.status}
+            {receipt.commerceCancellation.errorCode
+              ? ` (${receipt.commerceCancellation.errorCode})`
+              : ""}
+            . Refund started: no.
+          </p>
+        </>
+      ) : null}
       {receipt.revocations.length > 0 ? (
         <>
           <strong>Provider revocation</strong>
@@ -424,12 +440,12 @@ function DeletionReceipt({
               </li>
             ))}
           </ul>
-          {hasFailedRevocation ? (
-            <button className={styles.secondary} disabled={busy} onClick={onRetry} type="button">
-              Retry provider revocation
-            </button>
-          ) : null}
         </>
+      ) : null}
+      {hasFailedRevocation || hasFailedCommerceCancellation ? (
+        <button className={styles.secondary} disabled={busy} onClick={onRetry} type="button">
+          Retry Account Closure cleanup
+        </button>
       ) : null}
     </div>
   );

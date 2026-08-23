@@ -1,7 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  founderProductEntitlements,
+  operatorDeletionCommerceCancellations,
+  operatorDeletionReceipts,
   operatorConversations,
   operatorMailConnections,
   operators,
@@ -15,6 +18,7 @@ import {
   requestFounderDeletionForUser,
   retryFounderDeletionRevocationsForUser,
 } from "@/src/server/operators/founder-deletion";
+import { insertPastDueFounderEntitlementFixture } from "@/tests/helpers/founder-entitlement";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003701";
 const OTHER_OWNER_ID = "00000000-0000-4000-8000-000000003702";
@@ -113,6 +117,61 @@ describe("Founder deletion lifecycle", () => {
     });
     expect(completed?.request.status).toBe("completed");
     expect(completed?.stages.map((stage) => stage.stage)).toContain("backup_expiry");
+  });
+
+  it("keeps recently reauthenticated Account Closure as the commerce cancellation coordinator without implying refund", async () => {
+    await insertPastDueFounderEntitlementFixture({
+      connection,
+      userId: OWNER_ID,
+      fixtureId: "account-closure-384",
+      reconciledAt: NOW,
+      retirementDueAt: new Date(NOW.valueOf() + 7 * 24 * 60 * 60 * 1_000),
+    });
+    const cancelCommerce = vi.fn(async () => undefined);
+    const dependencies = {
+      createConnection: () => connection,
+      now: () => NOW,
+      cancelCommerce,
+      revokeConnections: async () => [],
+    };
+    const receipt = await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      dependencies,
+    );
+    expect(cancelCommerce).toHaveBeenCalledOnce();
+    expect(cancelCommerce).toHaveBeenCalledWith("subscription-account-closure-384");
+    expect(receipt?.commerceCancellation).toMatchObject({
+      provider: "lemon_squeezy",
+      status: "succeeded",
+      attemptCount: 1,
+      refundStarted: false,
+    });
+    expect(receipt?.stages).toContainEqual(
+      expect.objectContaining({
+        stage: "commerce_cancellation",
+        details: expect.objectContaining({
+          outcome: "subscription_cancellation_requested",
+          productEntitlementChanged: false,
+          refundStarted: false,
+        }),
+      }),
+    );
+    expect((await connection.db.select().from(founderProductEntitlements))[0]).toMatchObject({
+      status: "past_due",
+    });
+    expect(await connection.db.select().from(operatorDeletionCommerceCancellations)).toHaveLength(
+      1,
+    );
+    expect(
+      (await connection.db.select().from(operatorDeletionReceipts)).filter(
+        (item) => item.stage === "commerce_cancellation",
+      ),
+    ).toHaveLength(1);
+
+    await requestFounderDeletionForUser(OWNER_ID, "account_closure", {}, dependencies);
+    expect(cancelCommerce).toHaveBeenCalledOnce();
   });
 
   it("keeps revocation failures visible and retryable after local credential removal", async () => {

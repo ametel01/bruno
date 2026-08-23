@@ -46,6 +46,8 @@ await rm(scenarioLedgerPath, { force: true });
 const deterministicProviderEnvironment = {
   BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE: "deterministic",
   BRUNO_FOUNDER_CONTRACT_COMMERCE_WEBHOOK_SECRET: "founder-contract-lemon-test-secret-v1",
+  BRUNO_FOUNDER_CONTRACT_IDENTITY_RECOVERY_SIGNING_SECRET:
+    "founder-contract-identity-recovery-signing-secret-v1",
   BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
     "calendar_reading",
     new Date(),
