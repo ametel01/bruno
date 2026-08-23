@@ -10,6 +10,7 @@ import {
   operatorCalendarConnections,
   operatorLimitedOperations,
   operatorMailConnections,
+  operatorMailSendingConnections,
   operatorMorningBriefItems,
   operatorMorningBriefs,
   operatorProcessingConsents,
@@ -373,7 +374,7 @@ export async function createFounderGeneralReleaseOperator(
           "Confirm public Initial General Release eligibility before creating your Operator.",
         );
       }
-      if (!activation.releaseDecisionId) {
+      if (activation.releaseDecisionId !== releaseAuthority.decisionId) {
         throw new FounderGeneralReleaseError(
           "general_release_decision_required",
           "This setup is not bound to an approved exact-candidate Initial General Release Decision.",
@@ -1254,6 +1255,21 @@ async function projectGeneralRelease(
         processingConsentId: null,
         authorityPolicyId: null,
       };
+  const [sendingConnection] = operator
+    ? await tx
+        .select({ id: operatorMailSendingConnections.id })
+        .from(operatorMailSendingConnections)
+        .where(
+          and(
+            eq(operatorMailSendingConnections.operatorId, operator.id),
+            eq(operatorMailSendingConnections.status, "ready"),
+            eq(operatorMailSendingConnections.authorizationState, "authorized"),
+            isNull(operatorMailSendingConnections.disconnectedAt),
+            isNull(operatorMailSendingConnections.revokedAt),
+          ),
+        )
+        .limit(1)
+    : [];
   const [entitlement] = await tx
     .select({ status: founderProductEntitlements.status })
     .from(founderProductEntitlements)
@@ -1271,6 +1287,13 @@ async function projectGeneralRelease(
             ? "setup"
             : "waitlisted")) as FounderGeneralReleaseActivationDto["state"]);
   const priceLabel = activation?.publishedPriceLabel ?? availability.priceLabel;
+  const activationBoundToCurrentDecision = Boolean(
+    activation &&
+      availability.authority.decisionId &&
+      activation.releaseDecisionId === availability.authority.decisionId,
+  );
+  const founderReleaseQualified =
+    availability.authority.approved && activationBoundToCurrentDecision;
   return {
     state,
     admission: {
@@ -1286,8 +1309,8 @@ async function projectGeneralRelease(
       reason: activation?.admissionReason ?? availability.reason,
     },
     release: {
-      qualified: availability.authority.approved,
-      decisionState: !availability.authority.approved
+      qualified: founderReleaseQualified,
+      decisionState: !founderReleaseQualified
         ? "denied"
         : availability.authority.heldCapabilities.length > 0
           ? "held"
@@ -1306,7 +1329,12 @@ async function projectGeneralRelease(
         state: availability.authority.capabilities[id],
       })),
       providerChoice: "OpenAI, Anthropic, or both",
-      sending: "Off",
+      sending:
+        sendingConnection &&
+        availability.authority.capabilities.gmail_sending === "available" &&
+        activationBoundToCurrentDecision
+          ? "On only after each Founder approves it"
+          : "Off",
       supportBoundary: "Ordinary product support",
     },
     setup: {
@@ -1318,6 +1346,7 @@ async function projectGeneralRelease(
       explicitCreateConfirmed: Boolean(activation?.createConfirmedAt),
       canCreate:
         admissionState === "eligible" &&
+        activationBoundToCurrentDecision &&
         Boolean(activation?.serviceBusinessConfirmedAt) &&
         readiness.readyAiConnection &&
         readiness.selectedCompanyConnections &&

@@ -42,6 +42,7 @@ const ENV = {
     buildTestGoogleMailSendingAcceptanceRelease(NOW, REVISION),
   VERCEL_GIT_COMMIT_SHA: REVISION,
 };
+const GENERAL_RELEASE_ACCESS = { hasGeneralReleaseSetupAccess: async () => true } as const;
 
 describe("Founder Google Mail Sending connection", () => {
   let connection: DatabaseConnection;
@@ -159,6 +160,7 @@ describe("Founder Google Mail Sending connection", () => {
       env: ENV,
       now: () => NOW,
       randomBytes: () => Buffer.alloc(32, 4),
+      ...GENERAL_RELEASE_ACCESS,
     });
     const url = new URL(result.authorization!.authorizationUrl);
     expect(
@@ -182,13 +184,35 @@ describe("Founder Google Mail Sending connection", () => {
     const failed = await completeFounderGoogleMailSendingAuthorizationForState(
       url.searchParams.get("state")!,
       "code",
-      { createConnection: () => connection, adapter, keyring: KEYRING, env: ENV, now: () => NOW },
+      {
+        createConnection: () => connection,
+        adapter,
+        keyring: KEYRING,
+        env: ENV,
+        now: () => NOW,
+        ...GENERAL_RELEASE_ACCESS,
+      },
     );
     expect(failed.status).toBe("needs_attention");
     expect(failed.recoveryMessage).toMatch(/broader Gmail access/i);
     expect(
       (await connection.db.select().from(operatorMailSendingConnections))[0]?.accessTokenCiphertext,
     ).toBeNull();
+  });
+
+  it("does not start a provider authorization without exact Gmail Sending authority", async () => {
+    const adapter = sendingAdapter();
+    await expect(
+      startFounderGoogleMailSendingAuthorizationForUser(OWNER_ID, {
+        createConnection: () => connection,
+        adapter,
+        keyring: KEYRING,
+        env: ENV,
+        now: () => NOW,
+        hasGeneralReleaseSetupAccess: async () => false,
+      }),
+    ).rejects.toMatchObject({ code: "general_release_access_required" });
+    expect(adapter.requestedScopes).toEqual([]);
   });
 
   it("persists denial without changing the reading connection", async () => {
@@ -200,6 +224,7 @@ describe("Founder Google Mail Sending connection", () => {
       env: ENV,
       now: () => NOW,
       randomBytes: () => Buffer.alloc(32, 7),
+      ...GENERAL_RELEASE_ACCESS,
     });
     const denied = await denyFounderGoogleMailSendingAuthorizationForState(
       new URL(result.authorization!.authorizationUrl).searchParams.get("state")!,
@@ -244,12 +269,20 @@ describe("Founder Google Mail Sending connection", () => {
       env: ENV,
       now: () => NOW,
       randomBytes: () => Buffer.alloc(32, 5),
+      ...GENERAL_RELEASE_ACCESS,
     });
     adapter.subject = "different-subject";
     const mismatch = await completeFounderGoogleMailSendingAuthorizationForState(
       new URL(first.authorization!.authorizationUrl).searchParams.get("state")!,
       "code",
-      { createConnection: () => connection, adapter, keyring: KEYRING, env: ENV, now: () => NOW },
+      {
+        createConnection: () => connection,
+        adapter,
+        keyring: KEYRING,
+        env: ENV,
+        now: () => NOW,
+        ...GENERAL_RELEASE_ACCESS,
+      },
     );
     expect(mismatch.status).toBe("needs_attention");
     adapter.subject = "google-sub-349";
@@ -260,11 +293,19 @@ describe("Founder Google Mail Sending connection", () => {
       env: ENV,
       now: () => NOW,
       randomBytes: () => Buffer.alloc(32, 6),
+      ...GENERAL_RELEASE_ACCESS,
     });
     const ready = await completeFounderGoogleMailSendingAuthorizationForState(
       new URL(second.authorization!.authorizationUrl).searchParams.get("state")!,
       "code",
-      { createConnection: () => connection, adapter, keyring: KEYRING, env: ENV, now: () => NOW },
+      {
+        createConnection: () => connection,
+        adapter,
+        keyring: KEYRING,
+        env: ENV,
+        now: () => NOW,
+        ...GENERAL_RELEASE_ACCESS,
+      },
     );
     expect(ready.status).toBe("ready");
     expect(

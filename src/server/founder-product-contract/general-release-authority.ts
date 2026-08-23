@@ -40,10 +40,19 @@ const REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS = [
   "recoveryDigest",
   "retirementDigest",
 ] as const;
+type FounderGeneralReleaseEvidenceKey = (typeof REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS)[number];
 const FOUNDER_GENERAL_RELEASE_AUTHORITY_LOCK = "founder-initial-general-release-authority-v1";
 
 export type FounderGeneralReleaseCapability =
   (typeof FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST)[number];
+
+const REQUIRED_FRESH_RESUME_EVIDENCE_KEYS_BY_CAPABILITY = {
+  openai: REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS,
+  anthropic: REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS,
+  calendar_reading: REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS,
+  gmail_reading: REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS,
+  gmail_sending: REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS,
+} satisfies Record<FounderGeneralReleaseCapability, readonly FounderGeneralReleaseEvidenceKey[]>;
 
 export type FounderGeneralReleaseAuthority = {
   approved: boolean;
@@ -228,6 +237,8 @@ export async function readPersistedFounderGeneralReleaseAuthorityInTransaction(
   let decisionId = decision.id;
   let decisionOutcome = decision.outcome;
   let decisionDigest = decision.evidenceDigests[0] as `sha256:${string}`;
+  let decisionDecidedAt = decision.decidedAt;
+  let evidenceDigests = decision.evidenceDigests as `sha256:${string}`[];
   const holdChanged =
     heldCapabilities.length !== retainedHolds.length ||
     heldCapabilities.some((capability) => !retainedHolds.includes(capability));
@@ -262,6 +273,8 @@ export async function readPersistedFounderGeneralReleaseAuthorityInTransaction(
     decisionId = hold.id;
     decisionOutcome = "hold";
     decisionDigest = holdDigest;
+    decisionDecidedAt = hold.decidedAt;
+    evidenceDigests = hold.evidenceDigests as `sha256:${string}`[];
   }
   return {
     approved: true,
@@ -271,9 +284,9 @@ export async function readPersistedFounderGeneralReleaseAuthorityInTransaction(
     decisionDigest,
     decisionId,
     decisionOutcome,
-    decisionDecidedAt: decision.decidedAt.toISOString(),
+    decisionDecidedAt: decisionDecidedAt.toISOString(),
     authorityExpiresAt: decision.authorityExpiresAt.toISOString(),
-    evidenceDigests: decision.evidenceDigests as `sha256:${string}`[],
+    evidenceDigests,
     capabilities: Object.fromEntries(
       FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST.map((capability) => [
         capability,
@@ -328,6 +341,7 @@ export async function persistProtectedFounderGeneralReleaseDecisionForOwner(
           applicationRevision: founderReleaseDecisions.applicationRevision,
           runtimeRevision: founderReleaseDecisions.runtimeRevision,
           evidenceDigests: founderReleaseDecisions.evidenceDigests,
+          affectedCapabilities: founderReleaseDecisions.affectedCapabilities,
           authorityExpiresAt: founderReleaseDecisions.authorityExpiresAt,
           decidedAt: founderReleaseDecisions.decidedAt,
         })
@@ -356,7 +370,12 @@ export async function persistProtectedFounderGeneralReleaseDecisionForOwner(
       }
       if (
         latest?.outcome === "hold" &&
-        latest.evidenceDigests.includes(parsed.decisionDigest as `sha256:${string}`)
+        (latest.evidenceDigests.includes(parsed.decisionDigest as `sha256:${string}`) ||
+          !heldCapabilitiesHaveFreshCompleteEvidence(
+            latest.affectedCapabilities,
+            latest.evidenceDigests,
+            parsed.evidenceDigests,
+          ))
       ) {
         throw new Error("A Hold requires a fresh complete Initial General Release Decision.");
       }
@@ -379,6 +398,32 @@ export async function persistProtectedFounderGeneralReleaseDecisionForOwner(
   } finally {
     if (ownsConnection) await connection.close();
   }
+}
+
+function heldCapabilitiesHaveFreshCompleteEvidence(
+  affectedCapabilities: readonly unknown[],
+  retainedEvidenceDigests: readonly string[],
+  candidateEvidenceDigests: `sha256:${string}`[],
+): boolean {
+  const heldCapabilities = affectedCapabilities.filter(
+    (capability): capability is FounderGeneralReleaseCapability =>
+      typeof capability === "string" &&
+      FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST.includes(
+        capability as FounderGeneralReleaseCapability,
+      ),
+  );
+  if (heldCapabilities.length === 0) return false;
+  const candidateByKey = Object.fromEntries(
+    REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS.map((key, index) => [
+      key,
+      candidateEvidenceDigests[index],
+    ]),
+  ) as Record<FounderGeneralReleaseEvidenceKey, `sha256:${string}`>;
+  return heldCapabilities.every((capability) =>
+    REQUIRED_FRESH_RESUME_EVIDENCE_KEYS_BY_CAPABILITY[capability].every(
+      (key) => !retainedEvidenceDigests.includes(candidateByKey[key]),
+    ),
+  );
 }
 
 async function lockFounderGeneralReleaseAuthorityInTransaction(

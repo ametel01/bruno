@@ -1,10 +1,11 @@
+import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
+import { hasFounderGeneralReleaseSetupAccessForUser } from "@/src/server/founder-product-contract/initial-general-release";
 import {
   disconnectFounderGoogleMailSendingForUser,
   FounderMailSendingConnectionError,
-} from "@/src/server/operators/founder-mail-sending-connection";
-import type {
   getFounderGoogleMailSendingConnectionForUser,
   getFounderGoogleMailSendingOfferForUser,
+  isFounderGoogleMailSendingReleased,
   startFounderGoogleMailSendingAuthorizationForUser,
   verifyFounderGoogleMailSendingForUser,
 } from "@/src/server/operators/founder-mail-sending-connection";
@@ -19,6 +20,7 @@ type Dependencies = {
   verifyConnection?: typeof verifyFounderGoogleMailSendingForUser;
   disconnectConnection?: typeof disconnectFounderGoogleMailSendingForUser;
   isMailSendingReleased?: () => boolean;
+  hasGeneralReleaseSetupAccess?: typeof hasFounderGeneralReleaseSetupAccessForUser;
 };
 
 export const dynamic = "force-dynamic";
@@ -28,7 +30,16 @@ export async function GET(_request: Request, _context?: unknown, dependencies: D
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!user.ok) return authenticationResponse(user.status);
-  return ownerPreviewUnavailableResponse();
+  const accessError = await requireMailSendingSetupAccess(user.userId, dependencies);
+  if (accessError) return accessError;
+  if (!(dependencies.isMailSendingReleased ?? isFounderGoogleMailSendingReleased)()) {
+    return providerNotReleasedResponse();
+  }
+  const [connection, offerAvailable] = await Promise.all([
+    (dependencies.getConnection ?? getFounderGoogleMailSendingConnectionForUser)(user.userId),
+    (dependencies.getOffer ?? getFounderGoogleMailSendingOfferForUser)(user.userId),
+  ]);
+  return Response.json({ connection, offerAvailable }, { headers: noStoreHeaders() });
 }
 
 export async function POST(request: Request, _context?: unknown, dependencies: Dependencies = {}) {
@@ -43,8 +54,35 @@ export async function POST(request: Request, _context?: unknown, dependencies: D
     return validationResponse("Request body must be valid JSON.");
   }
   const action = isRecord(payload) && typeof payload.action === "string" ? payload.action : null;
-  if (action !== "disconnect") return ownerPreviewUnavailableResponse();
   try {
+    if (action !== "disconnect") {
+      const accessError = await requireMailSendingSetupAccess(user.userId, dependencies);
+      if (accessError) return accessError;
+      if (!(dependencies.isMailSendingReleased ?? isFounderGoogleMailSendingReleased)()) {
+        return providerNotReleasedResponse();
+      }
+    }
+    if (action === "start") {
+      return Response.json(
+        await (
+          dependencies.startAuthorization ?? startFounderGoogleMailSendingAuthorizationForUser
+        )(user.userId),
+        { headers: noStoreHeaders() },
+      );
+    }
+    if (action === "verify") {
+      return Response.json(
+        {
+          connection: await (
+            dependencies.verifyConnection ?? verifyFounderGoogleMailSendingForUser
+          )(user.userId),
+        },
+        { headers: noStoreHeaders() },
+      );
+    }
+    if (action !== "disconnect") {
+      return validationResponse("Choose a supported Mail Sending action.");
+    }
     return Response.json(
       {
         connection: await (
@@ -61,6 +99,23 @@ export async function POST(request: Request, _context?: unknown, dependencies: D
       );
     throw error;
   }
+}
+
+async function requireMailSendingSetupAccess(
+  userId: string,
+  dependencies: Dependencies,
+): Promise<Response | null> {
+  const hasSetupAccess =
+    dependencies.hasGeneralReleaseSetupAccess ?? hasFounderGeneralReleaseSetupAccessForUser;
+  if (!(await hasSetupAccess(userId, {}, ["gmail_sending"]))) {
+    return ownerPreviewUnavailableResponse();
+  }
+  return requireFounderOperatorWorkspaceAccess(userId, ["gmail_sending"], {
+    allowGeneralReleaseSetup: true,
+    ...(dependencies.hasGeneralReleaseSetupAccess
+      ? { hasGeneralReleaseSetupAccess: dependencies.hasGeneralReleaseSetupAccess }
+      : {}),
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -92,6 +147,17 @@ function ownerPreviewUnavailableResponse() {
       error: {
         code: "owner_preview_capability_unavailable",
         message: "Gmail sending is unavailable during Owner Preview.",
+      },
+    },
+    { status: 409, headers: noStoreHeaders() },
+  );
+}
+function providerNotReleasedResponse() {
+  return Response.json(
+    {
+      error: {
+        code: "mail_sending_not_released",
+        message: "Gmail sending is unavailable until current Connected Acceptance passes.",
       },
     },
     { status: 409, headers: noStoreHeaders() },

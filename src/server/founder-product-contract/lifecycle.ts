@@ -812,19 +812,23 @@ async function executeInitialGeneralReleaseContractScenario(
       )),
     ]);
   const resumeAt = new Date(holdAt.valueOf() + 1);
-  await connection.db.insert(founderReleaseDecisions).values({
-    stage: "initial_general_release",
-    outcome: "resume",
-    applicationRevision: initialReleaseDecision.applicationRevision,
-    runtimeRevision: initialReleaseDecision.runtimeRevision,
-    capabilityManifest: initialReleaseDecision.capabilityManifest,
-    evidenceDigests: Array.from(
-      { length: 12 },
-      (_, index) => `sha256:${(index + 32).toString(16).padStart(64, "0")}`,
-    ),
-    authorityExpiresAt: initialReleaseDecision.authorityExpiresAt,
-    decidedAt: resumeAt,
-  });
+  const [resumeDecision] = await connection.db
+    .insert(founderReleaseDecisions)
+    .values({
+      stage: "initial_general_release",
+      outcome: "resume",
+      applicationRevision: initialReleaseDecision.applicationRevision,
+      runtimeRevision: initialReleaseDecision.runtimeRevision,
+      capabilityManifest: initialReleaseDecision.capabilityManifest,
+      evidenceDigests: Array.from(
+        { length: 12 },
+        (_, index) => `sha256:${(index + 32).toString(16).padStart(64, "0")}`,
+      ),
+      authorityExpiresAt: initialReleaseDecision.authorityExpiresAt,
+      decidedAt: resumeAt,
+    })
+    .returning({ id: founderReleaseDecisions.id });
+  if (!resumeDecision) throw new Error("The deterministic General Release Resume was not saved.");
   const explicitResumeRestoredCapability = await connection.db.transaction((tx) =>
     founderGeneralReleaseSetupAuthorizesInTransaction(
       tx,
@@ -943,6 +947,8 @@ async function executeInitialGeneralReleaseContractScenario(
     configurationRecoveryDidNotResume: stillHeldAfterRecovery,
     explicitResumeRestoredCapability,
     activationBoundToExactReleaseDecision:
+      persistedActivated.releaseDecisionId === resumeDecision.id &&
+      boundReleaseDecision?.id === resumeDecision.id &&
       boundReleaseDecision?.stage === "initial_general_release" &&
       ["enter", "resume"].includes(boundReleaseDecision.outcome) &&
       boundReleaseDecision.applicationRevision === dependencies.applicationRevision &&

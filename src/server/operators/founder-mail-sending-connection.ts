@@ -13,6 +13,10 @@ import {
   operatorPrimaryCommunicationsSuites,
   operators,
 } from "@/src/server/db/schema";
+import {
+  founderGeneralReleaseSetupAuthorizesInTransaction,
+  hasFounderGeneralReleaseSetupAccessForUser,
+} from "@/src/server/founder-product-contract/initial-general-release";
 import { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
@@ -116,6 +120,7 @@ export type FounderMailSendingConnectionDependencies = {
   env?: Record<string, string | undefined>;
   randomBytes?: (size: number) => Buffer;
   preserveCredentialsOnUnconfirmedRevocation?: boolean;
+  hasGeneralReleaseSetupAccess?: typeof hasFounderGeneralReleaseSetupAccessForUser;
 };
 
 export class FounderMailSendingConnectionError extends Error {
@@ -194,6 +199,7 @@ export async function startFounderGoogleMailSendingAuthorizationForUser(
   authorization: { authorizationUrl: string; expiresAt: string } | null;
 }> {
   assertReleased(dependencies.env);
+  await requireGeneralReleaseMailSendingSetupAccess(userId, dependencies);
   const operator = await ensureReadyOperator(userId, dependencies);
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
@@ -291,7 +297,42 @@ export async function completeFounderGoogleMailSendingAuthorizationForState(
   const adapter = dependencies.adapter ?? createGoogleMailSendingAdapter({ env: dependencies.env });
   try {
     const stateHash = digestOperatorSecret(state);
+    const [authorizationOwner] = await connection.db
+      .select({ userId: operators.userId })
+      .from(operatorMailSendingConnections)
+      .innerJoin(operators, eq(operators.id, operatorMailSendingConnections.operatorId))
+      .where(eq(operatorMailSendingConnections.authorizationSessionHash, stateHash))
+      .limit(1);
+    if (!authorizationOwner) {
+      throw new FounderMailSendingConnectionError(
+        "authorization_invalid",
+        "That Mail Sending authorization is no longer active.",
+        400,
+      );
+    }
     const pending = await connection.db.transaction(async (tx) => {
+      const hasGeneralReleaseAccess = dependencies.hasGeneralReleaseSetupAccess
+        ? await dependencies.hasGeneralReleaseSetupAccess(
+            authorizationOwner.userId,
+            {
+              ...(dependencies.env ? { env: dependencies.env } : {}),
+              now,
+            },
+            ["gmail_sending"],
+          )
+        : await founderGeneralReleaseSetupAuthorizesInTransaction(
+            tx,
+            authorizationOwner.userId,
+            now(),
+            ["gmail_sending"],
+            dependencies.env ?? process.env,
+          );
+      if (!hasGeneralReleaseAccess) {
+        throw new FounderMailSendingConnectionError(
+          "general_release_access_required",
+          "Mail Sending authorization requires a current exact-bound Initial General Release setup.",
+        );
+      }
       const [found] = await tx
         .select()
         .from(operatorMailSendingConnections)
@@ -477,11 +518,48 @@ export async function completeFounderGoogleMailSendingAuthorizationForState(
   }
 }
 
+export async function resolveFounderGoogleMailSendingAuthorizationUserForState(
+  state: string,
+  dependencies: Pick<FounderMailSendingConnectionDependencies, "createConnection"> = {},
+): Promise<string> {
+  if (!state.trim()) {
+    throw new FounderMailSendingConnectionError(
+      "authorization_invalid",
+      "Mail Sending authorization is missing its state.",
+      400,
+    );
+  }
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  try {
+    const [authorization] = await connection.db
+      .select({ userId: operators.userId })
+      .from(operatorMailSendingConnections)
+      .innerJoin(operators, eq(operators.id, operatorMailSendingConnections.operatorId))
+      .where(
+        eq(operatorMailSendingConnections.authorizationSessionHash, digestOperatorSecret(state)),
+      )
+      .limit(1);
+    if (!authorization) {
+      throw new FounderMailSendingConnectionError(
+        "authorization_invalid",
+        "That Mail Sending authorization is no longer active.",
+        400,
+      );
+    }
+    return authorization.userId;
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
 export async function denyFounderGoogleMailSendingAuthorizationForState(
   state: string,
   dependencies: FounderMailSendingConnectionDependencies = {},
 ): Promise<FounderMailSendingConnectionDto | null> {
-  if (!isFounderGoogleMailSendingReleased(dependencies.env) || !state.trim()) return null;
+  // A provider denial is a recovery/cleanup path. It must remain available if
+  // release authority is held after the authorization redirect was created.
+  if (!state.trim()) return null;
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
@@ -521,6 +599,7 @@ export async function verifyFounderGoogleMailSendingForUser(
   dependencies: FounderMailSendingConnectionDependencies = {},
 ): Promise<FounderMailSendingConnectionDto | null> {
   assertReleased(dependencies.env);
+  await requireGeneralReleaseMailSendingSetupAccess(userId, dependencies);
   const operator = await ensureReadyOperator(userId, dependencies);
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
@@ -911,6 +990,28 @@ function assertReleased(env: Record<string, string | undefined> | undefined) {
       "mail_sending_not_released",
       "Mail Sending is not available in this Bruno release.",
     );
+}
+async function requireGeneralReleaseMailSendingSetupAccess(
+  userId: string,
+  dependencies: FounderMailSendingConnectionDependencies,
+): Promise<void> {
+  const hasAccess = await (
+    dependencies.hasGeneralReleaseSetupAccess ?? hasFounderGeneralReleaseSetupAccessForUser
+  )(
+    userId,
+    {
+      ...(dependencies.createConnection ? { createConnection: dependencies.createConnection } : {}),
+      ...(dependencies.env ? { env: dependencies.env } : {}),
+      ...(dependencies.now ? { now: dependencies.now } : {}),
+    },
+    ["gmail_sending"],
+  );
+  if (!hasAccess) {
+    throw new FounderMailSendingConnectionError(
+      "general_release_access_required",
+      "Mail Sending requires a current exact-bound Initial General Release setup.",
+    );
+  }
 }
 async function ensureReadyOperator(
   userId: string,

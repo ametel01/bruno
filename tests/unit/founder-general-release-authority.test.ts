@@ -9,6 +9,7 @@ import { createDatabaseConnection } from "@/src/server/db/client";
 import {
   founderGeneralReleaseActivations,
   founderReleaseDecisions,
+  operatorMailSendingConnections,
   operators,
   users,
 } from "@/src/server/db/schema";
@@ -21,6 +22,7 @@ import {
   confirmFounderGeneralReleaseEligibility,
   createFounderGeneralReleaseOperator,
   founderGeneralReleaseSetupAuthorizesInTransaction,
+  getFounderGeneralReleaseActivationForUser,
   hasFounderGeneralReleaseSetupAccessForUser,
 } from "@/src/server/founder-product-contract/initial-general-release";
 import { buildDeterministicFounderGeneralReleaseAuthorityFixture } from "@/src/testing/founder-general-release-authority";
@@ -134,6 +136,40 @@ describe("Initial General Release global authority", () => {
       expect(await connection.db.select().from(founderGeneralReleaseActivations)).toEqual([
         expect.objectContaining({ userId: APPLICANT_ID, releaseDecisionId: enterId }),
       ]);
+      const [applicantOperator] = await connection.db
+        .select({ id: operators.id })
+        .from(operators)
+        .where(eq(operators.userId, APPLICANT_ID));
+      if (!applicantOperator) throw new Error("Applicant Operator fixture is unavailable.");
+      await connection.db.insert(operatorMailSendingConnections).values({
+        operatorId: applicantOperator.id,
+        status: "ready",
+        authorizationState: "authorized",
+        providerSubjectId: "google-sub-general-release",
+        accountLabel: "founder@example.test",
+        accessTokenCiphertext: "ciphertext",
+        accessTokenIv: "iv",
+        accessTokenAuthTag: "tag",
+        refreshTokenCiphertext: "refresh-ciphertext",
+        refreshTokenIv: "refresh-iv",
+        refreshTokenAuthTag: "refresh-tag",
+        secretKeyVersion: "test-v1",
+        authorizedAt: NOW,
+        lastVerifiedAt: NOW,
+      });
+      await expect(
+        getFounderGeneralReleaseActivationForUser(APPLICANT_ID, {
+          createConnection: () => connection,
+          env: releasedEnvironment(NOW),
+          now: () => NOW,
+        }),
+      ).resolves.toMatchObject({
+        release: {
+          qualified: true,
+          decisionState: "approved",
+          sending: "On only after each Founder approves it",
+        },
+      });
       await expect(
         hasFounderGeneralReleaseSetupAccessForUser(
           APPLICANT_ID,
@@ -224,6 +260,16 @@ describe("Initial General Release global authority", () => {
         .from(founderReleaseDecisions)
         .orderBy(asc(founderReleaseDecisions.decidedAt));
       expect(beforeResume.map((decision) => decision.outcome)).toEqual(["enter", "hold"]);
+      expect(held).toMatchObject({
+        decisionId: beforeResume[1]?.id,
+        decisionDecidedAt: beforeResume[1]?.decidedAt.toISOString(),
+        evidenceDigests: beforeResume[1]?.evidenceDigests,
+      });
+      expect(concurrentHeld).toMatchObject({
+        decisionId: beforeResume[1]?.id,
+        decisionDecidedAt: beforeResume[1]?.decidedAt.toISOString(),
+        evidenceDigests: beforeResume[1]?.evidenceDigests,
+      });
       await expect(
         persistProtectedFounderGeneralReleaseDecisionForOwner(OWNER_ID, decisionArtifact(NOW), {
           createConnection: () => connection,
@@ -236,9 +282,27 @@ describe("Initial General Release global authority", () => {
           (decision) => decision.outcome,
         ),
       ).toEqual(["enter", "hold"]);
+      await expect(
+        persistProtectedFounderGeneralReleaseDecisionForOwner(OWNER_ID, decisionArtifact(later), {
+          createConnection: () => connection,
+          env: releasedEnvironment(later),
+          now: later,
+        }),
+      ).rejects.toThrow("A Hold requires a fresh complete Initial General Release Decision");
+      await expect(
+        persistProtectedFounderGeneralReleaseDecisionForOwner(
+          OWNER_ID,
+          partiallyFreshDecisionArtifact(later),
+          {
+            createConnection: () => connection,
+            env: releasedEnvironment(later),
+            now: later,
+          },
+        ),
+      ).rejects.toThrow("A Hold requires a fresh complete Initial General Release Decision");
       await persistProtectedFounderGeneralReleaseDecisionForOwner(
         OWNER_ID,
-        decisionArtifact(later),
+        freshDecisionArtifact(later),
         {
           createConnection: () => connection,
           env: releasedEnvironment(later),
@@ -311,6 +375,16 @@ describe("Initial General Release global authority", () => {
           { createConnection: () => connection, env: releasedEnvironment(NOW) },
         ),
       ).rejects.toMatchObject({ code: "general_release_decision_required" });
+      await expect(
+        getFounderGeneralReleaseActivationForUser(APPLICANT_ID, {
+          createConnection: () => connection,
+          env: releasedEnvironment(NOW),
+          now: () => NOW,
+        }),
+      ).resolves.toMatchObject({
+        release: { qualified: false, decisionState: "denied" },
+        setup: { canCreate: false },
+      });
       expect(await connection.db.select().from(founderGeneralReleaseActivations)).toEqual([
         expect.objectContaining({ userId: APPLICANT_ID, releaseDecisionId: null }),
       ]);
@@ -326,6 +400,26 @@ function decisionArtifact(decidedAt: Date): string {
     runtimeRevision: RUNTIME_REVISION,
     decidedAt,
   });
+}
+
+function freshDecisionArtifact(decidedAt: Date): string {
+  const value = JSON.parse(decisionArtifact(decidedAt)) as Record<string, unknown>;
+  const evidence = value.evidence as Record<string, unknown>;
+  for (const key of Object.keys(evidence)) {
+    evidence[key] = `sha256:${createHash("sha256")
+      .update(`fresh-initial-general-release:${key}:${decidedAt.toISOString()}`)
+      .digest("hex")}`;
+  }
+  return recomputeSummaryDigest(value);
+}
+
+function partiallyFreshDecisionArtifact(decidedAt: Date): string {
+  const value = JSON.parse(decisionArtifact(decidedAt)) as Record<string, unknown>;
+  const evidence = value.evidence as Record<string, unknown>;
+  evidence.operationalDigest = `sha256:${createHash("sha256")
+    .update(`fresh-but-incomplete:${decidedAt.toISOString()}`)
+    .digest("hex")}`;
+  return recomputeSummaryDigest(value);
 }
 
 function recomputeSummaryDigest(value: Record<string, unknown>): string {
