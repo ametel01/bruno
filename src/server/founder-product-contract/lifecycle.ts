@@ -128,6 +128,7 @@ export type FounderLifecycleOutcome = {
     separateRecordingConsent: true;
     recordingDeletionDueAt: string;
     recordingDeletionVerified: true;
+    lateRecordingDeletionTerminal: true;
     separateFeedbackConsent: true;
     separateMarketingConsents: true;
     refusalPreservedAccess: true;
@@ -687,6 +688,13 @@ async function exerciseExternalBetaPrivacyContract(input: {
     artifactReferenceDigest,
     recordedAt: new Date(input.now.valueOf() + 1),
   });
+  const lateArtifactReferenceDigest = founderProductContractDigest(
+    `external-beta-recording-late:${input.participantUserId}`,
+  );
+  const lateRecording = await registerFounderExternalBetaRecording(input.participantUserId, {
+    artifactReferenceDigest: lateArtifactReferenceDigest,
+    recordedAt: new Date(input.now.valueOf() + 120_000),
+  });
   await decideFounderExternalBetaConsent(input.participantUserId, {
     purpose: "feedback",
     decision: "refuse",
@@ -739,8 +747,39 @@ async function exerciseExternalBetaPrivacyContract(input: {
   const recordingDeletion = await reconcileFounderExternalBetaRecordingRetention(deletionAt, {
     deleteAndVerifyAbsent: (deletion) => input.providers.deleteExternalBetaRecording(deletion),
   });
-  if (recordingDeletion.deleted !== 1 || recordingDeletion.failed !== 0) {
+  if (
+    recordingDeletion.deleted !== 1 ||
+    recordingDeletion.late !== 0 ||
+    recordingDeletion.failed !== 0
+  ) {
     throw new Error("External Beta recording deletion was not verified within 30 days.");
+  }
+  const lateDeletionAt = new Date(new Date(lateRecording.deletionDueAt).valueOf() + 1);
+  const lateRecordingDeletion = await reconcileFounderExternalBetaRecordingRetention(
+    lateDeletionAt,
+    {
+      deleteAndVerifyAbsent: (deletion) => input.providers.deleteExternalBetaRecording(deletion),
+    },
+  );
+  const afterRecordingDeletion = await exportFounderExternalBetaPrivacyData(
+    input.participantUserId,
+  );
+  const persistedLateRecording = afterRecordingDeletion.recordings.find(
+    (candidate) => candidate.status === "deleted_late",
+  );
+  if (
+    lateRecordingDeletion.deleted !== 1 ||
+    lateRecordingDeletion.late !== 1 ||
+    lateRecordingDeletion.failed !== 0 ||
+    !persistedLateRecording ||
+    !persistedLateRecording.providerDeletionVerified ||
+    !persistedLateRecording.deletionReceiptDigest ||
+    !persistedLateRecording.deletedAt ||
+    new Date(persistedLateRecording.deletedAt) <= new Date(persistedLateRecording.deletionDueAt)
+  ) {
+    throw new Error(
+      "External Beta late recording deletion did not persist a terminal breach receipt.",
+    );
   }
 
   return {
@@ -751,6 +790,7 @@ async function exerciseExternalBetaPrivacyContract(input: {
     separateRecordingConsent: true,
     recordingDeletionDueAt: recording.deletionDueAt,
     recordingDeletionVerified: true,
+    lateRecordingDeletionTerminal: true,
     separateFeedbackConsent: true,
     separateMarketingConsents: true,
     refusalPreservedAccess: true,

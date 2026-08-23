@@ -393,7 +393,7 @@ export async function reconcileFounderExternalBetaRecordingRetention(
   now: Date,
   provider: FounderExternalBetaRecordingProvider | null,
   dependencies: Dependencies = {},
-): Promise<{ deleted: number; failed: number }> {
+): Promise<{ deleted: number; late: number; failed: number }> {
   requireExactInstant(now);
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
@@ -414,6 +414,7 @@ export async function reconcileFounderExternalBetaRecordingRetention(
       )
       .orderBy(asc(founderExternalBetaRecordings.deletionDueAt));
     let deleted = 0;
+    let late = 0;
     let failed = 0;
     for (const recording of due) {
       try {
@@ -422,18 +423,21 @@ export async function reconcileFounderExternalBetaRecordingRetention(
           artifactReferenceDigest: recording.artifactReferenceDigest as `sha256:${string}`,
         });
         if (!result.absent) throw new Error("Recording provider absence was not verified.");
+        const retentionOutcome = now > recording.deletionDueAt ? "late" : "within_deadline";
         const deletionReceiptDigest = founderProductContractDigest(
           JSON.stringify({
             kind: "external_beta_recording_deletion",
             recordingId: recording.id,
             artifactReferenceDigest: recording.artifactReferenceDigest,
             deletedAt: now.toISOString(),
+            deletionDueAt: recording.deletionDueAt.toISOString(),
+            retentionOutcome,
           }),
         );
         const [updated] = await connection.db
           .update(founderExternalBetaRecordings)
           .set({
-            status: "deleted",
+            status: retentionOutcome === "late" ? "deleted_late" : "deleted",
             deletedAt: now,
             providerDeletionVerified: true,
             deletionReceiptDigest,
@@ -446,12 +450,15 @@ export async function reconcileFounderExternalBetaRecordingRetention(
             ),
           )
           .returning({ id: founderExternalBetaRecordings.id });
-        if (updated) deleted += 1;
+        if (updated) {
+          deleted += 1;
+          if (retentionOutcome === "late") late += 1;
+        }
       } catch {
         failed += 1;
       }
     }
-    return { deleted, failed };
+    return { deleted, late, failed };
   } finally {
     if (ownsConnection) await connection.close();
   }

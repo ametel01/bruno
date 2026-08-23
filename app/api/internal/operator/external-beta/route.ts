@@ -47,16 +47,13 @@ export async function GET(
     return errorResponse(400, "external_beta_retirement_request_invalid");
   }
   const now = dependencies.now?.() ?? new Date();
-  let recordingDeletion: { deleted: number; failed: number };
+  let recordingDeletion: { deleted: number; late: number; failed: number };
   try {
     recordingDeletion = await (
       dependencies.reconcileRecordings ?? reconcileFounderExternalBetaRecordingRetention
     )(now, (dependencies.createRecordingProvider ?? createFounderExternalBetaRecordingProvider)());
   } catch {
-    return errorResponse(500, "external_beta_recording_deletion_failed");
-  }
-  if (recordingDeletion.failed > 0) {
-    return errorResponse(500, "external_beta_recording_deletion_failed");
+    recordingDeletion = { deleted: 0, late: 0, failed: 1 };
   }
   const applicationRevision = (
     dependencies.readApplicationRevision ?? readFounderApplicationRevision
@@ -78,9 +75,24 @@ export async function GET(
       now,
       providers,
     });
+    if (recordingDeletion.failed > 0 || recordingDeletion.late > 0) {
+      return errorResponse(
+        500,
+        recordingDeletion.failed > 0
+          ? "external_beta_recording_deletion_failed"
+          : "external_beta_recording_retention_breached",
+        { retirement: { ok: true, ...result }, recordingDeletion },
+      );
+    }
     return Response.json({ ok: true, ...result, recordingDeletion }, { headers: noStoreHeaders() });
   } catch {
-    return errorResponse(500, "external_beta_retirement_processing_failed");
+    return errorResponse(
+      500,
+      recordingDeletion.failed > 0 || recordingDeletion.late > 0
+        ? "external_beta_retirement_and_recording_deletion_failed"
+        : "external_beta_retirement_processing_failed",
+      { retirement: { ok: false }, recordingDeletion },
+    );
   }
 }
 
@@ -97,9 +109,16 @@ function createConfiguredProviders(): FounderInfrastructureRetirementProvider | 
   };
 }
 
-function errorResponse(status: number, code: string): Response {
+function errorResponse(
+  status: number,
+  code: string,
+  outcomes: Record<string, unknown> = {},
+): Response {
   return Response.json(
-    { error: { code, message: "External Beta retirement processing failed safely." } },
+    {
+      ...outcomes,
+      error: { code, message: "External Beta retirement processing failed safely." },
+    },
     { status, headers: noStoreHeaders() },
   );
 }

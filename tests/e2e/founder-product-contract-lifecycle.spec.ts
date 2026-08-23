@@ -142,6 +142,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                   separateRecordingConsent: boolean;
                   recordingDeletionDueAt: string;
                   recordingDeletionVerified: boolean;
+                  lateRecordingDeletionTerminal: boolean;
                   separateFeedbackConsent: boolean;
                   separateMarketingConsents: boolean;
                   refusalPreservedAccess: boolean;
@@ -282,6 +283,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                   clock.now().valueOf() + 30 * 24 * 60 * 60 * 1_000 + 1,
                 ).toISOString(),
                 recordingDeletionVerified: true,
+                lateRecordingDeletionTerminal: true,
                 separateFeedbackConsent: true,
                 separateMarketingConsents: true,
                 refusalPreservedAccess: true,

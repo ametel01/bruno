@@ -266,7 +266,7 @@ describe("External Beta privacy boundary", () => {
         provider,
         dependencies,
       ),
-    ).toEqual({ deleted: 0, failed: 0 });
+    ).toEqual({ deleted: 0, late: 0, failed: 0 });
     expect(provider.deleteAndVerifyAbsent).not.toHaveBeenCalled();
     expect(
       await reconcileFounderExternalBetaRecordingRetention(
@@ -274,7 +274,7 @@ describe("External Beta privacy boundary", () => {
         provider,
         dependencies,
       ),
-    ).toEqual({ deleted: 1, failed: 0 });
+    ).toEqual({ deleted: 1, late: 0, failed: 0 });
     expect(provider.deleteAndVerifyAbsent).toHaveBeenCalledWith({
       artifactReferenceDigest: ARTIFACT_REFERENCE_DIGEST,
     });
@@ -285,6 +285,44 @@ describe("External Beta privacy boundary", () => {
         deletedAt: new Date(recording.deletionDueAt),
       }),
     ]);
+  });
+
+  it("persists a terminal breach receipt when a retried recording deletion is late", async () => {
+    const dependencies = { createConnection: () => connection };
+    await decideFounderExternalBetaConsent(
+      PARTICIPANT_ID,
+      { purpose: "recording", decision: "grant", decidedAt: NOW },
+      dependencies,
+    );
+    const recording = await registerFounderExternalBetaRecording(
+      PARTICIPANT_ID,
+      { artifactReferenceDigest: ARTIFACT_REFERENCE_DIGEST, recordedAt: NOW },
+      dependencies,
+    );
+    const deletedAt = new Date(new Date(recording.deletionDueAt).valueOf() + 1);
+    const provider = { deleteAndVerifyAbsent: vi.fn(async () => ({ absent: true as const })) };
+
+    await expect(
+      reconcileFounderExternalBetaRecordingRetention(deletedAt, provider, dependencies),
+    ).resolves.toEqual({ deleted: 1, late: 1, failed: 0 });
+
+    expect(await connection.db.select().from(founderExternalBetaRecordings)).toEqual([
+      expect.objectContaining({
+        status: "deleted_late",
+        providerDeletionVerified: true,
+        deletedAt,
+        deletionDueAt: new Date(recording.deletionDueAt),
+        deletionReceiptDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      }),
+    ]);
+    await expect(
+      reconcileFounderExternalBetaRecordingRetention(
+        new Date(deletedAt.valueOf() + 60_000),
+        provider,
+        dependencies,
+      ),
+    ).resolves.toEqual({ deleted: 0, late: 0, failed: 0 });
+    expect(provider.deleteAndVerifyAbsent).toHaveBeenCalledTimes(1);
   });
 
   it("exports only bounded facts and honors measurement deletion", async () => {

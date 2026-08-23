@@ -198,6 +198,10 @@ Measurement, recording, testimonial, identity, name, logo, quotation, and case-s
 have their own append-only consent decision. Refusal or withdrawal changes only that purpose and
 cannot change External Beta admission or its 14-day window. Recording deletion stays pending until
 the configured object provider verifies absence no later than the exact 30-day deadline. The
+retention worker records a verified late deletion as a terminal `deleted_late` breach receipt and
+fails its scheduled run for operator attention; a retry can never strand a provider-deleted artifact
+in active state merely because the deadline has passed. Recording cleanup and Infrastructure
+Retirement run independently, and the internal scheduler reports both outcomes when either fails.
 Founder-visible External Beta privacy controls show the allowlist and exclusions, permit every
 purpose to be allowed, refused, or withdrawn separately, and provide a bounded privacy export and
 measurement deletion.

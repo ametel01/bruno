@@ -1280,7 +1280,7 @@ export const founderExternalBetaRecordings = pgTable(
     ),
     check(
       "founder_external_beta_recordings_state_check",
-      sql`(${table.status} = 'active' AND ${table.deletedAt} IS NULL AND ${table.providerDeletionVerified} = false AND ${table.deletionReceiptDigest} IS NULL) OR (${table.status} = 'deleted' AND ${table.deletedAt} IS NOT NULL AND ${table.deletedAt} <= ${table.deletionDueAt} AND ${table.providerDeletionVerified} = true AND ${table.deletionReceiptDigest} IS NOT NULL)`,
+      sql`(${table.status} = 'active' AND ${table.deletedAt} IS NULL AND ${table.providerDeletionVerified} = false AND ${table.deletionReceiptDigest} IS NULL) OR (${table.status} = 'deleted' AND ${table.deletedAt} IS NOT NULL AND ${table.deletedAt} <= ${table.deletionDueAt} AND ${table.providerDeletionVerified} = true AND ${table.deletionReceiptDigest} IS NOT NULL) OR (${table.status} = 'deleted_late' AND ${table.deletedAt} IS NOT NULL AND ${table.deletedAt} > ${table.deletionDueAt} AND ${table.providerDeletionVerified} = true AND ${table.deletionReceiptDigest} IS NOT NULL)`,
     ),
     index("founder_external_beta_recordings_retention_idx").on(table.status, table.deletionDueAt),
     index("founder_external_beta_recordings_participant_idx").on(
