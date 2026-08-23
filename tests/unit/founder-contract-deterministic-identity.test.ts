@@ -4,6 +4,8 @@ import {
   resolveFounderContractIdentity,
 } from "@/src/server/founder-product-contract/deterministic-identity";
 import {
+  cancelDeterministicFounderContractSubscription,
+  deterministicFounderLifecycleProviders,
   deterministicFounderContractGoogleConnectionRevoked,
   revokeDeterministicFounderContractGoogleConnection,
 } from "@/src/server/founder-product-contract/deterministic-providers";
@@ -93,5 +95,40 @@ describe("Founder Product Contract deterministic identity", () => {
         token: `founder-contract-google:${ENV.BRUNO_FOUNDER_CONTRACT_RUN_ID}:${userId}:calendar:refresh`,
       }),
     ).resolves.toEqual({ providerRevoked: true });
+  });
+
+  it("cancels only the exact provider subscription bound to the contract run", async () => {
+    for (const [name, value] of Object.entries(ENV)) vi.stubEnv(name, value);
+    const userId = "00000000-0000-4000-8000-000000000385";
+    const providers = deterministicFounderLifecycleProviders({
+      runId: ENV.BRUNO_FOUNDER_CONTRACT_RUN_ID,
+      userId,
+      now: new Date("2026-08-23T00:00:00.000Z"),
+      failures: [],
+      subscriptionStatus: "active",
+    });
+    const expectedSubscriptionId = `${ENV.BRUNO_FOUNDER_CONTRACT_RUN_ID}:subscription`;
+
+    await expect(
+      cancelDeterministicFounderContractSubscription({
+        runId: ENV.BRUNO_FOUNDER_CONTRACT_RUN_ID,
+        userId,
+        subscriptionId: `${ENV.BRUNO_FOUNDER_CONTRACT_RUN_ID}:different-subscription`,
+      }),
+    ).rejects.toThrow("Deterministic Founder commerce cancellation is unavailable.");
+    await expect(
+      providers.readSubscription({ subscriptionId: expectedSubscriptionId }),
+    ).resolves.toEqual({ status: "active" });
+
+    await expect(
+      cancelDeterministicFounderContractSubscription({
+        runId: ENV.BRUNO_FOUNDER_CONTRACT_RUN_ID,
+        userId,
+        subscriptionId: expectedSubscriptionId,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      providers.readSubscription({ subscriptionId: expectedSubscriptionId }),
+    ).resolves.toEqual({ status: "cancelled" });
   });
 });

@@ -225,9 +225,9 @@ export async function prepareFounderIdentityRecoveryBrowserPreconditions(
     if (!correlation) throw new Error("Browser commerce correlation is unavailable.");
     const [event] = await sql<
       { id: string }[]
-    >`insert into founder_commerce_events (provider_event_id, user_id, checkout_correlation_id, provider_subscription_id, provider_order_id, event_type, payload_digest, signature_verified, occurred_at, recorded_at, application_status, last_attempt_at, applied_at) values (${`browser:${input.runId}:subscription-active`}, ${fixture.userId}, ${correlation.id}, ${`${input.runId}:subscription`}, ${`order:${input.runId}`}, 'subscription_active', ${digest(`browser-commerce:${input.runId}`)}, true, ${occurredAt}, ${occurredAt}, 'applied', ${occurredAt}, ${occurredAt}) returning id`;
+    >`insert into founder_commerce_events (provider_event_id, user_id, checkout_correlation_id, provider_subscription_id, provider_order_id, event_type, payload_digest, signature_verified, occurred_at, recorded_at, application_status, last_attempt_at, applied_at) values (${`browser:${input.runId}:subscription-active`}, ${fixture.userId}, ${correlation.id}, ${`${input.providerRunId}:subscription`}, ${`order:${input.runId}`}, 'subscription_active', ${digest(`browser-commerce:${input.runId}`)}, true, ${occurredAt}, ${occurredAt}, 'applied', ${occurredAt}, ${occurredAt}) returning id`;
     if (!event) throw new Error("Browser commerce event was not persisted.");
-    await sql`insert into founder_product_entitlements (user_id, source_event_id, provider_subscription_id, status, reconciled_provider_status, provider_state_updated_at, reconciled_at, updated_at) values (${fixture.userId}, ${event.id}, ${`${input.runId}:subscription`}, 'verified', 'active', ${occurredAt}, ${occurredAt}, ${occurredAt})`;
+    await sql`insert into founder_product_entitlements (user_id, source_event_id, provider_subscription_id, status, reconciled_provider_status, provider_state_updated_at, reconciled_at, updated_at) values (${fixture.userId}, ${event.id}, ${`${input.providerRunId}:subscription`}, 'verified', 'active', ${occurredAt}, ${occurredAt}, ${occurredAt})`;
   });
   await prepareFounderRevocableCalendarConnection(fixture, {
     runId: input.providerRunId,

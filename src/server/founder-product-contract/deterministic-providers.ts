@@ -41,6 +41,7 @@ type ProviderState = {
   digitalOcean: FakeDigitalOceanProvider;
   archiveStorage: FakeBackupObjectStorage;
   seededResourceIds: Set<string>;
+  subscriptionId: string;
   subscriptionStatus: FounderCommerceStatus;
   revokedGoogleConnections: Set<string>;
   calls: string[];
@@ -66,6 +67,7 @@ export function deterministicFounderLifecycleProviders(input: {
     digitalOcean: new FakeDigitalOceanProvider({ now: () => input.now }),
     archiveStorage: new FakeBackupObjectStorage("founder-product-contract-recovery"),
     seededResourceIds: new Set(),
+    subscriptionId: `${input.runId}:subscription`,
     subscriptionStatus: input.subscriptionStatus,
     revokedGoogleConnections: new Set(),
     calls: [],
@@ -119,17 +121,17 @@ export function deterministicFounderLifecycleProviders(input: {
     async readSubscription({ subscriptionId }) {
       calls.push("lemonSqueezy.read_subscription");
       failIfConfigured(failures, "lemonSqueezy.read_subscription");
-      if (!subscriptionId) throw new Error("Subscription identity is required.");
+      assertExpectedSubscription(state, subscriptionId);
       return { status: state.subscriptionStatus };
     },
     async cancelSubscription({ subscriptionId }) {
       calls.push("lemonSqueezy.cancel_subscription");
-      if (!subscriptionId) throw new Error("Subscription identity is required.");
+      assertExpectedSubscription(state, subscriptionId);
       state.subscriptionStatus = "cancelled";
     },
     async createCustomerPortal({ subscriptionId, now }) {
       calls.push("lemonSqueezy.create_customer_portal");
-      if (!subscriptionId) throw new Error("Subscription identity is required.");
+      assertExpectedSubscription(state, subscriptionId);
       const expiresAt = new Date(now.valueOf() + 24 * 60 * 60 * 1_000);
       return {
         url: `https://app.lemonsqueezy.com/billing?expires=${Math.floor(expiresAt.valueOf() / 1_000)}&user=founder-contract&signature=${"a".repeat(64)}`,
@@ -162,9 +164,7 @@ export async function cancelDeterministicFounderContractSubscription(input: {
   userId: string;
   subscriptionId: string;
 }): Promise<void> {
-  if (!input.subscriptionId) {
-    throw new Error("Deterministic Founder commerce authority is unavailable.");
-  }
+  assertDeterministicCommerceBoundary(input);
   if (!globalProviders.__brunoFounderLifecycleProviders) {
     globalProviders.__brunoFounderLifecycleProviders = new Map();
   }
@@ -174,11 +174,13 @@ export async function cancelDeterministicFounderContractSubscription(input: {
     digitalOcean: new FakeDigitalOceanProvider(),
     archiveStorage: new FakeBackupObjectStorage("founder-product-contract-recovery"),
     seededResourceIds: new Set<string>(),
+    subscriptionId: `${input.runId}:subscription`,
     subscriptionStatus: "active" as const,
     revokedGoogleConnections: new Set<string>(),
     calls: [],
   };
   registry.set(key, state);
+  assertExpectedSubscription(state, input.subscriptionId);
   state.calls.push("lemonSqueezy.cancel_subscription");
   state.subscriptionStatus = "cancelled";
 }
@@ -199,6 +201,7 @@ export async function revokeDeterministicFounderContractGoogleConnection(input: 
     digitalOcean: new FakeDigitalOceanProvider(),
     archiveStorage: new FakeBackupObjectStorage("founder-product-contract-recovery"),
     seededResourceIds: new Set<string>(),
+    subscriptionId: `${input.runId}:subscription`,
     subscriptionStatus: "active" as const,
     revokedGoogleConnections: new Set<string>(),
     calls: [],
@@ -219,6 +222,29 @@ export function deterministicFounderContractGoogleConnectionRevoked(input: {
       ?.get(`${input.runId}:${input.userId}`)
       ?.revokedGoogleConnections.has(input.connectionKind) ?? false
   );
+}
+
+function assertExpectedSubscription(state: ProviderState, subscriptionId: string): void {
+  if (subscriptionId !== state.subscriptionId) {
+    throw new Error("Deterministic Founder subscription identity does not match.");
+  }
+}
+
+function assertDeterministicCommerceBoundary(input: {
+  runId: string;
+  subscriptionId: string;
+}): void {
+  const appUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? "invalid:");
+  if (
+    process.env.BRUNO_AUTH_MODE !== "development" ||
+    process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE !== "deterministic" ||
+    process.env.VERCEL_ENV ||
+    process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID !== input.runId ||
+    !["localhost", "127.0.0.1", "[::1]"].includes(appUrl.hostname) ||
+    input.subscriptionId !== `${input.runId}:subscription`
+  ) {
+    throw new Error("Deterministic Founder commerce cancellation is unavailable.");
+  }
 }
 
 function assertDeterministicGoogleBoundary(input: {
