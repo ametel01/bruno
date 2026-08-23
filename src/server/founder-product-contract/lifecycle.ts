@@ -180,6 +180,11 @@ export type FounderLifecycleOutcome = {
     unaffectedCapabilityAvailable: boolean;
     configurationRecoveryDidNotResume: boolean;
     explicitResumeRestoredCapability: boolean;
+    resumeReconfirmationSurfaced: boolean;
+    gmailPublicSetupSeamPassed: boolean;
+    gmailHoldBlockedProviderEffects: boolean;
+    gmailDisconnectPreservedDuringHold: boolean;
+    gmailResumeRestoredPublicSetup: boolean;
     activationBoundToExactReleaseDecision: boolean;
     abandonedSetupCreatedNoDroplet: boolean;
     explicitCreateRequired: boolean;
@@ -287,6 +292,16 @@ type LifecycleDependencies = {
     status: number;
     generalRelease?: FounderGeneralReleaseActivationDto;
     error?: { code?: string; message?: string };
+  }>;
+  generalReleaseGmailBoundary?: (
+    phase: "approved" | "held" | "resumed",
+    observedAt: Date,
+  ) => Promise<{
+    getAllowed: boolean;
+    startAllowed: boolean;
+    callbackAllowed: boolean;
+    disconnectAllowed: boolean;
+    providerEffectsStarted: number;
   }>;
   identityRecoveryPublicSeam?: (
     input: LifecycleInput,
@@ -668,6 +683,10 @@ async function executeInitialGeneralReleaseContractScenario(
   if (!application) {
     throw new Error("The public General Release application boundary is unavailable.");
   }
+  const gmailBoundary = dependencies.generalReleaseGmailBoundary;
+  if (!gmailBoundary) {
+    throw new Error("The public General Release Gmail boundary is unavailable.");
+  }
   const [initialReleaseDecision] = await connection.db
     .select()
     .from(founderReleaseDecisions)
@@ -744,6 +763,7 @@ async function executeInitialGeneralReleaseContractScenario(
   if (!boundSetup?.releaseDecisionId) {
     throw new Error("The deterministic General Release setup was not bound.");
   }
+  const approvedGmailBoundary = await gmailBoundary("approved", input.now);
   await connection.db
     .update(founderGeneralReleaseActivations)
     .set({ releaseDecisionId: null })
@@ -769,7 +789,7 @@ async function executeInitialGeneralReleaseContractScenario(
   const holdDigest = founderProductContractDigest(
     JSON.stringify({
       kind: "initial_general_release_contract_hold",
-      capability: "anthropic",
+      capability: "gmail_sending",
       observedAt: holdAt.toISOString(),
     }),
   );
@@ -779,7 +799,7 @@ async function executeInitialGeneralReleaseContractScenario(
     applicationRevision: initialReleaseDecision.applicationRevision,
     runtimeRevision: initialReleaseDecision.runtimeRevision,
     capabilityManifest: initialReleaseDecision.capabilityManifest,
-    affectedCapabilities: ["anthropic"],
+    affectedCapabilities: ["gmail_sending"],
     evidenceDigests: [holdDigest, ...initialReleaseDecision.evidenceDigests],
     authorityExpiresAt: initialReleaseDecision.authorityExpiresAt,
     decidedAt: holdAt,
@@ -800,17 +820,18 @@ async function executeInitialGeneralReleaseContractScenario(
         tx,
         input.userId,
         holdAt,
-        ["anthropic"],
+        ["gmail_sending"],
         availabilityEnvironment,
       )),
       !(await founderGeneralReleaseSetupAuthorizesInTransaction(
         tx,
         input.userId,
         holdAt,
-        ["anthropic"],
+        ["gmail_sending"],
         availabilityEnvironment,
       )),
     ]);
+  const heldGmailBoundary = await gmailBoundary("held", holdAt);
   const resumeAt = new Date(holdAt.valueOf() + 1);
   const [resumeDecision] = await connection.db
     .insert(founderReleaseDecisions)
@@ -834,15 +855,21 @@ async function executeInitialGeneralReleaseContractScenario(
       tx,
       input.userId,
       resumeAt,
-      ["anthropic"],
+      ["gmail_sending"],
       availabilityEnvironment,
     ),
   );
+  const resumeProjection = await getFounderGeneralReleaseActivationForUser(input.userId, {
+    createConnection: () => connection,
+    env: availabilityEnvironment,
+    now: () => resumeAt,
+  });
   requireGeneralReleaseApplicationStatus(
     await confirmEligibility(resumeAt),
     200,
     "Explicit General Release Resume",
   );
+  const resumedGmailBoundary = await gmailBoundary("resumed", resumeAt);
   const runnersAfterAbandonedSetup = await connection.db
     .select({ id: runners.id })
     .from(runners)
@@ -946,6 +973,26 @@ async function executeInitialGeneralReleaseContractScenario(
     unaffectedCapabilityAvailable,
     configurationRecoveryDidNotResume: stillHeldAfterRecovery,
     explicitResumeRestoredCapability,
+    resumeReconfirmationSurfaced:
+      resumeProjection.setup.requiresReleaseReconfirmation && !resumeProjection.setup.canCreate,
+    gmailPublicSetupSeamPassed:
+      approvedGmailBoundary.getAllowed &&
+      approvedGmailBoundary.startAllowed &&
+      approvedGmailBoundary.callbackAllowed &&
+      approvedGmailBoundary.disconnectAllowed &&
+      approvedGmailBoundary.providerEffectsStarted === 2,
+    gmailHoldBlockedProviderEffects:
+      !heldGmailBoundary.getAllowed &&
+      !heldGmailBoundary.startAllowed &&
+      !heldGmailBoundary.callbackAllowed &&
+      heldGmailBoundary.providerEffectsStarted === 0,
+    gmailDisconnectPreservedDuringHold: heldGmailBoundary.disconnectAllowed,
+    gmailResumeRestoredPublicSetup:
+      resumedGmailBoundary.getAllowed &&
+      resumedGmailBoundary.startAllowed &&
+      resumedGmailBoundary.callbackAllowed &&
+      resumedGmailBoundary.disconnectAllowed &&
+      resumedGmailBoundary.providerEffectsStarted === 2,
     activationBoundToExactReleaseDecision:
       persistedActivated.releaseDecisionId === resumeDecision.id &&
       boundReleaseDecision?.id === resumeDecision.id &&

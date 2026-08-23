@@ -96,6 +96,11 @@ describe("Founder Product Contract workflow", () => {
       "BRUNO_FOUNDER_CANDIDATE_CHECK_RUN_ID: $" +
         "{{ steps.release_candidate_control.outputs.check_run_id }}",
     );
+    expect(workflow).toContain("VERCEL_GIT_COMMIT_SHA: $" + "{{ github.sha }}");
+    expect(workflow).toContain(
+      "BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION: $" +
+        "{{ env.BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION }}",
+    );
     expect(workflow).toContain(
       "run: bun scripts/founder-product-contract-candidate-control.ts finalize",
     );

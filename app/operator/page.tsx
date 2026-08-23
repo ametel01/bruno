@@ -120,7 +120,9 @@ export default async function FounderOperatorPage({
 
   return (
     <FounderOperatorShell>
-      {generalReleaseStatus.admission.capacity !== "unavailable" ? (
+      {generalReleaseStatus.admission.capacity !== "unavailable" ||
+      generalReleaseStatus.setup.serviceBusinessConfirmed ||
+      generalReleaseStatus.release.decisionState === "held" ? (
         <FounderGeneralRelease initialStatus={generalReleaseStatus} />
       ) : null}
       <FounderExternalBeta

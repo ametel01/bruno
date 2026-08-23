@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation";
 import { hasFounderGeneralReleaseSetupAccessForUser } from "@/src/server/founder-product-contract/initial-general-release";
 import {
   completeFounderGoogleMailSendingAuthorizationForState,
@@ -32,13 +31,13 @@ export async function GET(
       );
     } catch (error) {
       if (error instanceof FounderMailSendingConnectionError)
-        return redirect(`/operator?mail_sending=${encodeURIComponent(error.code)}#mail-sending`);
+        return redirectToOperator(request, error.code);
       throw error;
     }
-    return redirect("/operator?mail_sending=authorization_denied#mail-sending");
+    return redirectToOperator(request, "authorization_denied");
   }
   if (!(dependencies.isMailSendingReleased ?? isFounderGoogleMailSendingReleased)()) {
-    return redirect("/operator?mail_sending=mail_sending_not_released#mail-sending");
+    return redirectToOperator(request, "mail_sending_not_released");
   }
   try {
     const userId = await (
@@ -49,19 +48,25 @@ export async function GET(
       dependencies.hasGeneralReleaseSetupAccess ?? hasFounderGeneralReleaseSetupAccessForUser
     )(userId, {}, ["gmail_sending"]);
     if (!hasAccess) {
-      return redirect("/operator?mail_sending=owner_preview_capability_unavailable#mail-sending");
+      return redirectToOperator(request, "owner_preview_capability_unavailable");
     }
     const connection = await (
       dependencies.completeAuthorization ?? completeFounderGoogleMailSendingAuthorizationForState
     )(state, url.searchParams.get("code") ?? "");
-    return redirect(
-      connection.status === "ready"
-        ? "/operator?mail_sending=connected#mail-sending"
-        : "/operator?mail_sending=needs_attention#mail-sending",
+    return redirectToOperator(
+      request,
+      connection.status === "ready" ? "connected" : "needs_attention",
     );
   } catch (error) {
     if (error instanceof FounderMailSendingConnectionError)
-      return redirect(`/operator?mail_sending=${encodeURIComponent(error.code)}#mail-sending`);
+      return redirectToOperator(request, error.code);
     throw error;
   }
+}
+
+function redirectToOperator(request: Request, outcome: string): Response {
+  const destination = new URL("/operator", request.url);
+  destination.searchParams.set("mail_sending", outcome);
+  destination.hash = "mail-sending";
+  return Response.redirect(destination, 303);
 }

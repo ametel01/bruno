@@ -97,7 +97,8 @@ export function FounderGeneralRelease({
         </p>
       </div>
 
-      {status.release.decisionState === "approved" && !status.setup.serviceBusinessConfirmed ? (
+      {(status.admission.capacity !== "unavailable" && !status.setup.serviceBusinessConfirmed) ||
+      status.setup.requiresReleaseReconfirmation ? (
         <form
           className={styles.form}
           onSubmit={(event) => {
@@ -133,8 +134,18 @@ export function FounderGeneralRelease({
             type="submit"
             disabled={busy || !serviceBusinessConfirmed || geographyCode.length !== 2}
           >
-            {busy ? "Checking…" : "Check public availability"}
+            {busy
+              ? "Checking…"
+              : status.setup.requiresReleaseReconfirmation
+                ? "Reconfirm current release"
+                : "Check public availability"}
           </button>
+          {status.setup.requiresReleaseReconfirmation ? (
+            <p className={styles.notice} role="status">
+              A fresh release decision resumed setup. Reconfirm your business and country before
+              creating the Operator.
+            </p>
+          ) : null}
         </form>
       ) : status.setup.serviceBusinessConfirmed ? (
         <ul className={styles.checklist} aria-label="Operator creation requirements">

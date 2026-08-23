@@ -189,6 +189,11 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                   unaffectedCapabilityAvailable: boolean;
                   configurationRecoveryDidNotResume: boolean;
                   explicitResumeRestoredCapability: boolean;
+                  resumeReconfirmationSurfaced: boolean;
+                  gmailPublicSetupSeamPassed: boolean;
+                  gmailHoldBlockedProviderEffects: boolean;
+                  gmailDisconnectPreservedDuringHold: boolean;
+                  gmailResumeRestoredPublicSetup: boolean;
                   activationBoundToExactReleaseDecision: boolean;
                   abandonedSetupCreatedNoDroplet: boolean;
                   explicitCreateRequired: boolean;
@@ -247,6 +252,11 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                 unaffectedCapabilityAvailable: true,
                 configurationRecoveryDidNotResume: true,
                 explicitResumeRestoredCapability: true,
+                resumeReconfirmationSurfaced: true,
+                gmailPublicSetupSeamPassed: true,
+                gmailHoldBlockedProviderEffects: true,
+                gmailDisconnectPreservedDuringHold: true,
+                gmailResumeRestoredPublicSetup: true,
                 activationBoundToExactReleaseDecision: true,
                 abandonedSetupCreatedNoDroplet: true,
                 explicitCreateRequired: true,

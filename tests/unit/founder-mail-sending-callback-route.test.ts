@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({
-  redirect: (path: string) => Response.redirect(new URL(path, "http://localhost"), 307),
-}));
-
 import { GET } from "@/app/api/operator/mail-sending/oauth/callback/route";
 
 describe("Mail Sending OAuth callback boundary", () => {
@@ -20,7 +16,7 @@ describe("Mail Sending OAuth callback boundary", () => {
       },
     );
 
-    expect(response.status).toBe(307);
+    expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe(
       "http://localhost/operator?mail_sending=connected#mail-sending",
     );
@@ -40,7 +36,7 @@ describe("Mail Sending OAuth callback boundary", () => {
       },
     );
 
-    expect(response.status).toBe(307);
+    expect(response.status).toBe(303);
     expect(response.headers.get("location")).toContain(
       "mail_sending=owner_preview_capability_unavailable",
     );
@@ -57,7 +53,7 @@ describe("Mail Sending OAuth callback boundary", () => {
       { denyAuthorization },
     );
 
-    expect(response.status).toBe(307);
+    expect(response.status).toBe(303);
     expect(response.headers.get("location")).toContain("mail_sending=authorization_denied");
     expect(denyAuthorization).toHaveBeenCalledWith("s");
   });

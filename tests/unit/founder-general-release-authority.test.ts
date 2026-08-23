@@ -9,7 +9,10 @@ import { createDatabaseConnection } from "@/src/server/db/client";
 import {
   founderGeneralReleaseActivations,
   founderReleaseDecisions,
+  operatorCalendarConnections,
+  operatorMailConnections,
   operatorMailSendingConnections,
+  operatorPrimaryCommunicationsSuites,
   operators,
   users,
 } from "@/src/server/db/schema";
@@ -141,8 +144,65 @@ describe("Initial General Release global authority", () => {
         .from(operators)
         .where(eq(operators.userId, APPLICANT_ID));
       if (!applicantOperator) throw new Error("Applicant Operator fixture is unavailable.");
+      const [calendarConnection] = await connection.db
+        .insert(operatorCalendarConnections)
+        .values({
+          operatorId: applicantOperator.id,
+          providerSubjectId: "google-sub-general-release",
+          accountLabel: "founder@example.test",
+          status: "ready",
+          authorizationState: "authorized",
+          accessTokenCiphertext: "calendar-ciphertext",
+          accessTokenIv: "calendar-iv",
+          accessTokenAuthTag: "calendar-tag",
+          refreshTokenCiphertext: "calendar-refresh-ciphertext",
+          refreshTokenIv: "calendar-refresh-iv",
+          refreshTokenAuthTag: "calendar-refresh-tag",
+          secretKeyVersion: "test-v1",
+          lastVerifiedAt: NOW,
+          lastEvidenceAt: NOW,
+          evidenceState: "current",
+          createdAt: NOW,
+          updatedAt: NOW,
+        })
+        .returning();
+      if (!calendarConnection) throw new Error("Applicant Calendar fixture is unavailable.");
+      const [mailConnection] = await connection.db
+        .insert(operatorMailConnections)
+        .values({
+          operatorId: applicantOperator.id,
+          providerSubjectId: "google-sub-general-release",
+          accountLabel: "founder@example.test",
+          status: "ready",
+          authorizationState: "authorized",
+          accessTokenCiphertext: "mail-ciphertext",
+          accessTokenIv: "mail-iv",
+          accessTokenAuthTag: "mail-tag",
+          refreshTokenCiphertext: "mail-refresh-ciphertext",
+          refreshTokenIv: "mail-refresh-iv",
+          refreshTokenAuthTag: "mail-refresh-tag",
+          secretKeyVersion: "test-v1",
+          suiteStatus: "matched",
+          lastVerifiedAt: NOW,
+          lastEvidenceAt: NOW,
+          evidenceState: "current",
+          createdAt: NOW,
+          updatedAt: NOW,
+        })
+        .returning();
+      if (!mailConnection) throw new Error("Applicant Mail fixture is unavailable.");
+      await connection.db.insert(operatorPrimaryCommunicationsSuites).values({
+        operatorId: applicantOperator.id,
+        calendarConnectionId: calendarConnection.id,
+        mailConnectionId: mailConnection.id,
+        providerSubjectId: "google-sub-general-release",
+        status: "active",
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
       await connection.db.insert(operatorMailSendingConnections).values({
         operatorId: applicantOperator.id,
+        mailConnectionId: mailConnection.id,
         status: "ready",
         authorizationState: "authorized",
         providerSubjectId: "google-sub-general-release",
@@ -154,6 +214,8 @@ describe("Initial General Release global authority", () => {
         refreshTokenIv: "refresh-iv",
         refreshTokenAuthTag: "refresh-tag",
         secretKeyVersion: "test-v1",
+        tokenExpiresAt: new Date(NOW.valueOf() + 60_000),
+        grantedScopes: ["https://www.googleapis.com/auth/gmail.send"],
         authorizedAt: NOW,
         lastVerifiedAt: NOW,
       });
@@ -170,6 +232,21 @@ describe("Initial General Release global authority", () => {
           sending: "On only after each Founder approves it",
         },
       });
+      await connection.db
+        .update(operatorMailSendingConnections)
+        .set({ tokenExpiresAt: NOW })
+        .where(eq(operatorMailSendingConnections.operatorId, applicantOperator.id));
+      await expect(
+        getFounderGeneralReleaseActivationForUser(APPLICANT_ID, {
+          createConnection: () => connection,
+          env: releasedEnvironment(NOW),
+          now: () => NOW,
+        }),
+      ).resolves.toMatchObject({ release: { sending: "Off" } });
+      await connection.db
+        .update(operatorMailSendingConnections)
+        .set({ tokenExpiresAt: new Date(NOW.valueOf() + 60_000) })
+        .where(eq(operatorMailSendingConnections.operatorId, applicantOperator.id));
       await expect(
         hasFounderGeneralReleaseSetupAccessForUser(
           APPLICANT_ID,
@@ -219,6 +296,16 @@ describe("Initial General Release global authority", () => {
         approved: true,
         decisionOutcome: "hold",
         heldCapabilities: ["gmail_sending"],
+      });
+      await expect(
+        getFounderGeneralReleaseActivationForUser(APPLICANT_ID, {
+          createConnection: () => connection,
+          env: heldEnvironment,
+          now: () => NOW,
+        }),
+      ).resolves.toMatchObject({
+        release: { qualified: false, decisionState: "held", sending: "Off" },
+        setup: { canCreate: false },
       });
       await expect(
         connection.db.transaction((tx) =>
@@ -300,7 +387,7 @@ describe("Initial General Release global authority", () => {
           },
         ),
       ).rejects.toThrow("A Hold requires a fresh complete Initial General Release Decision");
-      await persistProtectedFounderGeneralReleaseDecisionForOwner(
+      const resumeId = await persistProtectedFounderGeneralReleaseDecisionForOwner(
         OWNER_ID,
         freshDecisionArtifact(later),
         {
@@ -315,6 +402,28 @@ describe("Initial General Release global authority", () => {
         .orderBy(asc(founderReleaseDecisions.decidedAt));
       expect(afterResume.map((decision) => decision.outcome)).toEqual(["enter", "hold", "resume"]);
       expect(afterResume[1]).toMatchObject({ affectedCapabilities: ["gmail_sending"] });
+      await expect(
+        getFounderGeneralReleaseActivationForUser(APPLICANT_ID, {
+          createConnection: () => connection,
+          env: releasedEnvironment(later),
+          now: () => later,
+        }),
+      ).resolves.toMatchObject({
+        release: { qualified: false, decisionState: "denied", sending: "Off" },
+        setup: { requiresReleaseReconfirmation: true, canCreate: false },
+      });
+      await confirmFounderGeneralReleaseEligibility(
+        {
+          userId: APPLICANT_ID,
+          serviceBusinessConfirmed: true,
+          geographyCode: "PH",
+          now: later,
+        },
+        { createConnection: () => connection, env: releasedEnvironment(later) },
+      );
+      expect(await connection.db.select().from(founderGeneralReleaseActivations)).toEqual([
+        expect.objectContaining({ userId: APPLICANT_ID, releaseDecisionId: resumeId }),
+      ]);
     } finally {
       await reset(connection);
     }

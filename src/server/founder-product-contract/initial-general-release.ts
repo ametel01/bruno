@@ -10,13 +10,13 @@ import {
   operatorCalendarConnections,
   operatorLimitedOperations,
   operatorMailConnections,
-  operatorMailSendingConnections,
   operatorMorningBriefItems,
   operatorMorningBriefs,
   operatorProcessingConsents,
   operators,
 } from "@/src/server/db/schema";
 import { isFounderAnthropicReleased } from "@/src/server/operators/founder-anthropic-release";
+import { selectUsableFounderMailSendingConnectionInTransaction } from "@/src/server/operators/founder-mail-sending-readiness";
 import { isFounderOpenAiReleased } from "@/src/server/operators/founder-openai-release";
 import {
   type CreateRunnerProvisioningResult,
@@ -87,6 +87,7 @@ export type FounderGeneralReleaseActivationDto = {
     selectedCompanyConnections: boolean;
     processingConsent: boolean;
     explicitCreateConfirmed: boolean;
+    requiresReleaseReconfirmation: boolean;
     canCreate: boolean;
   };
   activation: {
@@ -153,7 +154,7 @@ export async function getFounderGeneralReleaseActivationForUser(
         null,
         authority,
       );
-      return projectGeneralRelease(tx, userId, availability);
+      return projectGeneralRelease(tx, userId, availability, now);
     });
   } finally {
     if (ownsConnection) await connection.close();
@@ -327,7 +328,7 @@ export async function confirmFounderGeneralReleaseEligibility(
       return availability;
     });
     return await connection.db.transaction((tx) =>
-      projectGeneralRelease(tx, input.userId, availability),
+      projectGeneralRelease(tx, input.userId, availability, input.now),
     );
   } finally {
     if (ownsConnection) await connection.close();
@@ -466,7 +467,7 @@ export async function createFounderGeneralReleaseOperator(
       .limit(1);
     if (existing[0]?.runnerId) {
       return await connection.db.transaction((tx) =>
-        projectGeneralRelease(tx, input.userId, availability),
+        projectGeneralRelease(tx, input.userId, availability, input.now),
       );
     }
     const provisionRunner =
@@ -515,7 +516,7 @@ export async function createFounderGeneralReleaseOperator(
         );
     });
     return await connection.db.transaction((tx) =>
-      projectGeneralRelease(tx, input.userId, availability),
+      projectGeneralRelease(tx, input.userId, availability, input.now),
     );
   } finally {
     if (ownsConnection) await connection.close();
@@ -1231,6 +1232,7 @@ async function projectGeneralRelease(
   tx: FounderProductContractTransaction,
   userId: string,
   availability: FounderGeneralReleaseAvailability,
+  now: Date,
 ): Promise<FounderGeneralReleaseActivationDto> {
   const [activation] = await tx
     .select()
@@ -1255,21 +1257,9 @@ async function projectGeneralRelease(
         processingConsentId: null,
         authorityPolicyId: null,
       };
-  const [sendingConnection] = operator
-    ? await tx
-        .select({ id: operatorMailSendingConnections.id })
-        .from(operatorMailSendingConnections)
-        .where(
-          and(
-            eq(operatorMailSendingConnections.operatorId, operator.id),
-            eq(operatorMailSendingConnections.status, "ready"),
-            eq(operatorMailSendingConnections.authorizationState, "authorized"),
-            isNull(operatorMailSendingConnections.disconnectedAt),
-            isNull(operatorMailSendingConnections.revokedAt),
-          ),
-        )
-        .limit(1)
-    : [];
+  const sendingConnection = operator
+    ? await selectUsableFounderMailSendingConnectionInTransaction(tx, operator.id, now)
+    : null;
   const [entitlement] = await tx
     .select({ status: founderProductEntitlements.status })
     .from(founderProductEntitlements)
@@ -1292,8 +1282,40 @@ async function projectGeneralRelease(
       availability.authority.decisionId &&
       activation.releaseDecisionId === availability.authority.decisionId,
   );
+  const [boundReleaseDecision] = activation?.releaseDecisionId
+    ? await tx
+        .select({
+          stage: founderReleaseDecisions.stage,
+          outcome: founderReleaseDecisions.outcome,
+          applicationRevision: founderReleaseDecisions.applicationRevision,
+          runtimeRevision: founderReleaseDecisions.runtimeRevision,
+          authorityExpiresAt: founderReleaseDecisions.authorityExpiresAt,
+        })
+        .from(founderReleaseDecisions)
+        .where(eq(founderReleaseDecisions.id, activation.releaseDecisionId))
+        .limit(1)
+    : [];
+  const activationBoundToCurrentCandidate = Boolean(
+    boundReleaseDecision?.stage === "initial_general_release" &&
+      ["enter", "resume"].includes(boundReleaseDecision.outcome) &&
+      boundReleaseDecision.applicationRevision === availability.authority.sourceRevision &&
+      boundReleaseDecision.runtimeRevision === availability.authority.runtimeRevision &&
+      boundReleaseDecision.authorityExpiresAt &&
+      boundReleaseDecision.authorityExpiresAt > now,
+  );
+  const setupIncomplete = !activation || ["setup", "waitlisted"].includes(activation.status);
+  const requiresReleaseReconfirmation = Boolean(
+    activation?.serviceBusinessConfirmedAt &&
+      availability.authority.approved &&
+      availability.authority.heldCapabilities.length === 0 &&
+      setupIncomplete &&
+      !activationBoundToCurrentDecision,
+  );
   const founderReleaseQualified =
-    availability.authority.approved && activationBoundToCurrentDecision;
+    availability.authority.approved &&
+    availability.authority.heldCapabilities.length === 0 &&
+    Boolean(activation) &&
+    (setupIncomplete ? activationBoundToCurrentDecision : activationBoundToCurrentCandidate);
   return {
     state,
     admission: {
@@ -1310,11 +1332,12 @@ async function projectGeneralRelease(
     },
     release: {
       qualified: founderReleaseQualified,
-      decisionState: !founderReleaseQualified
-        ? "denied"
-        : availability.authority.heldCapabilities.length > 0
+      decisionState:
+        availability.authority.heldCapabilities.length > 0
           ? "held"
-          : "approved",
+          : founderReleaseQualified
+            ? "approved"
+            : "denied",
       capabilities: (
         [
           ["openai", "OpenAI"],
@@ -1332,7 +1355,7 @@ async function projectGeneralRelease(
       sending:
         sendingConnection &&
         availability.authority.capabilities.gmail_sending === "available" &&
-        activationBoundToCurrentDecision
+        founderReleaseQualified
           ? "On only after each Founder approves it"
           : "Off",
       supportBoundary: "Ordinary product support",
@@ -1344,6 +1367,7 @@ async function projectGeneralRelease(
       selectedCompanyConnections: readiness.selectedCompanyConnections,
       processingConsent: readiness.processingConsent,
       explicitCreateConfirmed: Boolean(activation?.createConfirmedAt),
+      requiresReleaseReconfirmation,
       canCreate:
         admissionState === "eligible" &&
         activationBoundToCurrentDecision &&

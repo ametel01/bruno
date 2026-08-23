@@ -507,6 +507,7 @@ function status(
       selectedCompanyConnections: true,
       processingConsent: true,
       explicitCreateConfirmed: false,
+      requiresReleaseReconfirmation: false,
       canCreate: true,
     },
     activation: { dropletCreatedAt: null, dueAt: null, activatedAt: null },

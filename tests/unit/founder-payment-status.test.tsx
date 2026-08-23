@@ -1,8 +1,46 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { FounderGeneralRelease } from "@/app/operator/_components/founder-general-release";
 import { FounderPaymentStatus } from "@/app/operator/payment/founder-payment-status";
 
 describe("Founder payment status", () => {
+  it("keeps a Hold visible and surfaces explicit Resume re-confirmation", () => {
+    const baseline = generalReleaseStatus(false);
+    const newApplicant = {
+      ...baseline,
+      release: { ...baseline.release, qualified: false, decisionState: "denied" as const },
+      setup: { ...baseline.setup, serviceBusinessConfirmed: false },
+    };
+    expect(renderToStaticMarkup(<FounderGeneralRelease initialStatus={newApplicant} />)).toContain(
+      "Check public availability",
+    );
+    const held = {
+      ...baseline,
+      release: {
+        ...baseline.release,
+        qualified: false,
+        decisionState: "held" as const,
+        capabilities: baseline.release.capabilities.map((capability) =>
+          capability.id === "gmail_sending"
+            ? { ...capability, state: "paused" as const }
+            : capability,
+        ),
+      },
+    };
+    const heldHtml = renderToStaticMarkup(<FounderGeneralRelease initialStatus={held} />);
+    expect(heldHtml).toContain("Gmail sending: Paused");
+    expect(heldHtml).toContain("Operator creation requirements");
+
+    const resumed = {
+      ...baseline,
+      release: { ...baseline.release, qualified: false, decisionState: "denied" as const },
+      setup: { ...baseline.setup, requiresReleaseReconfirmation: true },
+    };
+    const resumedHtml = renderToStaticMarkup(<FounderGeneralRelease initialStatus={resumed} />);
+    expect(resumedHtml).toContain("Reconfirm current release");
+    expect(resumedHtml).toContain("fresh release decision resumed setup");
+  });
+
   it("keeps the return surface in plain-language confirming payment state", () => {
     const html = renderToStaticMarkup(
       <FounderPaymentStatus
@@ -194,6 +232,7 @@ function generalReleaseStatus(offerAvailable: boolean) {
       selectedCompanyConnections: true,
       processingConsent: true,
       explicitCreateConfirmed: true,
+      requiresReleaseReconfirmation: false,
       canCreate: false,
     },
     activation: {

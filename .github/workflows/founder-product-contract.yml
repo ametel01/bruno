@@ -197,4 +197,6 @@ jobs:
           BRUNO_FOUNDER_CANDIDATE_CHECK_RUN_ID: ${{ steps.release_candidate_control.outputs.check_run_id }}
           BRUNO_FOUNDER_CONTRACT_GITHUB_TOKEN: ${{ github.token }}
           BRUNO_FOUNDER_PRIOR_JOB_STATUS: ${{ job.status }}
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
+          BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION: ${{ env.BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION }}
         run: bun scripts/founder-product-contract-candidate-control.ts finalize
