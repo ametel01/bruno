@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
+import { eq } from "drizzle-orm";
 import {
   type BackupStorageUploadInput,
   type DeletableBackupObjectStorage,
@@ -15,6 +16,14 @@ import {
   type DigitalOceanOwnedSetResult,
   FakeDigitalOceanProvider,
 } from "@/src/server/runners/digitalocean-provider";
+import {
+  reconcileFounderCommerceReceipt,
+  recordFounderCommerceWebhook,
+} from "@/src/server/commerce/founder-commerce";
+import type { LemonSqueezyCommerceProvider } from "@/src/server/commerce/lemon-squeezy-provider";
+import { createDatabaseConnection } from "@/src/server/db/client";
+import { founderCommerceEvents, founderProductEntitlements } from "@/src/server/db/schema";
+import { founderProductContractDigest } from "./digest";
 import { digitalOceanRunnerFirewallName } from "@/src/server/runners/runner-provisioning";
 import { EncryptedFounderRecoveryArchiveProvider } from "./encrypted-recovery-archive-provider";
 import type { FounderCommerceStatus, FounderLifecycleProviderBoundary } from "./lifecycle";
@@ -48,7 +57,16 @@ type ProviderState = {
   archiveStorage: FakeBackupObjectStorage;
   seededResourceIds: Set<string>;
   restorationCounter: number;
+  subscriptionId: string;
+  subscriptionOrderId: string;
+  subscriptionStatus: FounderCommerceStatus;
+  subscriptionUpdatedAt: Date;
+  subscriptionEndsAt: Date | null;
+  revokedConnections: Set<DeterministicFounderContractConnectionKind>;
+  calls: string[];
 };
+
+export type DeterministicFounderContractConnectionKind = "ai:openai" | "calendar" | "mail";
 
 const globalProviders = globalThis as typeof globalThis & {
   __brunoFounderLifecycleProviders?: Map<string, ProviderState>;
@@ -72,9 +90,20 @@ export function deterministicFounderLifecycleProviders(input: {
     archiveStorage: new FakeBackupObjectStorage("founder-product-contract-recovery"),
     seededResourceIds: new Set(),
     restorationCounter: 0,
+    subscriptionId: `${input.runId}:subscription`,
+    subscriptionOrderId: `order-${input.runId}:subscription`,
+    subscriptionStatus: input.subscriptionStatus,
+    subscriptionUpdatedAt: input.now,
+    subscriptionEndsAt: null,
+    revokedConnections: new Set(),
+    calls: [],
   };
+  state.subscriptionStatus = input.subscriptionStatus;
+  state.subscriptionUpdatedAt = input.now;
+  state.subscriptionEndsAt = null;
+  state.calls = [];
   registry.set(key, state);
-  const calls: string[] = [];
+  const calls = state.calls;
   const failures = new Set(input.failures);
   const archiveProvider = new EncryptedFounderRecoveryArchiveProvider({
     storage: failures.has("archive.corrupt")
@@ -120,12 +149,17 @@ export function deterministicFounderLifecycleProviders(input: {
     async readSubscription({ subscriptionId }) {
       calls.push("lemonSqueezy.read_subscription");
       failIfConfigured(failures, "lemonSqueezy.read_subscription");
-      if (!subscriptionId) throw new Error("Subscription identity is required.");
-      return { status: input.subscriptionStatus };
+      assertExpectedSubscription(state, subscriptionId);
+      return { status: state.subscriptionStatus };
+    },
+    async cancelSubscription({ subscriptionId }) {
+      calls.push("lemonSqueezy.cancel_subscription");
+      assertExpectedSubscription(state, subscriptionId);
+      state.subscriptionStatus = "cancelled";
     },
     async createCustomerPortal({ subscriptionId, now }) {
       calls.push("lemonSqueezy.create_customer_portal");
-      if (!subscriptionId) throw new Error("Subscription identity is required.");
+      assertExpectedSubscription(state, subscriptionId);
       const expiresAt = new Date(now.valueOf() + 24 * 60 * 60 * 1_000);
       return {
         url: `https://app.lemonsqueezy.com/billing?expires=${Math.floor(expiresAt.valueOf() / 1_000)}&user=founder-contract&signature=${"a".repeat(64)}`,
@@ -220,6 +254,286 @@ export function deterministicFounderLifecycleProviders(input: {
     digitalOcean: ownedSetProvider(state, calls, failures, input.now),
     calls: () => [...calls],
   };
+}
+
+export async function cancelDeterministicFounderContractSubscription(input: {
+  runId: string;
+  userId: string;
+  subscriptionId: string;
+  reconcileEvidence?: boolean;
+}): Promise<void> {
+  assertDeterministicCommerceBoundary(input);
+  if (!globalProviders.__brunoFounderLifecycleProviders) {
+    globalProviders.__brunoFounderLifecycleProviders = new Map();
+  }
+  const registry = globalProviders.__brunoFounderLifecycleProviders;
+  const key = `${input.runId}:${input.userId}`;
+  let state = registry.get(key);
+  if (!state) {
+    if (!input.reconcileEvidence) {
+      throw new Error("Deterministic Founder commerce state is unavailable.");
+    }
+    const authority = await readDeterministicFounderContractCommerceAuthority(input);
+    state = {
+      digitalOcean: new FakeDigitalOceanProvider(),
+      archiveStorage: new FakeBackupObjectStorage("founder-product-contract-recovery"),
+      seededResourceIds: new Set<string>(),
+      restorationCounter: 0,
+      subscriptionId: authority.providerSubscriptionId,
+      subscriptionOrderId: authority.providerOrderId,
+      subscriptionStatus: "active" as const,
+      subscriptionUpdatedAt: authority.providerStateUpdatedAt,
+      subscriptionEndsAt: null,
+      revokedConnections: new Set(),
+      calls: [],
+    };
+  }
+  registry.set(key, state);
+  assertExpectedSubscription(state, input.subscriptionId);
+  state.calls.push("lemonSqueezy.cancel_subscription");
+  state.subscriptionStatus = "cancelled";
+  state.subscriptionUpdatedAt = new Date(state.subscriptionUpdatedAt.valueOf() + 1);
+  state.subscriptionEndsAt = new Date(
+    state.subscriptionUpdatedAt.valueOf() + 7 * 24 * 60 * 60 * 1_000,
+  );
+  if (input.reconcileEvidence) {
+    await reconcileDeterministicFounderContractCancellationEvidence(input, state);
+  }
+}
+
+async function reconcileDeterministicFounderContractCancellationEvidence(
+  input: { runId: string; userId: string; subscriptionId: string },
+  state: ProviderState,
+): Promise<void> {
+  const authority = await readDeterministicFounderContractCommerceAuthority(input);
+  const connection = createDatabaseConnection();
+  try {
+    state.subscriptionOrderId = authority.providerOrderId;
+    const payloadDigest = founderProductContractDigest(
+      JSON.stringify({
+        kind: "deterministic_account_closure_cancellation",
+        runId: input.runId,
+        userId: input.userId,
+        subscriptionId: input.subscriptionId,
+        updatedAt: state.subscriptionUpdatedAt.toISOString(),
+      }),
+    );
+    const recorded = await recordFounderCommerceWebhook({
+      webhook: {
+        derivedDeliveryKey: `lemon-squeezy:${payloadDigest}`,
+        payloadDigest,
+        eventName: "subscription_updated",
+        resourceType: "subscriptions",
+        resourceId: input.subscriptionId,
+        checkoutCorrelation: null,
+        subscriptionId: input.subscriptionId,
+        orderId: authority.providerOrderId,
+        occurredAt: state.subscriptionUpdatedAt.toISOString(),
+      },
+      recordedAt: state.subscriptionUpdatedAt,
+      createConnection: () => connection,
+    });
+    const provider: LemonSqueezyCommerceProvider = {
+      createCheckout: async () => {
+        throw new Error("Deterministic cancellation evidence cannot create checkout.");
+      },
+      createCustomerPortal: async () => {
+        throw new Error("Deterministic cancellation evidence cannot create a portal.");
+      },
+      readSubscription: async () => ({
+        subscriptionId: input.subscriptionId,
+        orderId: authority.providerOrderId,
+        status: "cancelled" as const,
+        updatedAt: state.subscriptionUpdatedAt.toISOString(),
+        endsAt: state.subscriptionEndsAt?.toISOString() ?? null,
+      }),
+      readOrder: async () => ({
+        orderId: authority.providerOrderId,
+        status: "paid" as const,
+        total: 1,
+        refundedAmount: 0,
+        updatedAt: state.subscriptionUpdatedAt.toISOString(),
+      }),
+      cancelSubscription: async () => undefined,
+      refundOrder: async () => {
+        throw new Error("Deterministic cancellation evidence cannot refund an order.");
+      },
+    };
+    const result = await reconcileFounderCommerceReceipt({
+      receiptId: recorded.receiptId,
+      now: state.subscriptionUpdatedAt,
+      provider,
+      createConnection: () => connection,
+    });
+    if (result !== "applied" && result !== "ignored") {
+      throw new Error("Deterministic Founder cancellation evidence was not reconciled.");
+    }
+  } finally {
+    await connection.close();
+  }
+}
+
+async function readDeterministicFounderContractCommerceAuthority(input: {
+  runId: string;
+  userId: string;
+  subscriptionId: string;
+}): Promise<{
+  sourceEventId: string;
+  providerSubscriptionId: string;
+  providerOrderId: string;
+  providerStateUpdatedAt: Date;
+}> {
+  const connection = createDatabaseConnection();
+  try {
+    const [authority] = await connection.db
+      .select({
+        sourceEventId: founderProductEntitlements.sourceEventId,
+        providerSubscriptionId: founderProductEntitlements.providerSubscriptionId,
+        providerOrderId: founderCommerceEvents.providerOrderId,
+        providerStateUpdatedAt: founderProductEntitlements.providerStateUpdatedAt,
+      })
+      .from(founderProductEntitlements)
+      .innerJoin(
+        founderCommerceEvents,
+        eq(founderCommerceEvents.id, founderProductEntitlements.sourceEventId),
+      )
+      .where(eq(founderProductEntitlements.userId, input.userId))
+      .limit(1);
+    if (
+      !authority ||
+      authority.providerSubscriptionId !== input.subscriptionId ||
+      authority.providerOrderId !== `order-${input.subscriptionId}`
+    ) {
+      throw new Error("Deterministic Founder cancellation authority is unavailable.");
+    }
+    return authority;
+  } finally {
+    await connection.close();
+  }
+}
+
+export async function readDeterministicFounderContractSubscription(input: {
+  runId: string;
+  userId: string;
+  subscriptionId: string;
+}): Promise<{
+  subscriptionId: string;
+  orderId: string;
+  status: FounderCommerceStatus;
+  updatedAt: string;
+  endsAt: string | null;
+}> {
+  assertDeterministicCommerceBoundary(input);
+  const state = globalProviders.__brunoFounderLifecycleProviders?.get(
+    `${input.runId}:${input.userId}`,
+  );
+  if (!state) throw new Error("Deterministic Founder commerce state is unavailable.");
+  assertExpectedSubscription(state, input.subscriptionId);
+  state.calls.push("lemonSqueezy.read_subscription");
+  return {
+    subscriptionId: state.subscriptionId,
+    orderId: state.subscriptionOrderId,
+    status: state.subscriptionStatus,
+    updatedAt: state.subscriptionUpdatedAt.toISOString(),
+    endsAt: state.subscriptionEndsAt?.toISOString() ?? null,
+  };
+}
+
+export async function revokeDeterministicFounderContractGoogleConnection(input: {
+  runId: string;
+  userId: string;
+  connectionKind: "calendar";
+  token: string;
+}): Promise<{ providerRevoked: true }> {
+  return revokeDeterministicFounderContractConnection(input);
+}
+
+export async function revokeDeterministicFounderContractConnection(input: {
+  runId: string;
+  userId: string;
+  connectionKind: DeterministicFounderContractConnectionKind;
+  providerIdentity?: string | null;
+  token?: string;
+}): Promise<{ providerRevoked: true }> {
+  assertDeterministicConnectionBoundary(input);
+  const key = `${input.runId}:${input.userId}`;
+  const state = globalProviders.__brunoFounderLifecycleProviders?.get(key);
+  if (!state) throw new Error("Deterministic Founder connection state is unavailable.");
+  state.revokedConnections.add(input.connectionKind);
+  state.calls.push(
+    input.connectionKind === "ai:openai"
+      ? "openAI.revoke_authorization"
+      : `google.revoke_${input.connectionKind}`,
+  );
+  return { providerRevoked: true };
+}
+
+export function deterministicFounderContractConnectionRevoked(input: {
+  runId: string;
+  userId: string;
+  connectionKind: DeterministicFounderContractConnectionKind;
+}): boolean {
+  return (
+    globalProviders.__brunoFounderLifecycleProviders
+      ?.get(`${input.runId}:${input.userId}`)
+      ?.revokedConnections.has(input.connectionKind) ?? false
+  );
+}
+
+export function deterministicFounderContractGoogleConnectionRevoked(input: {
+  runId: string;
+  userId: string;
+  connectionKind: "calendar";
+}): boolean {
+  return deterministicFounderContractConnectionRevoked(input);
+}
+
+function assertExpectedSubscription(state: ProviderState, subscriptionId: string): void {
+  if (subscriptionId !== state.subscriptionId) {
+    throw new Error("Deterministic Founder subscription identity does not match.");
+  }
+}
+
+function assertDeterministicCommerceBoundary(input: {
+  runId: string;
+  subscriptionId: string;
+}): void {
+  const appUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? "invalid:");
+  if (
+    process.env.BRUNO_AUTH_MODE !== "development" ||
+    process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE !== "deterministic" ||
+    process.env.VERCEL_ENV ||
+    process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID !== input.runId ||
+    !["localhost", "127.0.0.1", "[::1]"].includes(appUrl.hostname) ||
+    input.subscriptionId !== `${input.runId}:subscription`
+  ) {
+    throw new Error("Deterministic Founder commerce cancellation is unavailable.");
+  }
+}
+
+function assertDeterministicConnectionBoundary(input: {
+  runId: string;
+  userId: string;
+  connectionKind: DeterministicFounderContractConnectionKind;
+  providerIdentity?: string | null;
+  token?: string;
+}): void {
+  const appUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? "invalid:");
+  const expectedToken =
+    input.connectionKind === "calendar" || input.connectionKind === "mail"
+      ? `founder-contract-google:${input.runId}:${input.userId}:${input.connectionKind}:refresh`
+      : null;
+  if (
+    process.env.BRUNO_AUTH_MODE !== "development" ||
+    process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE !== "deterministic" ||
+    process.env.VERCEL_ENV ||
+    process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID !== input.runId ||
+    !["localhost", "127.0.0.1", "[::1]"].includes(appUrl.hostname) ||
+    (input.connectionKind === "ai:openai" && input.providerIdentity !== `openai-${input.userId}`) ||
+    (expectedToken !== null && input.token !== expectedToken)
+  ) {
+    throw new Error("Deterministic Founder connection revocation is unavailable.");
+  }
 }
 
 function corruptingRecoveryArchiveStorage(

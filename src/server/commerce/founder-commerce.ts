@@ -10,6 +10,7 @@ import {
   founderInfrastructureRetirements,
   founderOperatorRestorations,
   founderProductEntitlements,
+  operatorDeletionCommerceCancellations,
   operators,
 } from "@/src/server/db/schema";
 import { founderProductContractDigest } from "@/src/server/founder-product-contract/digest";
@@ -25,6 +26,12 @@ import {
   lockFounderProductContractLifecycleInTransaction,
   requireActiveFounderOperatorAuthorityInTransaction,
 } from "@/src/server/founder-product-contract/operator-authority";
+import {
+  FOUNDER_COMMERCE_WEBHOOK_INTAKE_PENDING_CODE,
+  getFounderAccountClosureCommerceFenceInTransaction,
+  isFounderAccountClosureSubscriptionInTransaction,
+  lockFounderCommerceWebhookIntakeInTransaction,
+} from "./founder-account-closure-fence";
 import type {
   LemonSqueezyCommerceProvider,
   LemonSqueezyCommerceStatus,
@@ -97,6 +104,9 @@ export async function createFounderCheckout(input: {
   try {
     const correlationId = await connection.db.transaction(async (tx) => {
       await lockFounderProductContractLifecycleInTransaction(tx, input.userId);
+      if (await getFounderAccountClosureCommerceFenceInTransaction(tx, input.userId)) {
+        throw new Error("Account Closure permanently fences new commerce.");
+      }
       await requireActiveFounderOperatorAuthorityInTransaction(tx, input.userId);
       await requireFounderGeneralReleasePurchaseDecisionInTransaction(tx, input.userId, input.now);
       const [latest] = await tx
@@ -330,7 +340,7 @@ export async function recordFounderCommerceWebhook(input: {
   const connection = input.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !input.createConnection;
   try {
-    return await connection.db.transaction(async (tx) => {
+    const intake = await connection.db.transaction(async (tx) => {
       const [existing] = await tx
         .select()
         .from(founderCommerceEvents)
@@ -338,30 +348,153 @@ export async function recordFounderCommerceWebhook(input: {
         .limit(1);
       if (existing) {
         assertSameReceipt(existing, input.webhook);
-        const [correlation] = await tx
-          .select({ status: founderCheckoutCorrelations.status })
-          .from(founderCheckoutCorrelations)
-          .where(eq(founderCheckoutCorrelations.id, existing.checkoutCorrelationId))
-          .limit(1);
         return {
-          receiptId: existing.id,
+          receipt: existing,
           userId: existing.userId,
-          terminal: correlation?.status === "closed" || correlation?.status === "refund_pending",
           duplicate: true,
         };
       }
 
       const [correlation] = await findCheckoutCorrelation(tx, input.webhook);
       if (!correlation) throw new Error("Checkout Correlation was not found.");
-      await lockFounderProductContractLifecycleInTransaction(tx, correlation.userId);
+      await lockFounderCommerceWebhookIntakeInTransaction(tx, correlation.userId, "intake");
+      const eventOccurredAt = new Date(input.webhook.occurredAt);
+      const [createdReceipt] = await tx
+        .insert(founderCommerceEvents)
+        .values({
+          providerEventId: input.webhook.derivedDeliveryKey,
+          userId: correlation.userId,
+          checkoutCorrelationId: correlation.id,
+          providerSubscriptionId: input.webhook.subscriptionId,
+          providerOrderId: input.webhook.orderId,
+          eventType: input.webhook.eventName,
+          payloadDigest: input.webhook.payloadDigest,
+          signatureVerified: true,
+          occurredAt: eventOccurredAt,
+          recordedAt: input.recordedAt,
+          lastErrorCode: FOUNDER_COMMERCE_WEBHOOK_INTAKE_PENDING_CODE,
+        })
+        .onConflictDoNothing({ target: founderCommerceEvents.providerEventId })
+        .returning();
+      if (createdReceipt) {
+        return { receipt: createdReceipt, userId: correlation.userId, duplicate: false };
+      }
+      const [conflictingReceipt] = await tx
+        .select()
+        .from(founderCommerceEvents)
+        .where(eq(founderCommerceEvents.providerEventId, input.webhook.derivedDeliveryKey))
+        .limit(1);
+      if (!conflictingReceipt) throw new Error("Commerce event intake could not be recorded.");
+      assertSameReceipt(conflictingReceipt, input.webhook);
+      return { receipt: conflictingReceipt, userId: conflictingReceipt.userId, duplicate: true };
+    });
+    if (intake.receipt.lastErrorCode !== FOUNDER_COMMERCE_WEBHOOK_INTAKE_PENDING_CODE) {
+      const [correlation] = await connection.db
+        .select({ status: founderCheckoutCorrelations.status })
+        .from(founderCheckoutCorrelations)
+        .where(eq(founderCheckoutCorrelations.id, intake.receipt.checkoutCorrelationId))
+        .limit(1);
+      return {
+        receiptId: intake.receipt.id,
+        userId: intake.userId,
+        terminal: correlation?.status === "closed" || correlation?.status === "refund_pending",
+        duplicate: true,
+      };
+    }
+
+    return await connection.db.transaction(async (tx) => {
+      await lockFounderProductContractLifecycleInTransaction(tx, intake.userId);
+      const [lockedReceipt] = await tx
+        .select()
+        .from(founderCommerceEvents)
+        .where(eq(founderCommerceEvents.id, intake.receipt.id))
+        .limit(1)
+        .for("update");
+      if (!lockedReceipt) throw new Error("Commerce event intake disappeared.");
+      assertSameReceipt(lockedReceipt, input.webhook);
       const [locked] = await tx
         .select()
         .from(founderCheckoutCorrelations)
-        .where(eq(founderCheckoutCorrelations.id, correlation.id))
+        .where(eq(founderCheckoutCorrelations.id, lockedReceipt.checkoutCorrelationId))
         .limit(1)
         .for("update");
       if (!locked) throw new Error("Checkout Correlation was not found.");
+      if (lockedReceipt.lastErrorCode !== FOUNDER_COMMERCE_WEBHOOK_INTAKE_PENDING_CODE) {
+        return {
+          receiptId: lockedReceipt.id,
+          userId: lockedReceipt.userId,
+          terminal: locked.status === "closed" || locked.status === "refund_pending",
+          duplicate: true,
+        };
+      }
+      const closureFence = await getFounderAccountClosureCommerceFenceInTransaction(
+        tx,
+        locked.userId,
+      );
       const eventOccurredAt = new Date(input.webhook.occurredAt);
+      const closureSubscriptionKnown = closureFence
+        ? await isFounderAccountClosureSubscriptionInTransaction(
+            tx,
+            closureFence.requestId,
+            input.webhook.subscriptionId,
+          )
+        : false;
+      if (closureFence && !closureSubscriptionKnown) {
+        if (
+          locked.status !== "pending" &&
+          locked.status !== "consumed" &&
+          locked.status !== "refund_pending" &&
+          !(locked.status === "closed" && locked.closureReason === "account_closure")
+        ) {
+          throw new Error("Account Closure rejects unrelated commerce evidence.");
+        }
+        if (locked.status === "pending" || locked.status === "closed") {
+          await tx
+            .update(founderCheckoutCorrelations)
+            .set({
+              status: "closed",
+              providerSubscriptionId: input.webhook.subscriptionId,
+              providerOrderId: input.webhook.orderId,
+              consumedAt: input.recordedAt,
+              paymentDetectedAt: eventOccurredAt,
+              reconciliationDueAt: new Date(eventOccurredAt.valueOf() + 60 * 60 * 1_000),
+              closedAt: locked.closedAt ?? input.recordedAt,
+              closureReason: "account_closure",
+            })
+            .where(eq(founderCheckoutCorrelations.id, locked.id));
+        }
+        await tx
+          .insert(operatorDeletionCommerceCancellations)
+          .values({
+            requestId: closureFence.requestId,
+            operatorId: closureFence.operatorId,
+            provider: "lemon_squeezy",
+            providerSubscriptionId: input.webhook.subscriptionId,
+            createdAt: input.recordedAt,
+            updatedAt: input.recordedAt,
+          })
+          .onConflictDoNothing({
+            target: [
+              operatorDeletionCommerceCancellations.requestId,
+              operatorDeletionCommerceCancellations.providerSubscriptionId,
+            ],
+          });
+        await tx
+          .update(founderCommerceEvents)
+          .set({
+            applicationStatus: "ignored",
+            lastAttemptAt: input.recordedAt,
+            appliedAt: input.recordedAt,
+            lastErrorCode: null,
+          })
+          .where(eq(founderCommerceEvents.id, lockedReceipt.id));
+        return {
+          receiptId: lockedReceipt.id,
+          userId: locked.userId,
+          terminal: true,
+          duplicate: intake.duplicate,
+        };
+      }
       if (locked.status === "pending") {
         if (!input.webhook.checkoutCorrelation || eventOccurredAt > locked.expiresAt) {
           throw new Error("Checkout Correlation was not valid when payment occurred.");
@@ -383,27 +516,15 @@ export async function recordFounderCommerceWebhook(input: {
       ) {
         throw new Error("Commerce identity does not match its Checkout Correlation.");
       }
-      const [receipt] = await tx
-        .insert(founderCommerceEvents)
-        .values({
-          providerEventId: input.webhook.derivedDeliveryKey,
-          userId: locked.userId,
-          checkoutCorrelationId: locked.id,
-          providerSubscriptionId: input.webhook.subscriptionId,
-          providerOrderId: input.webhook.orderId,
-          eventType: input.webhook.eventName,
-          payloadDigest: input.webhook.payloadDigest,
-          signatureVerified: true,
-          occurredAt: eventOccurredAt,
-          recordedAt: input.recordedAt,
-        })
-        .returning({ id: founderCommerceEvents.id });
-      if (!receipt) throw new Error("Commerce event receipt could not be recorded.");
+      await tx
+        .update(founderCommerceEvents)
+        .set({ lastErrorCode: null })
+        .where(eq(founderCommerceEvents.id, lockedReceipt.id));
       return {
-        receiptId: receipt.id,
+        receiptId: lockedReceipt.id,
         userId: locked.userId,
         terminal: locked.status === "closed" || locked.status === "refund_pending",
-        duplicate: false,
+        duplicate: intake.duplicate,
       };
     });
   } finally {
@@ -427,6 +548,9 @@ export async function reconcileFounderCommerceReceipt(input: {
       .limit(1);
     if (!receipt) throw new Error("Commerce event receipt was not found.");
     if (receipt.applicationStatus !== "pending") return "ignored";
+    if (receipt.lastErrorCode === FOUNDER_COMMERCE_WEBHOOK_INTAKE_PENDING_CODE) {
+      return "confirming_payment";
+    }
 
     let subscription: ReconciledLemonSqueezySubscription;
     let order: ReconciledLemonSqueezyOrder;
@@ -465,7 +589,29 @@ export async function reconcileFounderCommerceReceipt(input: {
         .for("update");
       if (!lockedReceipt || !correlation) throw new Error("Commerce authority disappeared.");
       if (lockedReceipt.applicationStatus !== "pending") return "ignored";
-      if (correlation.status === "closed" || correlation.status === "refund_pending") {
+      const closureFence = await getFounderAccountClosureCommerceFenceInTransaction(
+        tx,
+        receipt.userId,
+      );
+      const closureSubscriptionKnown = closureFence
+        ? await isFounderAccountClosureSubscriptionInTransaction(
+            tx,
+            closureFence.requestId,
+            receipt.providerSubscriptionId,
+          )
+        : false;
+      const closureCancellation = Boolean(
+        closureFence && closureSubscriptionKnown && subscription.status === "cancelled",
+      );
+      if (closureFence && !closureCancellation) {
+        await markReceipt(tx, lockedReceipt.id, "ignored", input.now);
+        return "ignored";
+      }
+      if (
+        !closureCancellation &&
+        (correlation.status === "refund_pending" ||
+          (correlation.status === "closed" && correlation.closureReason !== "account_closure"))
+      ) {
         await markReceipt(tx, lockedReceipt.id, "ignored", input.now);
         return "ignored";
       }
@@ -513,6 +659,7 @@ export async function reconcileFounderCommerceReceipt(input: {
         : [];
       if (current && !currentAuthority) throw new Error("Current commerce authority disappeared.");
       if (
+        !closureCancellation &&
         currentAuthority &&
         currentAuthority.checkoutCorrelationId !== correlation.id &&
         currentAuthority.generation >= correlation.generation
@@ -521,6 +668,7 @@ export async function reconcileFounderCommerceReceipt(input: {
         return "ignored";
       }
       if (
+        !closureFence &&
         correlation.reconciliationDueAt &&
         correlation.reconciliationDueAt <= input.now &&
         currentAuthority?.checkoutCorrelationId !== correlation.id
@@ -641,6 +789,17 @@ export async function reconcileFounderCommerceReceipt(input: {
         occurredAt: providerStateUpdatedAt,
         createdAt: input.now,
       });
+      if (providerStatus !== "cancelled" && subscription.status === "cancelled") {
+        await recordFounderCommerceLifecycleDecisionReceiptInTransaction(tx, {
+          userId: receipt.userId,
+          sourceEventId: receipt.id,
+          providerSubscriptionId: subscription.subscriptionId,
+          providerStatus: "cancelled",
+          effectiveAt: subscription.endsAt ? new Date(subscription.endsAt) : providerStateUpdatedAt,
+          occurredAt: providerStateUpdatedAt,
+          createdAt: input.now,
+        });
+      }
       await applyWorkPause(tx, receipt.userId, policy.stopNewWork, providerStatus, input.now);
       await markReceipt(tx, lockedReceipt.id, "applied", input.now);
       return "applied";

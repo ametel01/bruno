@@ -1,0 +1,4 @@
+ALTER TABLE "founder_checkout_correlations" DROP CONSTRAINT "founder_checkout_correlations_closed_check";--> statement-breakpoint
+DROP INDEX "operator_deletion_commerce_cancellations_request_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "operator_deletion_commerce_cancellations_request_subscription_idx" ON "operator_deletion_commerce_cancellations" USING btree ("request_id","provider_subscription_id");--> statement-breakpoint
+ALTER TABLE "founder_checkout_correlations" ADD CONSTRAINT "founder_checkout_correlations_closed_check" CHECK ("founder_checkout_correlations"."status" <> 'closed' OR ("founder_checkout_correlations"."closure_reason" IN ('payment_without_access_refunded', 'payment_without_access_refunded_superseded') AND "founder_checkout_correlations"."refunded_at" IS NOT NULL) OR ("founder_checkout_correlations"."closure_reason" = 'account_closure' AND "founder_checkout_correlations"."refunded_at" IS NULL));

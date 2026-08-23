@@ -49,6 +49,46 @@ describe("persisted Founder Product Entitlement policy", () => {
     await connection.close();
   });
 
+  it("persists the provider identity on a consumed contract Checkout Correlation", async () => {
+    const occurredAt = "2026-08-21T08:01:00.000Z";
+    await reconcile(event("active", occurredAt));
+
+    const [correlation] = await connection.db.select().from(founderCheckoutCorrelations);
+    expect(correlation).toMatchObject({
+      status: "consumed",
+      providerSubscriptionId: SUBSCRIPTION_ID,
+      providerOrderId: `order-${SUBSCRIPTION_ID}`,
+      consumedAt: new Date(occurredAt),
+      paymentDetectedAt: new Date(occurredAt),
+      reconciliationDueAt: new Date("2026-08-21T09:01:00.000Z"),
+    });
+  });
+
+  it("accepts a delayed signed payment that occurred before the Checkout Correlation expired", async () => {
+    const occurredAt = "2026-08-21T09:59:59.999Z";
+    const processedAt = new Date("2026-08-21T10:05:00.000Z");
+
+    await reconcile(event("active", occurredAt), processedAt);
+
+    const [correlation] = await connection.db.select().from(founderCheckoutCorrelations);
+    expect(correlation).toMatchObject({
+      status: "consumed",
+      consumedAt: processedAt,
+      paymentDetectedAt: new Date(occurredAt),
+    });
+  });
+
+  it("rejects a signed payment whose occurrence was after the Checkout Correlation expired", async () => {
+    const occurredAt = "2026-08-21T10:00:00.001Z";
+
+    await expect(
+      reconcile(event("active", occurredAt), new Date("2026-08-21T09:59:00.000Z")),
+    ).rejects.toThrow("A pending Owner-bound Checkout Correlation is required.");
+
+    const [correlation] = await connection.db.select().from(founderCheckoutCorrelations);
+    expect(correlation).toMatchObject({ status: "pending" });
+  });
+
   it.each([
     "unpaid",
     "refunded",
@@ -129,11 +169,14 @@ describe("persisted Founder Product Entitlement policy", () => {
     ).rejects.toMatchObject({ code: "external_action_paused", status: 409 });
   });
 
-  async function reconcile(commerceEvent: FounderCommerceEvent): Promise<void> {
+  async function reconcile(
+    commerceEvent: FounderCommerceEvent,
+    processedAt = new Date(commerceEvent.occurredAt),
+  ): Promise<void> {
     await connection.db.transaction((tx) =>
       reconcileFounderCommerceEvent(
         tx,
-        { userId: USER_ID, now: new Date(commerceEvent.occurredAt), commerceEvent },
+        { userId: USER_ID, now: processedAt, commerceEvent },
         {
           commerceWebhookSecret: SECRET,
           providers: { readSubscription: async () => ({ status: providerStatus }) },

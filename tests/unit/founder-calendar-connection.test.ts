@@ -231,6 +231,79 @@ describe("Founder Google Calendar connection application seam", () => {
     expect(row?.revokedAt).toBeNull();
   });
 
+  it("retains encrypted revocation authority only for a coordinated retry", async () => {
+    const adapter = calendarAdapter({ providerRevoked: false });
+    await connect(adapter);
+    await disconnectFounderGoogleCalendarForUser(OWNER_ID, {
+      createConnection: () => connection,
+      adapter,
+      keyring: KEYRING,
+      now: () => NOW,
+      preserveCredentialsOnUnconfirmedRevocation: true,
+    });
+    const [unconfirmed] = await connection.db.select().from(operatorCalendarConnections);
+    expect(unconfirmed).toEqual(
+      expect.objectContaining({
+        status: "disconnected",
+        authorizationState: "revocation_unconfirmed",
+        accessTokenCiphertext: expect.any(String),
+        refreshTokenCiphertext: expect.any(String),
+      }),
+    );
+
+    adapter.providerRevoked = true;
+    await disconnectFounderGoogleCalendarForUser(OWNER_ID, {
+      createConnection: () => connection,
+      adapter,
+      keyring: KEYRING,
+      now: () => new Date(NOW.valueOf() + 60_000),
+      preserveCredentialsOnUnconfirmedRevocation: true,
+    });
+    const [confirmed] = await connection.db.select().from(operatorCalendarConnections);
+    expect(confirmed).toEqual(
+      expect.objectContaining({
+        authorizationState: "revoked",
+        accessTokenCiphertext: null,
+        refreshTokenCiphertext: null,
+      }),
+    );
+  });
+
+  it("keeps a confirmed revocation terminal when Account Closure resumes after a crash", async () => {
+    const adapter = calendarAdapter();
+    adapter.revokeAuthorization = vi.fn(adapter.revokeAuthorization);
+    await connect(adapter);
+    const confirmed = await disconnectFounderGoogleCalendarForUser(OWNER_ID, {
+      createConnection: () => connection,
+      adapter,
+      keyring: KEYRING,
+      now: () => NOW,
+      preserveCredentialsOnUnconfirmedRevocation: true,
+    });
+    expect(confirmed).toMatchObject({ status: "disconnected", recoveryMessage: null });
+    expect(adapter.revokeAuthorization).toHaveBeenCalledTimes(1);
+
+    adapter.providerRevoked = false;
+    const resumed = await disconnectFounderGoogleCalendarForUser(OWNER_ID, {
+      createConnection: () => connection,
+      adapter,
+      keyring: KEYRING,
+      now: () => new Date(NOW.valueOf() + 60 * 60 * 1000),
+      preserveCredentialsOnUnconfirmedRevocation: true,
+    });
+
+    expect(adapter.revokeAuthorization).toHaveBeenCalledTimes(1);
+    expect(resumed).toMatchObject({ status: "disconnected", recoveryMessage: null });
+    const [persisted] = await connection.db.select().from(operatorCalendarConnections);
+    expect(persisted).toEqual(
+      expect.objectContaining({
+        authorizationState: "revoked",
+        accessTokenCiphertext: null,
+        refreshTokenCiphertext: null,
+      }),
+    );
+  });
+
   async function connect(adapter: CalendarAdapter): Promise<CalendarDto> {
     const started = await startFounderGoogleCalendarAuthorizationForUser(OWNER_ID, {
       createConnection: () => connection,
@@ -266,7 +339,10 @@ describe("Founder Google Calendar connection application seam", () => {
   }
 });
 
-type CalendarAdapter = FounderGoogleCalendarAdapter & { calendars: CalendarResource[] };
+type CalendarAdapter = FounderGoogleCalendarAdapter & {
+  calendars: CalendarResource[];
+  providerRevoked: boolean;
+};
 type CalendarResource = {
   providerResourceId: string;
   summary: string;
@@ -279,6 +355,7 @@ type CalendarDto = Awaited<ReturnType<typeof completeFounderGoogleCalendarAuthor
 function calendarAdapter(input: { providerRevoked?: boolean } = {}): CalendarAdapter {
   let adapter: CalendarAdapter;
   adapter = {
+    providerRevoked: input.providerRevoked ?? true,
     calendars: [
       {
         providerResourceId: "primary",
@@ -323,7 +400,7 @@ function calendarAdapter(input: { providerRevoked?: boolean } = {}): CalendarAda
       refreshToken: "refresh-token",
       tokenExpiresAt: new Date("2026-08-19T02:00:00.000Z"),
     }),
-    revokeAuthorization: async () => ({ providerRevoked: input.providerRevoked ?? true }),
+    revokeAuthorization: async () => ({ providerRevoked: adapter.providerRevoked }),
   } as CalendarAdapter;
   return adapter;
 }

@@ -1,5 +1,5 @@
-import { createHash, createHmac, randomUUID } from "node:crypto";
-import { expect } from "@playwright/test";
+import { createCipheriv, createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { expect, type APIRequestContext } from "@playwright/test";
 import postgres from "postgres";
 import type { FounderProductContractClock } from "@/src/testing/founder-product-contract";
 
@@ -231,10 +231,135 @@ export async function prepareFounderExternalBetaBrowserFixture(
   return { accessExpiresAt, retirementDueAt };
 }
 
+export function founderContractIdentityHeaders(subject: string): Record<string, string> {
+  const runId = requiredContractEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID");
+  const sourceRevision = requiredContractEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION");
+  const signingSecret = requiredContractEnvironment(
+    "BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET",
+  );
+  const issuedAt = new Date();
+  const expiresAt = new Date(issuedAt.valueOf() + 5 * 60 * 1_000);
+  const payload = `${runId}\n${sourceRevision}\n${subject}\n${issuedAt.toISOString()}\n${expiresAt.toISOString()}`;
+  return {
+    "x-bruno-founder-contract-clerk-subject": subject,
+    "x-bruno-founder-contract-issued-at": issuedAt.toISOString(),
+    "x-bruno-founder-contract-expires-at": expiresAt.toISOString(),
+    "x-bruno-founder-contract-clerk-signature": createHmac("sha256", signingSecret)
+      .update(payload)
+      .digest("hex"),
+  };
+}
+
+export async function sendFounderIdentityLossWebhook(
+  request: APIRequestContext,
+  input: { subject: string; eventId: string },
+): Promise<void> {
+  const signingSecret = requiredContractEnvironment("CLERK_WEBHOOK_SIGNING_SECRET");
+  if (!signingSecret.startsWith("whsec_")) throw new Error("Clerk webhook secret is invalid.");
+  const key = Buffer.from(signingSecret.slice("whsec_".length), "base64");
+  const body = JSON.stringify({ type: "user.deleted", data: { id: input.subject } });
+  const timestamp = Math.floor(Date.now() / 1_000).toString();
+  const signature = `v1,${createHmac("sha256", key)
+    .update(`${input.eventId}.${timestamp}.${body}`)
+    .digest("base64")}`;
+  const response = await request.post("/api/webhooks/clerk", {
+    data: body,
+    headers: {
+      "content-type": "application/json",
+      "svix-id": input.eventId,
+      "svix-timestamp": timestamp,
+      "svix-signature": signature,
+    },
+  });
+  expect(response.status()).toBe(202);
+}
+
+export async function prepareFounderIdentityRecoveryBrowserPreconditions(
+  fixture: FounderProductContractFixture,
+  input: { runId: string; providerRunId: string; now: Date },
+): Promise<void> {
+  const occurredAt = input.now.toISOString();
+  const digest = (value: string) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
+
+  await withFounderProductContractDatabase(async (sql) => {
+    const [correlation] = await sql<
+      { id: string }[]
+    >`select id from founder_checkout_correlations where user_id = ${fixture.userId} order by created_at desc limit 1`;
+    if (!correlation) throw new Error("Browser commerce correlation is unavailable.");
+    const [event] = await sql<
+      { id: string }[]
+    >`insert into founder_commerce_events (provider_event_id, user_id, checkout_correlation_id, provider_subscription_id, provider_order_id, event_type, payload_digest, signature_verified, occurred_at, recorded_at, application_status, last_attempt_at, applied_at) values (${`browser:${input.runId}:subscription-active`}, ${fixture.userId}, ${correlation.id}, ${`${input.providerRunId}:subscription`}, ${`order-${input.providerRunId}:subscription`}, 'subscription_active', ${digest(`browser-commerce:${input.runId}`)}, true, ${occurredAt}, ${occurredAt}, 'applied', ${occurredAt}, ${occurredAt}) returning id`;
+    if (!event) throw new Error("Browser commerce event was not persisted.");
+    await sql`update founder_checkout_correlations set status = 'consumed', provider_subscription_id = ${`${input.providerRunId}:subscription`}, provider_order_id = ${`order-${input.providerRunId}:subscription`}, consumed_at = ${occurredAt}, payment_detected_at = ${occurredAt}, reconciliation_due_at = ${new Date(input.now.valueOf() + 60 * 60 * 1_000).toISOString()} where id = ${correlation.id} and status = 'pending'`;
+    await sql`insert into founder_product_entitlements (user_id, source_event_id, provider_subscription_id, status, reconciled_provider_status, provider_state_updated_at, reconciled_at, updated_at) values (${fixture.userId}, ${event.id}, ${`${input.providerRunId}:subscription`}, 'verified', 'active', ${occurredAt}, ${occurredAt}, ${occurredAt})`;
+  });
+  await prepareFounderRevocableConnections(fixture, {
+    runId: input.providerRunId,
+    now: input.now,
+  });
+}
+
+export async function prepareFounderRevocableConnections(
+  fixture: FounderProductContractFixture,
+  input: { runId: string; now: Date },
+): Promise<void> {
+  const access = encryptFounderContractConnectionSecret(
+    `founder-contract-google:${input.runId}:${fixture.userId}:calendar:access`,
+    "google-calendar-access",
+  );
+  const refresh = encryptFounderContractConnectionSecret(
+    `founder-contract-google:${input.runId}:${fixture.userId}:calendar:refresh`,
+    "google-calendar-refresh",
+  );
+  const mailAccess = encryptFounderContractConnectionSecret(
+    `founder-contract-google:${input.runId}:${fixture.userId}:mail:access`,
+    "google-mail-access",
+  );
+  const mailRefresh = encryptFounderContractConnectionSecret(
+    `founder-contract-google:${input.runId}:${fixture.userId}:mail:refresh`,
+    "google-mail-refresh",
+  );
+  const connectionId = randomUUID();
+  const at = input.now.toISOString();
+  await withFounderProductContractDatabase(async (sql) => {
+    await sql`insert into operator_calendar_connections (id, operator_id, provider, provider_subject_id, account_label, status, authorization_state, access_token_ciphertext, access_token_iv, access_token_auth_tag, refresh_token_ciphertext, refresh_token_iv, refresh_token_auth_tag, secret_key_version, authorized_at, last_verified_at, last_evidence_at, last_evidence_count, evidence_state, created_at, updated_at) values (${connectionId}, ${fixture.operatorId}, 'google_calendar', ${`google-${fixture.userId}`}, 'founder@example.com', 'ready', 'authorized', ${access.ciphertext}, ${access.iv}, ${access.authTag}, ${refresh.ciphertext}, ${refresh.iv}, ${refresh.authTag}, ${access.keyVersion}, ${at}, ${at}, ${at}, 0, 'current', ${at}, ${at}) on conflict (operator_id, provider) do update set status = excluded.status, authorization_state = excluded.authorization_state, access_token_ciphertext = excluded.access_token_ciphertext, access_token_iv = excluded.access_token_iv, access_token_auth_tag = excluded.access_token_auth_tag, refresh_token_ciphertext = excluded.refresh_token_ciphertext, refresh_token_iv = excluded.refresh_token_iv, refresh_token_auth_tag = excluded.refresh_token_auth_tag, secret_key_version = excluded.secret_key_version, authorized_at = excluded.authorized_at, last_verified_at = excluded.last_verified_at, last_evidence_at = excluded.last_evidence_at, last_evidence_count = excluded.last_evidence_count, evidence_state = excluded.evidence_state, disconnected_at = null, failure_code = null, recovery_message = null, updated_at = excluded.updated_at`;
+    await sql`update operator_mail_connections set status = 'ready', authorization_state = 'authorized', access_token_ciphertext = ${mailAccess.ciphertext}, access_token_iv = ${mailAccess.iv}, access_token_auth_tag = ${mailAccess.authTag}, refresh_token_ciphertext = ${mailRefresh.ciphertext}, refresh_token_iv = ${mailRefresh.iv}, refresh_token_auth_tag = ${mailRefresh.authTag}, secret_key_version = ${mailAccess.keyVersion}, authorized_at = ${at}, last_verified_at = ${at}, last_evidence_at = ${at}, last_evidence_count = 0, evidence_state = 'current', disconnected_at = null, failure_code = null, recovery_message = null, updated_at = ${at} where operator_id = ${fixture.operatorId} and provider = 'google_gmail'`;
+  });
+}
+
+function encryptFounderContractConnectionSecret(value: string, scope: string) {
+  const keyVersion = requiredContractEnvironment("BRUNO_CONNECTION_SECRET_ACTIVE_KEY_VERSION");
+  const serializedKeys = requiredContractEnvironment("BRUNO_CONNECTION_SECRET_KEYS_JSON");
+  const keys = JSON.parse(serializedKeys) as Record<string, unknown>;
+  const encodedKey = keys[keyVersion];
+  if (typeof encodedKey !== "string") {
+    throw new Error("Founder Product Contract connection key is unavailable.");
+  }
+  const key = Buffer.from(encodedKey, "base64url");
+  if (key.length !== 32) throw new Error("Founder Product Contract connection key is invalid.");
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(`bruno.operator.connection.${scope}.${keyVersion}`, "utf8"));
+  const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  return {
+    ciphertext: ciphertext.toString("base64url"),
+    iv: iv.toString("base64url"),
+    authTag: cipher.getAuthTag().toString("base64url"),
+    keyVersion,
+  };
+}
+
+function requiredContractEnvironment(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required for Founder Product Contract browser proof.`);
+  return value;
+}
+
 export async function deleteFounderProductContractFixture(
   fixture: FounderProductContractFixture,
   options: { retainScenarioExecutions?: boolean } = {},
 ): Promise<void> {
+  assertFounderProductContractCleanupBoundary();
   await withFounderProductContractDatabase(async (sql) => {
     const allUserIds = [
       fixture.userId,
@@ -276,6 +401,15 @@ export async function deleteFounderProductContractFixture(
     if (!options.retainScenarioExecutions) {
       await sql`delete from founder_product_contract_scenario_executions where user_id = ${fixture.userId}`;
     }
+    await sql`delete from founder_identity_recovery_receipts where user_id = any(${allUserIds})`;
+    await sql`delete from founder_identity_recoveries where user_id = any(${allUserIds})`;
+    await sql`delete from founder_identity_recovery_credentials where user_id = any(${allUserIds})`;
+    await sql`delete from operator_deletion_receipts where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_deletion_commerce_cancellations where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_deletion_revocations where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_deletion_backup_expiries where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_deletion_tombstones where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_deletion_requests where operator_id = any(${allOperatorIds})`;
     await sql`delete from founder_operator_restorations where user_id = any(${allUserIds})`;
     await sql`delete from founder_external_beta_recordings where participant_user_id = any(${allUserIds})`;
     await sql`delete from founder_external_beta_measurements where participant_user_id = any(${allUserIds})`;
@@ -283,7 +417,11 @@ export async function deleteFounderProductContractFixture(
     await sql`delete from founder_external_beta_invitations where cohort_owner_user_id = ${fixture.externalBetaOwnerUserId} or participant_user_id = any(${[fixture.userId, fixture.externalBetaParticipantUserId]})`;
     await sql`delete from founder_general_release_activations where user_id = any(${allUserIds})`;
     await sql`delete from founder_product_entitlements where user_id = any(${allUserIds})`;
-    await sql`delete from founder_commerce_lifecycle_receipts where user_id = any(${allUserIds})`;
+    await sql.begin(async (transaction) => {
+      await transaction`alter table founder_commerce_lifecycle_receipts disable trigger founder_commerce_lifecycle_receipts_immutable_delete`;
+      await transaction`delete from founder_commerce_lifecycle_receipts where user_id = any(${allUserIds})`;
+      await transaction`alter table founder_commerce_lifecycle_receipts enable trigger founder_commerce_lifecycle_receipts_immutable_delete`;
+    });
     await sql`delete from founder_infrastructure_retirements where user_id = any(${allUserIds})`;
     await sql`delete from founder_commerce_events where user_id = any(${allUserIds})`;
     await sql`delete from founder_checkout_correlations where user_id = any(${allUserIds})`;
@@ -326,6 +464,8 @@ export async function deleteFounderProductContractFixture(
     await sql`delete from operator_relationship_candidates where operator_id = any(${allOperatorIds})`;
     await sql`delete from operator_relationship_records where operator_id = any(${allOperatorIds})`;
     await sql`delete from operator_founder_data_exports where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_mail_resources where connection_id = any(${mailConnectionIds})`;
+    await sql`delete from operator_calendar_resources where connection_id = any(${calendarConnectionIds})`;
     await sql`delete from operator_mail_connections where operator_id = any(${allOperatorIds})`;
     await sql`delete from operator_calendar_connections where operator_id = any(${allOperatorIds})`;
     await sql`delete from operator_ai_connections where operator_id = any(${allOperatorIds})`;
@@ -356,6 +496,8 @@ export async function deleteFounderProductContractFixture(
       union all select 'operator_relationship_candidates', count(*)::integer from operator_relationship_candidates where operator_id = any(${allOperatorIds})
       union all select 'operator_relationship_records', count(*)::integer from operator_relationship_records where operator_id = any(${allOperatorIds})
       union all select 'operator_founder_data_exports', count(*)::integer from operator_founder_data_exports where operator_id = any(${allOperatorIds})
+      union all select 'operator_calendar_resources', count(*)::integer from operator_calendar_resources where connection_id = any(${calendarConnectionIds})
+      union all select 'operator_mail_resources', count(*)::integer from operator_mail_resources where connection_id = any(${mailConnectionIds})
       union all select 'operator_ai_connections', count(*)::integer from operator_ai_connections where id = any(${aiConnectionIds})
       union all select 'operator_calendar_connections', count(*)::integer from operator_calendar_connections where id = any(${calendarConnectionIds})
       union all select 'operator_mail_connections', count(*)::integer from operator_mail_connections where id = any(${mailConnectionIds})
@@ -366,6 +508,15 @@ export async function deleteFounderProductContractFixture(
       union all select 'runner_provisioning_events', count(*)::integer from runner_provisioning_events where runner_id = any(${runnerIds})
       union all select 'runners', count(*)::integer from runners where id = any(${runnerIds})
       union all select 'founder_operator_restorations', count(*)::integer from founder_operator_restorations where user_id = any(${allUserIds})
+      union all select 'founder_identity_recovery_receipts', count(*)::integer from founder_identity_recovery_receipts where user_id = any(${allUserIds})
+      union all select 'founder_identity_recoveries', count(*)::integer from founder_identity_recoveries where user_id = any(${allUserIds})
+      union all select 'founder_identity_recovery_credentials', count(*)::integer from founder_identity_recovery_credentials where user_id = any(${allUserIds})
+      union all select 'operator_deletion_receipts', count(*)::integer from operator_deletion_receipts where operator_id = any(${allOperatorIds})
+      union all select 'operator_deletion_commerce_cancellations', count(*)::integer from operator_deletion_commerce_cancellations where operator_id = any(${allOperatorIds})
+      union all select 'operator_deletion_revocations', count(*)::integer from operator_deletion_revocations where operator_id = any(${allOperatorIds})
+      union all select 'operator_deletion_backup_expiries', count(*)::integer from operator_deletion_backup_expiries where operator_id = any(${allOperatorIds})
+      union all select 'operator_deletion_tombstones', count(*)::integer from operator_deletion_tombstones where operator_id = any(${allOperatorIds})
+      union all select 'operator_deletion_requests', count(*)::integer from operator_deletion_requests where operator_id = any(${allOperatorIds})
       union all select 'founder_external_beta_recordings', count(*)::integer from founder_external_beta_recordings where participant_user_id = any(${allUserIds})
       union all select 'founder_external_beta_measurements', count(*)::integer from founder_external_beta_measurements where participant_user_id = any(${allUserIds})
       union all select 'founder_external_beta_consent_receipts', count(*)::integer from founder_external_beta_consent_receipts where participant_user_id = any(${allUserIds})
@@ -385,6 +536,20 @@ export async function deleteFounderProductContractFixture(
     ) cleanup where remaining <> 0`;
     expect(remainingRows, "Founder Product Contract teardown left fixture-owned rows.").toEqual([]);
   });
+}
+
+function assertFounderProductContractCleanupBoundary(): void {
+  const databaseUrl = process.env.DATABASE_URL;
+  const parsed = databaseUrl ? new URL(databaseUrl) : null;
+  if (
+    process.env.BRUNO_AUTH_MODE !== "development" ||
+    process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE !== "deterministic" ||
+    !process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID ||
+    !parsed ||
+    !["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)
+  ) {
+    throw new Error("Founder Product Contract cleanup is restricted to a loopback test database.");
+  }
 }
 
 export async function assertPersistedFounderLifecycleAuthority(
@@ -414,6 +579,11 @@ export async function assertPersistedFounderLifecycleAuthority(
         restored_operator_id: string | null;
         source_operator_id: string | null;
         new_identity_distinct: boolean | null;
+        recovered_identities: number;
+        identity_receipts: number;
+        used_identity_credentials: number;
+        account_closures: number;
+        account_closure_receipts: number;
       }[]
     >`select
       (select count(*)::int from founder_release_decisions where user_id = ${fixture.userId}) as release_decisions,
@@ -436,12 +606,17 @@ export async function assertPersistedFounderLifecycleAuthority(
       (select count(*)::int from founder_operator_restorations where user_id = ${fixture.restorationSuccessUserId} and status = 'completed') as completed_restorations,
       (select restored_operator_id from founder_operator_restorations where user_id = ${fixture.restorationSuccessUserId} order by created_at desc limit 1) as restored_operator_id,
       (select source_operator_id from founder_operator_restorations where user_id = ${fixture.restorationSuccessUserId} order by created_at desc limit 1) as source_operator_id,
-      (select new_provider_resource_id <> old_provider_resource_id and new_provider_firewall_id <> old_provider_firewall_id and new_runtime_identity <> old_runtime_identity from founder_operator_restorations where user_id = ${fixture.restorationSuccessUserId} order by created_at desc limit 1) as new_identity_distinct`;
+      (select new_provider_resource_id <> old_provider_resource_id and new_provider_firewall_id <> old_provider_firewall_id and new_runtime_identity <> old_runtime_identity from founder_operator_restorations where user_id = ${fixture.restorationSuccessUserId} order by created_at desc limit 1) as new_identity_distinct,
+      (select count(*)::int from founder_identity_recoveries where user_id = ${fixture.userId} and status = 'recovered' and recovered_at is not null) as recovered_identities,
+      (select count(*)::int from founder_identity_recovery_receipts where user_id = ${fixture.userId}) as identity_receipts,
+      (select count(*)::int from founder_identity_recovery_credentials where user_id = ${fixture.userId} and used_at is not null) as used_identity_credentials,
+      (select count(*)::int from operator_deletion_requests where operator_id = ${fixture.operatorId} and kind = 'account_closure') as account_closures,
+      (select count(*)::int from operator_deletion_receipts where operator_id = ${fixture.operatorId} and stage in ('requested', 'access_stopped')) as account_closure_receipts`;
     expect(authority).toMatchObject({
       release_decisions: 3,
       release_decision_outcomes: ["enter", "hold", "resume"],
-      scenario_executions: 7,
-      commerce_events: 2,
+      scenario_executions: 8,
+      commerce_events: 3,
       terminal_entitlements: 1,
       consumed_correlations: 1,
       safe_release_decisions: 3,
@@ -459,6 +634,11 @@ export async function assertPersistedFounderLifecycleAuthority(
       restored_operator_id: fixture.restorationSuccessOperatorId,
       source_operator_id: fixture.restorationSuccessOperatorId,
       new_identity_distinct: true,
+      recovered_identities: 1,
+      identity_receipts: 3,
+      used_identity_credentials: 1,
+      account_closures: 1,
+      account_closure_receipts: 2,
     });
   });
 }

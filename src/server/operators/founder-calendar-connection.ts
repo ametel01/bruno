@@ -159,6 +159,7 @@ export type FounderCalendarConnectionDependencies = {
   env?: Record<string, string | undefined>;
   randomBytes?: (size: number) => Buffer;
   getOwnerPreviewAccess?: (userId: string, now: Date) => Promise<FounderOwnerPreviewAccess>;
+  preserveCredentialsOnUnconfirmedRevocation?: boolean;
 };
 
 export type FounderGoogleCalendarAuthorizationResult = {
@@ -839,6 +840,7 @@ export async function disconnectFounderGoogleCalendarForUser(
       selectConnectionBundle(tx, operator.id, true),
     );
     if (!current) return null;
+    if (current.connection.authorizationState === "revoked") return toDto(current);
     let accessToken: string | null = null;
     let refreshToken: string | null = null;
     try {
@@ -887,14 +889,18 @@ export async function disconnectFounderGoogleCalendarForUser(
           authorizationState: providerRevoked ? "revoked" : "revocation_unconfirmed",
           authorizationSessionHash: null,
           authorizationExpiresAt: null,
-          accessTokenCiphertext: null,
-          accessTokenIv: null,
-          accessTokenAuthTag: null,
-          refreshTokenCiphertext: null,
-          refreshTokenIv: null,
-          refreshTokenAuthTag: null,
-          secretKeyVersion: null,
-          tokenExpiresAt: null,
+          ...(providerRevoked || !dependencies.preserveCredentialsOnUnconfirmedRevocation
+            ? {
+                accessTokenCiphertext: null,
+                accessTokenIv: null,
+                accessTokenAuthTag: null,
+                refreshTokenCiphertext: null,
+                refreshTokenIv: null,
+                refreshTokenAuthTag: null,
+                secretKeyVersion: null,
+                tokenExpiresAt: null,
+              }
+            : {}),
           evidenceState: "unknown",
           lastEvidenceAt: null,
           failureCode: providerRevoked ? null : "provider_revocation_unconfirmed",

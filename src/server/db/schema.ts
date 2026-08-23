@@ -55,6 +55,18 @@ export const founderProductEntitlementStatusEnum = pgEnum("founder_product_entit
   "expired",
   "refunded",
 ]);
+export const founderIdentityRecoveryStatusEnum = pgEnum("founder_identity_recovery_status", [
+  "pending",
+  "recovered",
+]);
+export const founderIdentityRecoveryReasonEnum = pgEnum("founder_identity_recovery_reason", [
+  "clerk_user_deleted",
+  "clerk_identity_lost",
+]);
+export const founderIdentityRecoveryReceiptKindEnum = pgEnum(
+  "founder_identity_recovery_receipt_kind",
+  ["identity_loss_recorded", "recovery_denied", "identity_rebound"],
+);
 export const founderCommerceLifecycleReceiptKindEnum = pgEnum(
   "founder_commerce_lifecycle_receipt_kind",
   ["portal_issued", "cancellation", "refund"],
@@ -71,6 +83,7 @@ export const founderProductContractScenarioEnum = pgEnum("founder_product_contra
   "external_beta_cohort_lifecycle",
   "product_entitlement_lifecycle",
   "subscription_lifecycle",
+  "identity_recovery_lifecycle",
   "recovery_archive_lifecycle",
   "infrastructure_retirement",
 ]);
@@ -105,6 +118,7 @@ export const operatorDeletionRequestStatusEnum = pgEnum("operator_deletion_reque
 export const operatorDeletionStageEnum = pgEnum("operator_deletion_stage", [
   "requested",
   "access_stopped",
+  "commerce_cancellation",
   "active_purge_complete",
   "backup_expiry",
   "revocation",
@@ -114,6 +128,10 @@ export const operatorDeletionRevocationStatusEnum = pgEnum("operator_deletion_re
   "succeeded",
   "failed",
 ]);
+export const operatorDeletionCommerceCancellationStatusEnum = pgEnum(
+  "operator_deletion_commerce_cancellation_status",
+  ["pending", "succeeded", "failed"],
+);
 export const operatorDeletionBackupStatusEnum = pgEnum("operator_deletion_backup_status", [
   "pending",
   "expired",
@@ -692,6 +710,116 @@ export const users = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex("users_clerk_user_id_idx").on(table.clerkUserId)],
+);
+
+export const founderIdentityRecoveries = pgTable(
+  "founder_identity_recoveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    status: founderIdentityRecoveryStatusEnum("status").notNull().default("pending"),
+    reason: founderIdentityRecoveryReasonEnum("reason").notNull(),
+    priorClerkSubjectDigest: text("prior_clerk_subject_digest").notNull(),
+    replacementClerkSubjectDigest: text("replacement_clerk_subject_digest"),
+    providerEventId: text("provider_event_id").notNull(),
+    providerEventDigest: text("provider_event_digest").notNull(),
+    lossObservedAt: timestamp("loss_observed_at", { withTimezone: true }).notNull(),
+    recoveredAt: timestamp("recovered_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("founder_identity_recoveries_provider_event_idx").on(table.providerEventId),
+    uniqueIndex("founder_identity_recoveries_pending_user_idx")
+      .on(table.userId)
+      .where(sql`${table.status} = 'pending'`),
+    check(
+      "founder_identity_recoveries_prior_subject_digest_check",
+      sql`${table.priorClerkSubjectDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_identity_recoveries_replacement_subject_digest_check",
+      sql`${table.replacementClerkSubjectDigest} IS NULL OR ${table.replacementClerkSubjectDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_identity_recoveries_provider_event_digest_check",
+      sql`${table.providerEventDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_identity_recoveries_status_check",
+      sql`(${table.status} = 'pending' AND ${table.replacementClerkSubjectDigest} IS NULL AND ${table.recoveredAt} IS NULL) OR (${table.status} = 'recovered' AND ${table.replacementClerkSubjectDigest} IS NOT NULL AND ${table.recoveredAt} IS NOT NULL)`,
+    ),
+    index("founder_identity_recoveries_user_status_idx").on(
+      table.userId,
+      table.status,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const founderIdentityRecoveryCredentials = pgTable(
+  "founder_identity_recovery_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    credentialDigest: text("credential_digest").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("founder_identity_recovery_credentials_user_idx").on(table.userId),
+    uniqueIndex("founder_identity_recovery_credentials_digest_idx").on(table.credentialDigest),
+    check(
+      "founder_identity_recovery_credentials_digest_check",
+      sql`${table.credentialDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_identity_recovery_credentials_window_check",
+      sql`${table.expiresAt} > ${table.issuedAt}`,
+    ),
+  ],
+);
+
+export const founderIdentityRecoveryReceipts = pgTable(
+  "founder_identity_recovery_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    recoveryId: uuid("recovery_id")
+      .notNull()
+      .references(() => founderIdentityRecoveries.id, { onDelete: "restrict" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    kind: founderIdentityRecoveryReceiptKindEnum("kind").notNull(),
+    subjectDigest: text("subject_digest"),
+    evidenceDigest: text("evidence_digest").notNull(),
+    details: jsonb("details").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("founder_identity_recovery_receipts_evidence_idx").on(table.evidenceDigest),
+    check(
+      "founder_identity_recovery_receipts_subject_digest_check",
+      sql`${table.subjectDigest} IS NULL OR ${table.subjectDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_identity_recovery_receipts_evidence_digest_check",
+      sql`${table.evidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    index("founder_identity_recovery_receipts_user_occurred_idx").on(
+      table.userId,
+      table.occurredAt,
+    ),
+  ],
 );
 
 export const runners = pgTable(
@@ -1355,7 +1483,7 @@ export const founderCheckoutCorrelations = pgTable(
     ),
     check(
       "founder_checkout_correlations_consumed_check",
-      sql`(${table.status} = 'pending' AND ${table.consumedAt} IS NULL AND ${table.closedAt} IS NULL AND ${table.closureReason} IS NULL) OR (${table.status} IN ('consumed', 'refund_pending') AND ${table.consumedAt} IS NOT NULL AND ${table.closedAt} IS NULL AND ${table.closureReason} IS NULL) OR (${table.status} = 'closed' AND ${table.consumedAt} IS NOT NULL AND ${table.closedAt} IS NOT NULL AND ${table.closureReason} IS NOT NULL)`,
+      sql`(${table.status} = 'pending' AND ${table.consumedAt} IS NULL AND ${table.closedAt} IS NULL AND ${table.closureReason} IS NULL) OR (${table.status} IN ('consumed', 'refund_pending') AND ${table.consumedAt} IS NOT NULL AND ${table.closedAt} IS NULL AND ${table.closureReason} IS NULL) OR (${table.status} = 'closed' AND ${table.closedAt} IS NOT NULL AND ${table.closureReason} IS NOT NULL AND (${table.consumedAt} IS NOT NULL OR ${table.closureReason} = 'account_closure'))`,
     ),
     check(
       "founder_checkout_correlations_payment_check",
@@ -1371,7 +1499,7 @@ export const founderCheckoutCorrelations = pgTable(
     ),
     check(
       "founder_checkout_correlations_closed_check",
-      sql`${table.status} <> 'closed' OR (${table.closureReason} IN ('payment_without_access_refunded', 'payment_without_access_refunded_superseded') AND ${table.refundedAt} IS NOT NULL)`,
+      sql`${table.status} <> 'closed' OR (${table.closureReason} IN ('payment_without_access_refunded', 'payment_without_access_refunded_superseded') AND ${table.refundedAt} IS NOT NULL) OR (${table.closureReason} = 'account_closure' AND ${table.refundedAt} IS NULL)`,
     ),
     check(
       "founder_checkout_correlations_expiry_check",
@@ -3310,6 +3438,43 @@ export const operatorDeletionRevocations = pgTable(
       table.status,
       table.nextAttemptAt,
     ),
+  ],
+);
+
+export const operatorDeletionCommerceCancellations = pgTable(
+  "operator_deletion_commerce_cancellations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => operatorDeletionRequests.id, { onDelete: "restrict" }),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    providerSubscriptionId: text("provider_subscription_id").notNull(),
+    status: operatorDeletionCommerceCancellationStatusEnum("status").notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    errorCode: text("error_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("operator_deletion_commerce_cancellations_request_subscription_idx").on(
+      table.requestId,
+      table.providerSubscriptionId,
+    ),
+    check(
+      "operator_deletion_commerce_cancellations_attempt_count_check",
+      sql`${table.attemptCount} >= 0`,
+    ),
+    check(
+      "operator_deletion_commerce_cancellations_status_check",
+      sql`(${table.status} = 'pending' AND ${table.confirmedAt} IS NULL AND ${table.errorCode} IS NULL) OR (${table.status} = 'succeeded' AND ${table.confirmedAt} IS NOT NULL AND ${table.errorCode} IS NULL) OR (${table.status} = 'failed' AND ${table.confirmedAt} IS NULL AND ${table.errorCode} IS NOT NULL)`,
+    ),
+    index("operator_deletion_commerce_cancellations_status_idx").on(table.status, table.updatedAt),
   ],
 );
 

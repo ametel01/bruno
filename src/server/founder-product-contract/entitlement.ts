@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { and, eq, gt, inArray, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import {
   founderCheckoutCorrelations,
@@ -78,6 +78,7 @@ export async function reconcileFounderCommerceEvent(
       tx,
       input,
       event,
+      eventOccurredAt,
       currentEntitlement,
       currentSource,
     );
@@ -388,6 +389,7 @@ async function consumeOrVerifyCheckoutCorrelation(
   tx: Transaction,
   input: { userId: string; now: Date },
   event: FounderCommerceEvent,
+  eventOccurredAt: Date,
   currentEntitlement:
     | { sourceEventId: string; providerSubscriptionId: string; retirementDueAt: Date | null }
     | undefined,
@@ -405,7 +407,7 @@ async function consumeOrVerifyCheckoutCorrelation(
             founderProductContractDigest(event.checkoutCorrelation),
           ),
           eq(founderCheckoutCorrelations.status, "pending"),
-          gt(founderCheckoutCorrelations.expiresAt, input.now),
+          gte(founderCheckoutCorrelations.expiresAt, eventOccurredAt),
         ),
       )
       .limit(1)
@@ -413,7 +415,14 @@ async function consumeOrVerifyCheckoutCorrelation(
     if (!correlation) throw new Error("A pending Owner-bound Checkout Correlation is required.");
     await tx
       .update(founderCheckoutCorrelations)
-      .set({ status: "consumed", consumedAt: input.now })
+      .set({
+        status: "consumed",
+        providerSubscriptionId: event.subscriptionId,
+        providerOrderId: `order-${event.subscriptionId}`,
+        consumedAt: input.now,
+        paymentDetectedAt: eventOccurredAt,
+        reconciliationDueAt: new Date(eventOccurredAt.valueOf() + 60 * 60 * 1_000),
+      })
       .where(eq(founderCheckoutCorrelations.id, correlation.id));
     return correlation.id;
   }

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, lte, notExists, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, ne, notExists, or } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   founderCheckoutCorrelations,
@@ -29,6 +29,7 @@ import {
   reconcileFounderCommerceReceipt,
   recordFounderCommerceLifecycleDecisionReceiptInTransaction,
 } from "./founder-commerce";
+import { FOUNDER_COMMERCE_WEBHOOK_INTAKE_PENDING_CODE } from "./founder-account-closure-fence";
 import type { LemonSqueezyCommerceProvider } from "./lemon-squeezy-provider";
 
 const REFUND_LEASE_MILLISECONDS = 5 * 60 * 1_000;
@@ -74,7 +75,15 @@ export async function reconcileNextFounderCommerce(input: {
     const [pendingReceipt] = await connection.db
       .select({ id: founderCommerceEvents.id, userId: founderCommerceEvents.userId })
       .from(founderCommerceEvents)
-      .where(eq(founderCommerceEvents.applicationStatus, "pending"))
+      .where(
+        and(
+          eq(founderCommerceEvents.applicationStatus, "pending"),
+          or(
+            isNull(founderCommerceEvents.lastErrorCode),
+            ne(founderCommerceEvents.lastErrorCode, FOUNDER_COMMERCE_WEBHOOK_INTAKE_PENDING_CODE),
+          ),
+        ),
+      )
       .orderBy(asc(founderCommerceEvents.recordedAt))
       .limit(1);
     if (pendingReceipt) {

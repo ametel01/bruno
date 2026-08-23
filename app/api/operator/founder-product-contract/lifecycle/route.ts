@@ -1,7 +1,13 @@
+import { createHmac } from "node:crypto";
+import { eq } from "drizzle-orm";
+import type { DatabaseConnection } from "@/src/server/db/client";
+import { users } from "@/src/server/db/schema";
 import {
+  deterministicFounderContractConnectionRevoked,
   deterministicFounderLifecycleProviders,
   type FounderLifecycleFailureOperation,
 } from "@/src/server/founder-product-contract/deterministic-providers";
+import { createFounderContractIdentityHeaders } from "@/src/server/founder-product-contract/deterministic-identity";
 import {
   claimFounderProductContractScenarioExecution,
   completeFounderProductContractScenarioExecution,
@@ -12,7 +18,10 @@ import {
   executeFounderProductContractLifecycleAction,
   type FounderCommerceEvent,
   type FounderCommerceStatus,
+  type FounderLifecycleInput,
+  type FounderLifecycleOutcome,
   type FounderProductContractLifecycleAction,
+  readFounderIdentitySeparationSnapshot,
 } from "@/src/server/founder-product-contract/lifecycle";
 import {
   type FounderGeneralReleaseActivationDto,
@@ -31,6 +40,7 @@ const ACTIONS = new Set<FounderProductContractLifecycleAction>([
   "subscription_lifecycle",
   "recovery_archive_lifecycle",
   "infrastructure_retirement",
+  "identity_recovery_lifecycle",
 ]);
 const FAILURE_OPERATIONS = new Set<FounderLifecycleFailureOperation>([
   "clerk.authenticate",
@@ -130,6 +140,14 @@ export async function POST(request: Request): Promise<Response> {
   if (!commerceWebhookSecret) {
     return Response.json({ error: { code: "commerce_boundary_unavailable" } }, { status: 503 });
   }
+  const identityRecoverySigningSecret =
+    process.env.BRUNO_FOUNDER_CONTRACT_IDENTITY_RECOVERY_SIGNING_SECRET ??
+    (process.env.BRUNO_AUTH_MODE === "development"
+      ? "founder-contract-identity-recovery-signing-secret-v1"
+      : "");
+  if (!identityRecoverySigningSecret) {
+    return Response.json({ error: { code: "identity_boundary_unavailable" } }, { status: 503 });
+  }
 
   const now = new Date(body.now);
   const providers = deterministicFounderLifecycleProviders({
@@ -166,9 +184,17 @@ export async function POST(request: Request): Promise<Response> {
       {
         providers,
         commerceWebhookSecret,
+        identityRecoverySigningSecret,
         applicationRevision: identity.sourceRevision,
         generalReleaseApplication: (payload, observedAt) =>
           callGeneralReleaseApplication(applicationUser.userId, payload, observedAt),
+        identityRecoveryPublicSeam: (scenario, connection) =>
+          executeIdentityRecoveryThroughPublicSeams({
+            input: scenario,
+            connection,
+            providers,
+            baseUrl: localContractBaseUrl(request),
+          }),
       },
     );
     await completeFounderProductContractScenarioExecution({ identity: evidenceIdentity, outcome });
@@ -236,6 +262,234 @@ async function getGeneralReleaseStatusAt(
   return getFounderGeneralReleaseActivationForUser(userId, { now: () => now });
 }
 
+async function executeIdentityRecoveryThroughPublicSeams(input: {
+  input: FounderLifecycleInput;
+  connection: DatabaseConnection;
+  providers: ReturnType<typeof deterministicFounderLifecycleProviders>;
+  baseUrl: string;
+}): Promise<FounderLifecycleOutcome> {
+  const { connection, providers } = input;
+  const identity = await providers.authenticateIdentity({ userId: input.input.userId });
+  const [owner] = await connection.db
+    .select({ clerkUserId: users.clerkUserId })
+    .from(users)
+    .where(eq(users.id, input.input.userId))
+    .limit(1);
+  if (!owner?.clerkUserId || owner.clerkUserId !== identity.subject) {
+    throw new Error("The public identity journey did not start from the current internal Owner.");
+  }
+
+  const currentIdentityHeaders = createFounderContractIdentityHeaders(owner.clerkUserId);
+  const credentialResponse = await fetch(
+    new URL("/api/operator/identity-recovery", input.baseUrl),
+    { method: "POST", headers: currentIdentityHeaders },
+  );
+  if (credentialResponse.status !== 200) {
+    throw new Error(
+      `The recently reauthenticated recovery-code journey was unavailable (${credentialResponse.status}: ${await credentialResponse.text()}).`,
+    );
+  }
+  const credentialBody = (await credentialResponse.json()) as {
+    credential?: { recoveryCode?: string };
+  };
+  const recoveryCode = credentialBody.credential?.recoveryCode;
+  if (!recoveryCode) throw new Error("The public recovery-code journey returned no one-time code.");
+
+  const beforeLoss = await readFounderIdentitySeparationSnapshot(connection, input.input.userId);
+  const webhookBody = JSON.stringify({
+    type: "user.deleted",
+    data: { id: owner.clerkUserId },
+  });
+  const webhookId = `founder-contract:${input.input.runId}:clerk-user-deleted`;
+  const webhookTimestamp = Math.floor(Date.now() / 1_000).toString();
+  const webhookSigningSecret = process.env.CLERK_WEBHOOK_SIGNING_SECRET?.trim() ?? "";
+  if (!webhookSigningSecret.startsWith("whsec_")) {
+    throw new Error("The deterministic Clerk webhook authority was unavailable.");
+  }
+  const webhookKey = Buffer.from(webhookSigningSecret.slice("whsec_".length), "base64");
+  if (webhookKey.length < 32) {
+    throw new Error("The deterministic Clerk webhook authority was invalid.");
+  }
+  const webhookSignature = `v1,${createHmac("sha256", webhookKey)
+    .update(`${webhookId}.${webhookTimestamp}.${webhookBody}`)
+    .digest("base64")}`;
+  const webhookResponse = await fetch(new URL("/api/webhooks/clerk", input.baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "svix-id": webhookId,
+      "svix-timestamp": webhookTimestamp,
+      "svix-signature": webhookSignature,
+    },
+    body: webhookBody,
+  });
+  if (webhookResponse.status !== 202) {
+    throw new Error("The signature-verified Clerk webhook did not record identity loss.");
+  }
+
+  const lostAccessResponse = await fetch(new URL("/api/operator/privacy", input.baseUrl), {
+    headers: currentIdentityHeaders,
+  });
+  if (lostAccessResponse.status !== 401) {
+    throw new Error("The public Operator API did not deny the lost identity.");
+  }
+
+  const attackerClerkUserId = `clerk:attacker:${input.input.userId}`;
+  const wrongRecoveryCode = `${recoveryCode.slice(0, -1)}${recoveryCode.endsWith("x") ? "y" : "x"}`;
+  const takeoverResponse = await fetch(new URL("/api/identity-recovery", input.baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...createFounderContractIdentityHeaders(attackerClerkUserId),
+    },
+    body: JSON.stringify({ recoveryCode: wrongRecoveryCode }),
+  });
+  if (takeoverResponse.status !== 403) {
+    throw new Error("The public Identity Recovery API did not deny the attempted takeover.");
+  }
+
+  const replacementClerkUserId = `clerk:recovered:${input.input.userId}`;
+  const recoveredIdentityHeaders = createFounderContractIdentityHeaders(replacementClerkUserId);
+  const recoveredResponse = await fetch(new URL("/api/identity-recovery", input.baseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...recoveredIdentityHeaders },
+    body: JSON.stringify({ recoveryCode }),
+  });
+  if (recoveredResponse.status !== 200) {
+    throw new Error("The public Identity Recovery API did not restore the verified Owner.");
+  }
+  const recoveredBody = (await recoveredResponse.json()) as {
+    recovery?: {
+      state?: string;
+      receipts?: Array<{ kind?: string }>;
+    };
+  };
+  const receiptKinds = recoveredBody.recovery?.receipts?.map((receipt) => receipt.kind) ?? [];
+  if (
+    recoveredBody.recovery?.state !== "recovered" ||
+    receiptKinds.join(",") !== "identity_loss_recorded,recovery_denied,identity_rebound"
+  ) {
+    throw new Error("The public Identity Recovery receipt view was incomplete.");
+  }
+  const recoveredStatusResponse = await fetch(new URL("/api/identity-recovery", input.baseUrl), {
+    headers: recoveredIdentityHeaders,
+  });
+  if (recoveredStatusResponse.status !== 200) {
+    throw new Error("The recovered identity was not visible through the public status API.");
+  }
+
+  const restoredAccessResponse = await fetch(new URL("/api/operator/privacy", input.baseUrl), {
+    headers: recoveredIdentityHeaders,
+  });
+  if (restoredAccessResponse.status !== 200) {
+    throw new Error("The public Operator API did not restore the same Owner.");
+  }
+
+  const afterRecovery = await readFounderIdentitySeparationSnapshot(connection, input.input.userId);
+  if (JSON.stringify(beforeLoss) !== JSON.stringify(afterRecovery)) {
+    throw new Error(
+      "Identity Recovery changed commerce, entitlement, retirement, deletion, or archive authority.",
+    );
+  }
+
+  const closureAt = new Date(input.input.now.valueOf() + 3);
+  const closureCommerce = await providers.readSubscription({
+    subscriptionId: `${input.input.runId}:subscription`,
+  });
+  if (closureCommerce.status !== "active") {
+    throw new Error("Account Closure could not observe the active provider subscription state.");
+  }
+  const closureResponse = await fetch(new URL("/api/operator/privacy", input.baseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...recoveredIdentityHeaders },
+    body: JSON.stringify({ action: "close_account", confirmation: "CLOSE_ACCOUNT" }),
+  });
+  const closureBody = (await closureResponse.json()) as {
+    deletion?: {
+      request?: { kind?: string; status?: string };
+      stages?: Array<{ stage?: string }>;
+      revocations?: Array<{ connectionKind?: string; status?: string }>;
+      commerceCancellation?: { status?: string; refundStarted?: boolean };
+    };
+  };
+  const expectedRevocations = ["ai:openai", "calendar", "mail"] as const;
+  if (
+    closureResponse.status !== 200 ||
+    closureBody.deletion?.request?.kind !== "account_closure" ||
+    closureBody.deletion.request.status !== "access_stopped" ||
+    !closureBody.deletion.stages?.some((stage) => stage.stage === "requested") ||
+    closureBody.deletion.revocations?.length !== expectedRevocations.length ||
+    expectedRevocations.some(
+      (connectionKind) =>
+        !closureBody.deletion?.revocations?.some(
+          (revocation) =>
+            revocation.connectionKind === connectionKind && revocation.status === "succeeded",
+        ),
+    ) ||
+    closureBody.deletion.commerceCancellation?.status !== "succeeded" ||
+    closureBody.deletion.commerceCancellation.refundStarted !== false
+  ) {
+    throw new Error("Recently reauthenticated Account Closure did not coordinate destruction.");
+  }
+  const closureProviderObservation = await providers.readSubscription({
+    subscriptionId: `${input.input.runId}:subscription`,
+  });
+  if (closureProviderObservation.status !== "cancelled") {
+    throw new Error("Account Closure cancellation was not visible at the provider seam.");
+  }
+  for (const connectionKind of expectedRevocations) {
+    if (
+      !deterministicFounderContractConnectionRevoked({
+        runId: input.input.runId,
+        userId: input.input.userId,
+        connectionKind,
+      })
+    ) {
+      throw new Error(
+        `Account Closure ${connectionKind} revocation was not visible at the provider seam.`,
+      );
+    }
+  }
+  const afterClosure = await readFounderIdentitySeparationSnapshot(connection, input.input.userId);
+  if (
+    afterClosure.accountClosureRequests !== beforeLoss.accountClosureRequests + 1 ||
+    afterClosure.deletionRequests !== beforeLoss.deletionRequests + 1
+  ) {
+    throw new Error("Account Closure did not create its distinct deletion authority.");
+  }
+
+  return {
+    action: input.input.action,
+    status: "passed",
+    observedAt: input.input.now.toISOString(),
+    providerCalls: providers.calls(),
+    cleanup: {
+      resourcesBefore: 0,
+      resourcesAfter: 0,
+      verified: true,
+      observedAt: closureAt.toISOString(),
+    },
+    identityRecovery: {
+      lostIdentityDenied: true,
+      takeoverDenied: true,
+      recoveredSameOwner: true,
+      accountClosureCoordinated: true,
+      commerceChangedByIdentityLoss: false,
+      productEntitlementChangedByIdentityLoss: false,
+      refundStartedByIdentityLoss: false,
+      retirementStartedByIdentityLoss: false,
+      archiveDeletionStartedByIdentityLoss: false,
+      accountClosureStartedByIdentityLoss: false,
+      receiptKinds: [
+        "identity_loss_recorded",
+        "recovery_denied",
+        "identity_rebound",
+        "account_closure_requested",
+      ],
+    },
+  };
+}
+
 function lifecycleErrorMessage(error: unknown): string {
   if (!(error instanceof Error)) return "Lifecycle transition failed.";
   const cause = error.cause;
@@ -247,6 +501,19 @@ function deterministicBoundaryAvailable(): boolean {
     process.env.BRUNO_AUTH_MODE === "development" &&
     process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE === "deterministic"
   );
+}
+
+function localContractBaseUrl(request: Request): string {
+  const requestUrl = new URL(request.url);
+  const configuredUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? "invalid:");
+  if (!isLoopbackHostname(requestUrl.hostname) || !isLoopbackHostname(configuredUrl.hostname)) {
+    throw new Error("Founder Product Contract public HTTP boundary must remain on loopback.");
+  }
+  return requestUrl.origin;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
 function contractIdentity(): {

@@ -1,8 +1,15 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  founderCommerceEvents,
+  founderCommerceLifecycleReceipts,
   founderGeneralReleaseActivations,
+  founderInfrastructureRetirements,
+  founderProductEntitlements,
+  founderRecoveryArchiveDeletionReceipts,
   founderReleaseDecisions,
+  operatorDeletionRequests,
+  operators,
   runners,
 } from "@/src/server/db/schema";
 import { getActiveFounderAiCompatibilityPolicy } from "@/src/server/operators/founder-ai-routing";
@@ -77,7 +84,8 @@ export type FounderProductContractLifecycleAction =
   | "product_entitlement_lifecycle"
   | "subscription_lifecycle"
   | "recovery_archive_lifecycle"
-  | "infrastructure_retirement";
+  | "infrastructure_retirement"
+  | "identity_recovery_lifecycle";
 
 export type FounderCommerceEvent = {
   eventId: string;
@@ -108,6 +116,7 @@ export type FounderLifecycleProviderBoundary = FounderRecoveryArchiveProvider &
       gmailSending: true;
     }>;
     readSubscription(input: { subscriptionId: string }): Promise<{ status: FounderCommerceStatus }>;
+    cancelSubscription?(input: { subscriptionId: string }): Promise<void>;
     createCustomerPortal(input: { subscriptionId: string; now: Date }): Promise<{
       url: string;
       expiresAt: Date;
@@ -201,9 +210,27 @@ export type FounderLifecycleOutcome = {
     evidenceClassification: "product_hardening";
     founderAcceptanceEligible: false;
   };
+  identityRecovery?: {
+    lostIdentityDenied: true;
+    takeoverDenied: true;
+    recoveredSameOwner: true;
+    accountClosureCoordinated: true;
+    commerceChangedByIdentityLoss: false;
+    productEntitlementChangedByIdentityLoss: false;
+    refundStartedByIdentityLoss: false;
+    retirementStartedByIdentityLoss: false;
+    archiveDeletionStartedByIdentityLoss: false;
+    accountClosureStartedByIdentityLoss: false;
+    receiptKinds: readonly [
+      "identity_loss_recorded",
+      "recovery_denied",
+      "identity_rebound",
+      "account_closure_requested",
+    ];
+  };
 };
 
-type LifecycleInput = {
+export type LifecycleInput = {
   action: FounderProductContractLifecycleAction;
   runId: string;
   userId: string;
@@ -226,9 +253,12 @@ type LifecycleInput = {
   };
 };
 
+export type FounderLifecycleInput = LifecycleInput;
+
 type LifecycleDependencies = {
   providers: FounderLifecycleProviderBoundary;
   commerceWebhookSecret: string;
+  identityRecoverySigningSecret?: string;
   applicationRevision: string;
   providerRequestTimeoutMilliseconds?: number;
   createConnection?: () => DatabaseConnection;
@@ -247,6 +277,10 @@ type LifecycleDependencies = {
     generalRelease?: FounderGeneralReleaseActivationDto;
     error?: { code?: string; message?: string };
   }>;
+  identityRecoveryPublicSeam?: (
+    input: LifecycleInput,
+    connection: DatabaseConnection,
+  ) => Promise<FounderLifecycleOutcome>;
 };
 
 export async function executeFounderProductContractLifecycleAction(
@@ -286,6 +320,12 @@ export async function executeFounderProductContractLifecycleAction(
     }
     if (input.action === "initial_general_release_activation") {
       return await executeInitialGeneralReleaseContractScenario(input, dependencies, connection);
+    }
+    if (input.action === "identity_recovery_lifecycle") {
+      if (!dependencies.identityRecoveryPublicSeam) {
+        throw new Error("Identity Recovery public seam is unavailable.");
+      }
+      return await dependencies.identityRecoveryPublicSeam(input, connection);
     }
     const lifecycleArchiveId =
       input.action === "release_stage_admission"
@@ -454,6 +494,8 @@ export async function executeFounderProductContractLifecycleAction(
         }
         case "infrastructure_retirement":
           throw new Error("Infrastructure Retirement must use its durable execution path.");
+        case "identity_recovery_lifecycle":
+          throw new Error("Identity Recovery must use its complete recovery lifecycle path.");
       }
 
       return {
@@ -793,6 +835,82 @@ function requireReturningFounderProvider(
     throw new Error("Returning Founder restoration provider boundary is unavailable.");
   }
   return provider as FounderReturningRestorationProvider;
+}
+
+export async function readFounderIdentitySeparationSnapshot(
+  connection: DatabaseConnection,
+  userId: string,
+): Promise<{
+  commerceEvents: number;
+  refundReceipts: number;
+  entitlement: unknown;
+  retirements: number;
+  archiveDeletions: number;
+  accountClosureRequests: number;
+  deletionRequests: number;
+}> {
+  const [
+    commerceEvents,
+    refundReceipts,
+    entitlements,
+    retirements,
+    archiveDeletions,
+    deletionRequests,
+    accountClosures,
+  ] = await Promise.all([
+    connection.db
+      .select({ id: founderCommerceEvents.id })
+      .from(founderCommerceEvents)
+      .where(eq(founderCommerceEvents.userId, userId)),
+    connection.db
+      .select({ id: founderCommerceLifecycleReceipts.id })
+      .from(founderCommerceLifecycleReceipts)
+      .where(
+        and(
+          eq(founderCommerceLifecycleReceipts.userId, userId),
+          eq(founderCommerceLifecycleReceipts.kind, "refund"),
+        ),
+      ),
+    connection.db
+      .select({
+        id: founderProductEntitlements.id,
+        status: founderProductEntitlements.status,
+        providerSubscriptionId: founderProductEntitlements.providerSubscriptionId,
+        retirementDueAt: founderProductEntitlements.retirementDueAt,
+        updatedAt: founderProductEntitlements.updatedAt,
+      })
+      .from(founderProductEntitlements)
+      .where(eq(founderProductEntitlements.userId, userId)),
+    connection.db
+      .select({ id: founderInfrastructureRetirements.id })
+      .from(founderInfrastructureRetirements)
+      .where(eq(founderInfrastructureRetirements.userId, userId)),
+    connection.db
+      .select({ id: founderRecoveryArchiveDeletionReceipts.id })
+      .from(founderRecoveryArchiveDeletionReceipts)
+      .where(eq(founderRecoveryArchiveDeletionReceipts.userId, userId)),
+    connection.db
+      .select({ id: operatorDeletionRequests.id })
+      .from(operatorDeletionRequests)
+      .innerJoin(operators, eq(operators.id, operatorDeletionRequests.operatorId))
+      .where(eq(operators.userId, userId)),
+    connection.db
+      .select({ id: operatorDeletionRequests.id })
+      .from(operatorDeletionRequests)
+      .innerJoin(operators, eq(operators.id, operatorDeletionRequests.operatorId))
+      .where(
+        and(eq(operators.userId, userId), eq(operatorDeletionRequests.kind, "account_closure")),
+      ),
+  ]);
+  return {
+    commerceEvents: commerceEvents.length,
+    refundReceipts: refundReceipts.length,
+    entitlement: entitlements,
+    retirements: retirements.length,
+    archiveDeletions: archiveDeletions.length,
+    accountClosureRequests: accountClosures.length,
+    deletionRequests: deletionRequests.length,
+  };
 }
 
 async function executeFounderExternalBetaContractLifecycle(

@@ -53,6 +53,7 @@ describe("Clerk route matrix", () => {
     "/api/internal/runner-release/required",
     "/api/internal/runner-replacements/reconcile",
     "/api/webhooks/lemon-squeezy",
+    "/api/webhooks/clerk",
   ])("recognizes independently authenticated internal route %s", (pathname) => {
     expect(isInternalServiceAuthPath(pathname)).toBe(true);
   });
@@ -62,6 +63,7 @@ describe("Clerk route matrix", () => {
     "/api/internal/future",
     "/api/internal/runner-release/required/extra",
     "/api/webhooks/lemon-squeezy/extra",
+    "/api/webhooks/clerk/extra",
   ])("does not broaden the internal service bypass to %s", (pathname) => {
     expect(isInternalServiceAuthPath(pathname)).toBe(false);
   });

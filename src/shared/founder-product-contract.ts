@@ -54,6 +54,16 @@ export const FOUNDER_PRODUCT_CONTRACT_INVARIANTS = [
     ],
   },
   {
+    id: "identity_recovery_lifecycle",
+    kind: "automated",
+    evidence: [
+      "tests/e2e/founder-product-contract-lifecycle.spec.ts",
+      "tests/unit/founder-identity-recovery.test.ts",
+      "tests/unit/founder-identity-recovery-routes.test.ts",
+      "tests/unit/founder-deletion-db.test.ts",
+    ],
+  },
+  {
     id: "privacy_lifecycle",
     kind: "automated",
     evidence: [
@@ -139,6 +149,9 @@ export const FOUNDER_PRODUCT_CONTRACT_UNIT_FILES = [
   "tests/unit/founder-commerce-routes.test.ts",
   "tests/unit/founder-commerce-db.test.ts",
   "tests/unit/founder-payment-status.test.tsx",
+  "tests/unit/founder-identity-recovery.test.ts",
+  "tests/unit/founder-identity-recovery-routes.test.ts",
+  "tests/unit/founder-identity-recovery-ui.test.tsx",
   "tests/unit/founder-infrastructure-retirement.test.ts",
   "tests/unit/founder-recovery.test.ts",
   "tests/unit/founder-support.test.ts",
@@ -162,6 +175,7 @@ export const FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS = [
   "subscription_lifecycle",
   "recovery_archive_lifecycle",
   "infrastructure_retirement",
+  "identity_recovery_lifecycle",
 ] as const;
 
 export const FOUNDER_PRODUCT_CONTRACT_ATTENDED_TASKS = [

@@ -115,6 +115,7 @@ export type FounderMailSendingConnectionDependencies = {
   keyring?: OperatorSecretKeyring;
   env?: Record<string, string | undefined>;
   randomBytes?: (size: number) => Buffer;
+  preserveCredentialsOnUnconfirmedRevocation?: boolean;
 };
 
 export class FounderMailSendingConnectionError extends Error {
@@ -571,6 +572,7 @@ export async function disconnectFounderGoogleMailSendingForUser(
     const current = await connection.db.transaction((tx) => selectBundle(tx, operator.id, true));
     if (!current?.sending) return null;
     const sending = current.sending;
+    if (sending.authorizationState === "revoked") return toDto(current);
     let accessToken: string | null = null;
     let refreshToken: string | null = null;
     try {
@@ -603,14 +605,18 @@ export async function disconnectFounderGoogleMailSendingForUser(
           authorizationState: providerRevoked ? "revoked" : "revocation_unconfirmed",
           authorizationSessionHash: null,
           authorizationExpiresAt: null,
-          accessTokenCiphertext: null,
-          accessTokenIv: null,
-          accessTokenAuthTag: null,
-          refreshTokenCiphertext: null,
-          refreshTokenIv: null,
-          refreshTokenAuthTag: null,
-          secretKeyVersion: null,
-          tokenExpiresAt: null,
+          ...(providerRevoked || !dependencies.preserveCredentialsOnUnconfirmedRevocation
+            ? {
+                accessTokenCiphertext: null,
+                accessTokenIv: null,
+                accessTokenAuthTag: null,
+                refreshTokenCiphertext: null,
+                refreshTokenIv: null,
+                refreshTokenAuthTag: null,
+                secretKeyVersion: null,
+                tokenExpiresAt: null,
+              }
+            : {}),
           failureCode: providerRevoked ? null : "provider_revocation_unconfirmed",
           recoveryMessage: providerRevoked
             ? null

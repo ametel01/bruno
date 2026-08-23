@@ -117,4 +117,22 @@ describe("Clerk authentication surfaces", () => {
     expect(html).toContain(`aria-label="${widgetLabel}"`);
     expect(readProps()).toEqual(expectedProps);
   });
+
+  it("preserves Identity Recovery intent through replacement sign-in and signup", () => {
+    renderToStaticMarkup(<SignInSurface identityRecovery />);
+    expect(mocks.signInProps).toEqual({
+      forceRedirectUrl: "/identity-recovery",
+      path: "/sign-in",
+      routing: "path",
+      signUpUrl: "/sign-up?continue=identity-recovery",
+    });
+
+    renderToStaticMarkup(<SignUpSurface identityRecovery />);
+    expect(mocks.signUpProps).toEqual({
+      forceRedirectUrl: "/identity-recovery",
+      path: "/sign-up",
+      routing: "path",
+      signInUrl: "/sign-in?continue=identity-recovery",
+    });
+  });
 });

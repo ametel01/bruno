@@ -1,8 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  founderCommerceLifecycleReceipts,
+  founderProductEntitlements,
+  operatorAiConnections,
   operatorConversations,
+  operatorDeletionCommerceCancellations,
+  operatorDeletionReceipts,
   operatorMailConnections,
   operators,
   users,
@@ -10,17 +15,33 @@ import {
 import {
   FOUNDER_ACTIVE_PURGE_WINDOW_MS,
   FOUNDER_BACKUP_EXPIRY_WINDOW_MS,
+  FOUNDER_REVOCATION_MAX_ATTEMPTS,
+  FOUNDER_REVOCATION_RETRY_MS,
   getFounderDeletionReceiptForUser,
   processFounderDeletionRequests,
   requestFounderDeletionForUser,
   retryFounderDeletionRevocationsForUser,
 } from "@/src/server/operators/founder-deletion";
+import {
+  insertPastDueFounderEntitlementFixture,
+  insertReconciledFounderCancellationFixture,
+} from "@/tests/helpers/founder-entitlement";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003701";
 const OTHER_OWNER_ID = "00000000-0000-4000-8000-000000003702";
 const OPERATOR_ID = "00000000-0000-4000-8000-000000003703";
 const OTHER_OPERATOR_ID = "00000000-0000-4000-8000-000000003704";
 const NOW = new Date("2026-08-20T00:00:00.000Z");
+
+async function confirmedCancellation(subscriptionId: string) {
+  return {
+    subscriptionId,
+    orderId: `order-${subscriptionId}`,
+    status: "cancelled" as const,
+    updatedAt: NOW.toISOString(),
+    endsAt: new Date(NOW.valueOf() + 7 * 24 * 60 * 60 * 1_000).toISOString(),
+  };
+}
 
 describe("Founder deletion lifecycle", () => {
   let connection: DatabaseConnection;
@@ -115,7 +136,287 @@ describe("Founder deletion lifecycle", () => {
     expect(completed?.stages.map((stage) => stage.stage)).toContain("backup_expiry");
   });
 
-  it("keeps revocation failures visible and retryable after local credential removal", async () => {
+  it("keeps recently reauthenticated Account Closure as the commerce cancellation coordinator without implying refund", async () => {
+    await insertPastDueFounderEntitlementFixture({
+      connection,
+      userId: OWNER_ID,
+      fixtureId: "account-closure-384",
+      reconciledAt: NOW,
+      retirementDueAt: new Date(NOW.valueOf() + 7 * 24 * 60 * 60 * 1_000),
+    });
+    let canonicalEvidence!: Awaited<ReturnType<typeof insertReconciledFounderCancellationFixture>>;
+    const cancelCommerce = vi.fn(async () => {
+      canonicalEvidence = await insertReconciledFounderCancellationFixture({
+        connection,
+        userId: OWNER_ID,
+        fixtureId: "account-closure-384",
+        providerUpdatedAt: NOW,
+        effectiveAt: new Date(NOW.valueOf() + 7 * 24 * 60 * 60 * 1_000),
+      });
+    });
+    const readCommerce = vi.fn(confirmedCancellation);
+    const dependencies = {
+      createConnection: () => connection,
+      now: () => NOW,
+      cancelCommerce,
+      readCommerce,
+      revokeConnections: async () => [],
+    };
+    const receipt = await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      dependencies,
+    );
+    expect(cancelCommerce).toHaveBeenCalledOnce();
+    expect(cancelCommerce).toHaveBeenCalledWith("subscription-account-closure-384");
+    expect(receipt?.commerceCancellation).toMatchObject({
+      provider: "lemon_squeezy",
+      status: "succeeded",
+      attemptCount: 1,
+      refundStarted: false,
+    });
+    expect(receipt?.stages).toContainEqual(
+      expect.objectContaining({
+        stage: "commerce_cancellation",
+        details: expect.objectContaining({
+          outcome: "subscription_cancellation_confirmed",
+          providerStatus: "cancelled",
+          commerceLifecycleReceiptId: canonicalEvidence.lifecycleReceiptId,
+          sourceEventId: canonicalEvidence.eventId,
+          effectiveAt: new Date(NOW.valueOf() + 7 * 24 * 60 * 60 * 1_000).toISOString(),
+          productEntitlementChanged: false,
+          refundStarted: false,
+        }),
+      }),
+    );
+    expect((await connection.db.select().from(founderProductEntitlements))[0]).toMatchObject({
+      status: "cancelled",
+      sourceEventId: canonicalEvidence.eventId,
+    });
+    expect(await connection.db.select().from(operatorDeletionCommerceCancellations)).toHaveLength(
+      1,
+    );
+    expect(
+      (await connection.db.select().from(operatorDeletionReceipts)).filter(
+        (item) => item.stage === "commerce_cancellation",
+      ),
+    ).toHaveLength(1);
+    expect(await connection.db.select().from(founderCommerceLifecycleReceipts)).toEqual([
+      expect.objectContaining({
+        userId: OWNER_ID,
+        providerSubscriptionId: "subscription-account-closure-384",
+        kind: "cancellation",
+        sourceEventId: canonicalEvidence.eventId,
+        effectiveAt: new Date(NOW.valueOf() + 7 * 24 * 60 * 60 * 1_000),
+      }),
+    ]);
+
+    await requestFounderDeletionForUser(OWNER_ID, "account_closure", {}, dependencies);
+    expect(cancelCommerce).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Account Closure pending when a cancellation mutation is not confirmed by provider state", async () => {
+    await insertPastDueFounderEntitlementFixture({
+      connection,
+      userId: OWNER_ID,
+      fixtureId: "account-closure-unconfirmed-384",
+      reconciledAt: NOW,
+      retirementDueAt: new Date(NOW.valueOf() + 7 * 24 * 60 * 60 * 1_000),
+    });
+    const cancelCommerce = vi.fn(async () => undefined);
+    const readCommerce = vi.fn(async (subscriptionId: string) => ({
+      subscriptionId,
+      orderId: `order-${subscriptionId}`,
+      status: "active" as const,
+      updatedAt: NOW.toISOString(),
+      endsAt: null,
+    }));
+    const dependencies = {
+      createConnection: () => connection,
+      now: () => NOW,
+      cancelCommerce,
+      readCommerce,
+      revokeConnections: async () => [],
+    };
+
+    const receipt = await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      dependencies,
+    );
+    expect(cancelCommerce).toHaveBeenCalledOnce();
+    expect(readCommerce).toHaveBeenCalledWith("subscription-account-closure-unconfirmed-384");
+    expect(receipt?.request).toMatchObject({
+      status: "failed",
+      activePurgeCompletedAt: null,
+      backupExpiredAt: null,
+      completedAt: null,
+      failureCode: "account_closure_external_effects_unresolved",
+    });
+    expect(receipt?.commerceCancellation).toMatchObject({
+      status: "failed",
+      attemptCount: 1,
+      confirmedAt: null,
+      errorCode: "commerce_cancellation_unconfirmed",
+    });
+    expect(receipt?.stages.map((stage) => stage.stage)).not.toContain("commerce_cancellation");
+    expect(await connection.db.select().from(founderCommerceLifecycleReceipts)).toEqual([]);
+
+    const processed = await processFounderDeletionRequests({
+      ...dependencies,
+      now: () => new Date(NOW.valueOf() + FOUNDER_ACTIVE_PURGE_WINDOW_MS),
+    });
+    expect(processed).toEqual({ processed: 1, failed: 0 });
+    const stillPending = await getFounderDeletionReceiptForUser(OWNER_ID, {
+      createConnection: () => connection,
+    });
+    expect(stillPending?.request.activePurgeCompletedAt).toBeNull();
+  });
+
+  it("cancels a still-renewable subscription after a separate refund decision", async () => {
+    await insertPastDueFounderEntitlementFixture({
+      connection,
+      userId: OWNER_ID,
+      fixtureId: "account-closure-refunded-384",
+      reconciledAt: NOW,
+      retirementDueAt: new Date(NOW.valueOf() + 7 * 24 * 60 * 60 * 1_000),
+    });
+    await connection.db
+      .update(founderProductEntitlements)
+      .set({ status: "refunded", updatedAt: NOW })
+      .where(eq(founderProductEntitlements.userId, OWNER_ID));
+    const cancelCommerce = vi.fn(async () => {
+      await insertReconciledFounderCancellationFixture({
+        connection,
+        userId: OWNER_ID,
+        fixtureId: "account-closure-refunded-384",
+        providerUpdatedAt: NOW,
+        effectiveAt: new Date(NOW.valueOf() + 7 * 24 * 60 * 60 * 1_000),
+      });
+    });
+    const readCommerce = vi.fn(confirmedCancellation);
+
+    const receipt = await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        cancelCommerce,
+        readCommerce,
+        revokeConnections: async () => [],
+      },
+    );
+
+    expect(cancelCommerce).toHaveBeenCalledWith("subscription-account-closure-refunded-384");
+    expect(receipt?.commerceCancellation).toMatchObject({
+      status: "succeeded",
+      attemptCount: 1,
+      refundStarted: false,
+    });
+    expect(receipt?.stages).toContainEqual(
+      expect.objectContaining({
+        stage: "commerce_cancellation",
+        details: expect.objectContaining({
+          outcome: "subscription_cancellation_confirmed",
+          refundStarted: false,
+        }),
+      }),
+    );
+  });
+
+  it("keeps unresolved Account Closure effects visible and retryable after backup expiry", async () => {
+    await insertPastDueFounderEntitlementFixture({
+      connection,
+      userId: OWNER_ID,
+      fixtureId: "account-closure-retry-384",
+      reconciledAt: NOW,
+      retirementDueAt: new Date(NOW.valueOf() + 7 * 24 * 60 * 60 * 1_000),
+    });
+    const cancellationUnavailable = vi.fn(async () => {
+      throw new Error("provider unavailable");
+    });
+    await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        cancelCommerce: cancellationUnavailable,
+        readCommerce: confirmedCancellation,
+        revokeConnections: async () => [],
+      },
+    );
+
+    const afterExpiry = new Date(NOW.valueOf() + FOUNDER_BACKUP_EXPIRY_WINDOW_MS);
+    await processFounderDeletionRequests({
+      createConnection: () => connection,
+      now: () => afterExpiry,
+      cancelCommerce: cancellationUnavailable,
+      readCommerce: confirmedCancellation,
+      revokeConnections: async () => [],
+    });
+    const unresolved = await getFounderDeletionReceiptForUser(OWNER_ID, {
+      createConnection: () => connection,
+    });
+    expect(unresolved?.request).toMatchObject({
+      status: "failed",
+      activePurgeCompletedAt: null,
+      backupExpiredAt: null,
+      completedAt: null,
+      failureCode: "account_closure_external_effects_unresolved",
+    });
+    expect(unresolved?.commerceCancellation).toMatchObject({ status: "failed", attemptCount: 2 });
+
+    const cancellationRestored = vi.fn(async () => {
+      await insertReconciledFounderCancellationFixture({
+        connection,
+        userId: OWNER_ID,
+        fixtureId: "account-closure-retry-384",
+        providerUpdatedAt: NOW,
+        effectiveAt: new Date(NOW.valueOf() + 7 * 24 * 60 * 60 * 1_000),
+      });
+    });
+    const completed = await retryFounderDeletionRevocationsForUser(OWNER_ID, {
+      createConnection: () => connection,
+      now: () => new Date(afterExpiry.valueOf() + FOUNDER_REVOCATION_RETRY_MS),
+      cancelCommerce: cancellationRestored,
+      readCommerce: confirmedCancellation,
+      revokeConnections: async () => [],
+    });
+    expect(cancellationRestored).toHaveBeenCalledOnce();
+    expect(completed?.request).toMatchObject({
+      status: "access_stopped",
+      activePurgeCompletedAt: null,
+      backupExpiredAt: null,
+      completedAt: null,
+      failureCode: null,
+    });
+    expect(completed?.commerceCancellation).toMatchObject({ status: "succeeded", attemptCount: 3 });
+    const closureCompletedAt = new Date(afterExpiry.valueOf() + FOUNDER_REVOCATION_RETRY_MS * 2);
+    await processFounderDeletionRequests({
+      createConnection: () => connection,
+      now: () => closureCompletedAt,
+      cancelCommerce: cancellationRestored,
+      readCommerce: confirmedCancellation,
+      revokeConnections: async () => [],
+    });
+    const finalized = await getFounderDeletionReceiptForUser(OWNER_ID, {
+      createConnection: () => connection,
+    });
+    expect(finalized?.request).toMatchObject({
+      status: "completed",
+      backupExpiredAt: closureCompletedAt.toISOString(),
+      completedAt: closureCompletedAt.toISOString(),
+      failureCode: null,
+    });
+  });
+
+  it("keeps revocation failures visible without purging before a confirmed retry", async () => {
     await connection.db.insert(operatorMailConnections).values({
       id: "00000000-0000-4000-8000-000000003707",
       operatorId: OPERATOR_ID,
@@ -156,16 +457,16 @@ describe("Founder deletion lifecycle", () => {
         errorCode: "provider_503",
       }),
     ]);
-    const [locallyRemoved] = await connection.db
+    const [locallyPaused] = await connection.db
       .select()
       .from(operatorMailConnections)
       .where(eq(operatorMailConnections.id, "00000000-0000-4000-8000-000000003707"));
-    expect(locallyRemoved).toEqual(
+    expect(locallyPaused).toEqual(
       expect.objectContaining({
         status: "disconnected",
         authorizationState: "revocation_unconfirmed",
-        accessTokenCiphertext: null,
-        refreshTokenCiphertext: null,
+        accessTokenCiphertext: "access",
+        refreshTokenCiphertext: "refresh",
       }),
     );
 
@@ -178,5 +479,251 @@ describe("Founder deletion lifecycle", () => {
       expect.objectContaining({ connectionKind: "mail", status: "succeeded", attemptCount: 2 }),
     ]);
     expect(retried?.stages.map((stage) => stage.stage)).toContain("revocation");
+  });
+
+  it("keeps an already-confirmed provider revocation terminal during Account Closure", async () => {
+    await connection.db.insert(operatorMailConnections).values({
+      id: "00000000-0000-4000-8000-000000003708",
+      operatorId: OPERATOR_ID,
+      providerSubjectId: "gmail-already-revoked",
+      accountLabel: "founder@example.com",
+      status: "disconnected",
+      authorizationState: "revoked",
+      revokedAt: NOW,
+      disconnectedAt: NOW,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    const revokeConnections = vi.fn(async () => [
+      { connectionKind: "mail", ok: false, errorCode: "credential_missing" },
+    ]);
+
+    const receipt = await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      { createConnection: () => connection, now: () => NOW, revokeConnections },
+    );
+
+    expect(revokeConnections).not.toHaveBeenCalled();
+    expect(receipt?.revocations).toEqual([
+      expect.objectContaining({
+        connectionKind: "mail",
+        status: "succeeded",
+        attemptCount: 0,
+        errorCode: null,
+      }),
+    ]);
+    expect(receipt?.stages).toContainEqual(
+      expect.objectContaining({
+        stage: "revocation",
+        details: { outcome: "connections_already_revoked" },
+      }),
+    );
+  });
+
+  it("does not invent provider revocation work for a failed authorization with no grant", async () => {
+    await connection.db.insert(operatorAiConnections).values({
+      id: "00000000-0000-4000-8000-000000003718",
+      operatorId: OPERATOR_ID,
+      provider: "anthropic",
+      status: "needs_attention",
+      authorizationState: "pending",
+      providerSubjectId: null,
+      authorizationSessionHash: null,
+      failureCode: "authorization_unavailable",
+      recoveryMessage: "Anthropic authorization did not start.",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    const revokeConnections = vi.fn(async () => [
+      { connectionKind: "ai:anthropic", ok: false, errorCode: "credential_missing" },
+    ]);
+
+    const receipt = await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      { createConnection: () => connection, now: () => NOW, revokeConnections },
+    );
+
+    expect(revokeConnections).not.toHaveBeenCalled();
+    expect(receipt?.revocations).toEqual([
+      expect.objectContaining({
+        connectionKind: "ai:anthropic",
+        provider: "anthropic",
+        status: "succeeded",
+        attemptCount: 0,
+        errorCode: null,
+      }),
+    ]);
+    expect(receipt?.stages).toContainEqual(
+      expect.objectContaining({
+        stage: "revocation",
+        details: { outcome: "connections_absent_or_already_revoked" },
+      }),
+    );
+  });
+
+  it("bounds revocation retry custody and clears retained Google credentials on exhaustion", async () => {
+    const connectionId = "00000000-0000-4000-8000-000000003709";
+    await connection.db.insert(operatorMailConnections).values({
+      id: connectionId,
+      operatorId: OPERATOR_ID,
+      providerSubjectId: "gmail-exhausted",
+      accountLabel: "founder@example.com",
+      status: "ready",
+      authorizationState: "authorized",
+      accessTokenCiphertext: "access",
+      accessTokenIv: "access-iv",
+      accessTokenAuthTag: "access-tag",
+      refreshTokenCiphertext: "refresh",
+      refreshTokenIv: "refresh-iv",
+      refreshTokenAuthTag: "refresh-tag",
+      secretKeyVersion: "test-v1",
+      authorizedAt: NOW,
+      lastVerifiedAt: NOW,
+      lastEvidenceAt: NOW,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    const revokeConnections = vi.fn(async () => [
+      { connectionKind: "mail", ok: false, errorCode: "provider_503" },
+    ]);
+    await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        revokeConnections,
+      },
+    );
+    await processFounderDeletionRequests({
+      createConnection: () => connection,
+      now: () => new Date(NOW.valueOf() + FOUNDER_REVOCATION_RETRY_MS - 1),
+      revokeConnections,
+    });
+    expect(revokeConnections).toHaveBeenCalledTimes(1);
+
+    for (let attempt = 1; attempt < FOUNDER_REVOCATION_MAX_ATTEMPTS; attempt += 1) {
+      await retryFounderDeletionRevocationsForUser(OWNER_ID, {
+        createConnection: () => connection,
+        now: () => new Date(NOW.valueOf() + FOUNDER_REVOCATION_RETRY_MS * attempt),
+        revokeConnections,
+      });
+    }
+    const exhausted = await getFounderDeletionReceiptForUser(OWNER_ID, {
+      createConnection: () => connection,
+    });
+    expect(exhausted?.request).toMatchObject({
+      status: "failed",
+      failureCode: "account_closure_revocation_recovery_exhausted",
+    });
+    expect(exhausted?.revocations).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        attemptCount: FOUNDER_REVOCATION_MAX_ATTEMPTS,
+        nextAttemptAt: null,
+        errorCode: "provider_revocation_recovery_exhausted",
+      }),
+    ]);
+    const [cleared] = await connection.db
+      .select()
+      .from(operatorMailConnections)
+      .where(eq(operatorMailConnections.id, connectionId));
+    expect(cleared).toEqual(
+      expect.objectContaining({
+        accessTokenCiphertext: null,
+        refreshTokenCiphertext: null,
+        failureCode: "provider_revocation_recovery_exhausted",
+      }),
+    );
+
+    await processFounderDeletionRequests({
+      createConnection: () => connection,
+      now: () => new Date(NOW.valueOf() + FOUNDER_REVOCATION_RETRY_MS * 4),
+      revokeConnections,
+    });
+    expect(revokeConnections).toHaveBeenCalledTimes(FOUNDER_REVOCATION_MAX_ATTEMPTS);
+  });
+
+  it("serializes concurrent revocation retries before either can reuse retained credentials", async () => {
+    await connection.db.insert(operatorMailConnections).values({
+      id: "00000000-0000-4000-8000-000000003710",
+      operatorId: OPERATOR_ID,
+      providerSubjectId: "gmail-concurrent-retry",
+      accountLabel: "founder@example.com",
+      status: "ready",
+      authorizationState: "authorized",
+      accessTokenCiphertext: "access",
+      accessTokenIv: "access-iv",
+      accessTokenAuthTag: "access-tag",
+      refreshTokenCiphertext: "refresh",
+      refreshTokenIv: "refresh-iv",
+      refreshTokenAuthTag: "refresh-tag",
+      secretKeyVersion: "test-v1",
+      authorizedAt: NOW,
+      lastVerifiedAt: NOW,
+      lastEvidenceAt: NOW,
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    let releaseProvider!: () => void;
+    const providerGate = new Promise<void>((resolve) => {
+      releaseProvider = resolve;
+    });
+    let observeThirdCall!: () => void;
+    const thirdCall = new Promise<void>((resolve) => {
+      observeThirdCall = resolve;
+    });
+    const revokeConnections = vi.fn(async () => {
+      const callNumber = revokeConnections.mock.calls.length;
+      if (callNumber === 3) observeThirdCall();
+      if (callNumber >= 2) await providerGate;
+      return [{ connectionKind: "mail", ok: false, errorCode: "provider_503" }];
+    });
+    await requestFounderDeletionForUser(
+      OWNER_ID,
+      "account_closure",
+      {},
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        revokeConnections,
+      },
+    );
+
+    const firstRetryConnection = createDatabaseConnection();
+    const secondRetryConnection = createDatabaseConnection();
+    try {
+      const retryAt = new Date(NOW.valueOf() + FOUNDER_REVOCATION_RETRY_MS);
+      const first = retryFounderDeletionRevocationsForUser(OWNER_ID, {
+        createConnection: () => firstRetryConnection,
+        now: () => retryAt,
+        revokeConnections,
+      });
+      await vi.waitFor(() => expect(revokeConnections).toHaveBeenCalledTimes(2));
+      const second = retryFounderDeletionRevocationsForUser(OWNER_ID, {
+        createConnection: () => secondRetryConnection,
+        now: () => retryAt,
+        revokeConnections,
+      });
+      const concurrentProviderReuse = await Promise.race([
+        thirdCall.then(() => true),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 100)),
+      ]);
+      expect(concurrentProviderReuse).toBe(false);
+      releaseProvider();
+      const [firstReceipt, secondReceipt] = await Promise.all([first, second]);
+      expect(revokeConnections).toHaveBeenCalledTimes(2);
+      expect(firstReceipt?.revocations[0]?.attemptCount).toBe(2);
+      expect(secondReceipt?.revocations[0]?.attemptCount).toBe(2);
+    } finally {
+      releaseProvider();
+      await firstRetryConnection.close();
+      await secondRetryConnection.close();
+    }
   });
 });

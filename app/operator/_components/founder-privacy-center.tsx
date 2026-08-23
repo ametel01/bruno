@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { FounderDeletionReceipt } from "@/src/server/operators/founder-deletion";
 import type {
   FounderPrivacyCenterDto,
   FounderPrivacyConnection,
 } from "@/src/server/operators/founder-privacy-center";
-import type { FounderDeletionReceipt } from "@/src/server/operators/founder-deletion";
+import type { FounderIdentityRecoveryStatusDto } from "@/src/server/users/founder-identity-recovery";
 import styles from "./founder-privacy-center.module.css";
 
 export function FounderPrivacyCenter({
@@ -24,6 +25,36 @@ export function FounderPrivacyCenter({
     html: string;
     expiresAt: string;
   } | null>(null);
+  const [recoveryCredential, setRecoveryCredential] = useState<{
+    recoveryCode?: string;
+    state?: "not_created" | "ready" | "expired" | "used";
+    expiresAt?: string;
+  } | null>(null);
+  const [identityRecovery, setIdentityRecovery] = useState<FounderIdentityRecoveryStatusDto | null>(
+    null,
+  );
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/operator/identity-recovery", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const body = (await response.json()) as {
+          credential?: { state: "not_created" | "ready" | "expired" | "used"; expiresAt?: string };
+          recovery?: FounderIdentityRecoveryStatusDto;
+        };
+        return body;
+      })
+      .then((body) => {
+        if (!active || !body) return;
+        if (body.credential) setRecoveryCredential(body.credential);
+        if (body.recovery) setIdentityRecovery(body.recovery);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function disconnect(connection: FounderPrivacyConnection) {
     if (
@@ -86,7 +117,7 @@ export function FounderPrivacyCenter({
       setDeletion(body.deletion ?? null);
       setMessage(
         isClosure
-          ? "Account closure requested. Access is stopped and provider revocation results are tracked below."
+          ? "Account closure requested. Access is stopped; commerce cancellation and provider revocation are tracked separately below."
           : "Deletion requested. Access is stopped; purge and backup expiry remain staged below.",
       );
     } catch (error) {
@@ -111,7 +142,9 @@ export function FounderPrivacyCenter({
       };
       if (!response.ok) throw new Error(body.error?.message ?? "Revocation retry failed.");
       setDeletion(body.deletion ?? null);
-      setMessage("Provider revocation was retried. Review each connection result below.");
+      setMessage(
+        "Account Closure cleanup was retried. Review commerce cancellation and each connection result below.",
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Revocation retry failed.");
     } finally {
@@ -145,6 +178,31 @@ export function FounderPrivacyCenter({
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Founder Data Export could not be created.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function createIdentityRecoveryCode() {
+    setBusy("identity-recovery");
+    setMessage(null);
+    try {
+      const response = await fetch("/api/operator/identity-recovery", { method: "POST" });
+      const body = (await response.json()) as {
+        credential?: { recoveryCode?: string; expiresAt?: string };
+        error?: { message?: string };
+      };
+      if (!response.ok || !body.credential?.recoveryCode) {
+        throw new Error(body.error?.message ?? "Identity Recovery code could not be created.");
+      }
+      setRecoveryCredential(body.credential);
+      setMessage(
+        "Identity Recovery code created. Store it privately; Bruno will not show it again.",
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Identity Recovery code could not be created.",
       );
     } finally {
       setBusy(null);
@@ -294,6 +352,51 @@ export function FounderPrivacyCenter({
         </div>
         <div className={styles.dataControls}>
           <div>
+            <h3>Prepare Identity Recovery</h3>
+            <p>
+              After recent reauthentication, create a one-time code that can prove the same internal
+              Owner if the Clerk identity is later lost or replaced. It grants no commerce or
+              deletion authority.
+            </p>
+            <button
+              className={styles.secondary}
+              disabled={busy !== null}
+              onClick={() => void createIdentityRecoveryCode()}
+              type="button"
+            >
+              {busy === "identity-recovery"
+                ? "Creating…"
+                : recoveryCredential?.state === "ready"
+                  ? "Replace Identity Recovery code"
+                  : "Create Identity Recovery code"}
+            </button>
+            {recoveryCredential?.recoveryCode ? (
+              <div className={styles.exportLinks} aria-live="polite">
+                <strong>Shown once</strong>
+                <code>{recoveryCredential.recoveryCode}</code>
+                <small>Expires {formatDate(recoveryCredential.expiresAt ?? null)}</small>
+              </div>
+            ) : recoveryCredential?.state === "ready" ? (
+              <small>
+                A code is ready until {formatDate(recoveryCredential.expiresAt ?? null)}. Replace it
+                if the stored copy is unavailable.
+              </small>
+            ) : null}
+            {identityRecovery?.state === "recovered" ? (
+              <div className={styles.exportLinks} aria-live="polite">
+                <strong>Identity Recovery receipts</strong>
+                <ul>
+                  {identityRecovery.receipts.map((receipt) => (
+                    <li key={`${receipt.kind}:${receipt.occurredAt}`}>
+                      {identityRecoveryReceiptLabel(receipt.kind)} ·{" "}
+                      {formatDate(receipt.occurredAt)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+          <div>
             <h3>Disconnect access</h3>
             <p>
               Stops Bruno using that provider grant. It does not erase Bruno-local retained data or
@@ -313,10 +416,11 @@ export function FounderPrivacyCenter({
             </button>
           </div>
           <div>
-            <h3>Close account</h3>
+            <h3>Account Closure</h3>
             <p>
-              Revokes every connected account, cancels unstarted effects, and starts staged
-              deletion.
+              The only control that coordinates external-action pause, subscription cancellation,
+              connected-account revocation, and staged Bruno Data Deletion. It does not imply a
+              refund.
             </p>
             <button
               className={styles.danger}
@@ -324,7 +428,7 @@ export function FounderPrivacyCenter({
               onClick={() => void requestDeletion("close_account")}
               type="button"
             >
-              {busy === "close" ? "Closing…" : "Close account"}
+              {busy === "close" ? "Requesting…" : "Request Account Closure"}
             </button>
           </div>
         </div>
@@ -402,9 +506,17 @@ function DeletionReceipt({
   busy: boolean;
 }) {
   const hasFailedRevocation = receipt.revocations.some((item) => item.status === "failed");
+  const hasExhaustedRevocation = receipt.revocations.some(
+    (item) => item.errorCode === "provider_revocation_recovery_exhausted",
+  );
+  const hasFailedCommerceCancellation = receipt.commerceCancellation?.status === "failed";
+  const receiptTitle =
+    receipt.request.kind === "account_closure" ? "Account Closure Receipt" : "Deletion Receipt";
   return (
     <div className={styles.aiPanel} aria-live="polite">
-      <h3>Deletion Receipt · {receipt.request.status}</h3>
+      <h3>
+        {receiptTitle} · {receipt.request.status}
+      </h3>
       <p>Requested {formatDate(receipt.request.requestedAt)}.</p>
       <ul>
         <li>Access stopped: {formatDate(receipt.request.accessStoppedAt)}</li>
@@ -413,6 +525,18 @@ function DeletionReceipt({
         <li>Active purge complete: {formatDate(receipt.request.activePurgeCompletedAt)}</li>
         <li>Backup expiry complete: {formatDate(receipt.request.backupExpiredAt)}</li>
       </ul>
+      {receipt.commerceCancellation ? (
+        <>
+          <strong>Commerce cancellation</strong>
+          <p>
+            Lemon Squeezy subscription: {receipt.commerceCancellation.status}
+            {receipt.commerceCancellation.errorCode
+              ? ` (${receipt.commerceCancellation.errorCode})`
+              : ""}
+            . Refund started: no.
+          </p>
+        </>
+      ) : null}
       {receipt.revocations.length > 0 ? (
         <>
           <strong>Provider revocation</strong>
@@ -424,12 +548,18 @@ function DeletionReceipt({
               </li>
             ))}
           </ul>
-          {hasFailedRevocation ? (
-            <button className={styles.secondary} disabled={busy} onClick={onRetry} type="button">
-              Retry provider revocation
-            </button>
-          ) : null}
         </>
+      ) : null}
+      {hasExhaustedRevocation ? (
+        <p>
+          Recovery Exhausted. Bruno removed the retained retry credentials. Account Closure remains
+          paused until an attended provider-resolution review can confirm revocation.
+        </p>
+      ) : null}
+      {!hasExhaustedRevocation && (hasFailedRevocation || hasFailedCommerceCancellation) ? (
+        <button className={styles.secondary} disabled={busy} onClick={onRetry} type="button">
+          Retry Account Closure cleanup
+        </button>
       ) : null}
     </div>
   );
@@ -444,10 +574,16 @@ function Detail({ label, value }: { label: string; value: string }) {
   );
 }
 
+function identityRecoveryReceiptLabel(
+  kind: "identity_loss_recorded" | "recovery_denied" | "identity_rebound",
+): string {
+  if (kind === "identity_loss_recorded") return "Identity loss recorded";
+  if (kind === "recovery_denied") return "Recovery attempt denied";
+  return "Identity rebound to the same Owner";
+}
+
 function formatDate(value: string | null): string {
-  return value
-    ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
-        new Date(value),
-      )
-    : "No recorded use";
+  if (!value) return "No recorded use";
+  const instant = new Date(value);
+  return `${instant.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }

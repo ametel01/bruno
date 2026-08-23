@@ -1,7 +1,9 @@
 import "server-only";
 
 import { auth } from "@clerk/nextjs/server";
+import { headers } from "next/headers";
 import { type AuthModeConfigurationErrorCode, resolveAuthMode } from "@/src/auth/server-auth-mode";
+import { resolveFounderContractIdentity } from "@/src/server/founder-product-contract/deterministic-identity";
 import {
   type ApplicationUserResolution,
   type RequireApplicationUserDependencies,
@@ -22,13 +24,15 @@ export type RequireConfiguredApplicationUserDependencies = {
   env?: Record<string, string | undefined>;
   createConnection?: RequireApplicationUserDependencies["createConnection"];
   getClerkUserId?: RequireApplicationUserDependencies["getClerkUserId"];
+  getRequestHeaders?: () => Promise<Pick<Headers, "get">>;
   requireUser?: RequireUser;
 };
 
 export async function requireConfiguredApplicationUser(
   dependencies: RequireConfiguredApplicationUserDependencies = {},
 ): Promise<ConfiguredApplicationUserResolution> {
-  const authMode = resolveAuthMode(dependencies.env ?? process.env);
+  const environment = dependencies.env ?? process.env;
+  const authMode = resolveAuthMode(environment);
 
   if (authMode.mode === "invalid") {
     return {
@@ -43,6 +47,21 @@ export async function requireConfiguredApplicationUser(
 
   if (dependencies.createConnection) {
     resolverDependencies.createConnection = dependencies.createConnection;
+  }
+
+  if (
+    authMode.mode === "development" &&
+    environment.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE === "deterministic"
+  ) {
+    const requestHeaders = await (dependencies.getRequestHeaders ?? headers)();
+    const contractIdentity = resolveFounderContractIdentity(requestHeaders, environment);
+    if (contractIdentity.present) {
+      if (!contractIdentity.valid) {
+        return { ok: false, status: 401, code: "unauthenticated" };
+      }
+      resolverDependencies.getClerkUserId = async () => contractIdentity.subject;
+      return await requireUser("clerk", resolverDependencies);
+    }
   }
 
   if (authMode.mode === "clerk") {

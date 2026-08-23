@@ -28,6 +28,9 @@ const generalReleaseDecisionPath = join(
   "founder-initial-general-release-decision.json",
 );
 const mode = process.env.BRUNO_FOUNDER_CONTRACT_MODE === "release" ? "release" : "ci";
+const deterministicConnectionSecret = createHash("sha256")
+  .update("founder-contract-connection-secret-v1")
+  .digest("base64url");
 
 await mkdir(artifactDirectory, { recursive: true });
 await rm(evidencePath, { force: true });
@@ -52,6 +55,16 @@ const deterministicProviderEnvironment = {
   BRUNO_INITIAL_GENERAL_RELEASE_AVAILABILITY_MESSAGE:
     "Public contract capacity is available in this geography.",
   BRUNO_INITIAL_GENERAL_RELEASE_PRICE_LABEL: "$30/month",
+  BRUNO_FOUNDER_CONTRACT_IDENTITY_RECOVERY_SIGNING_SECRET:
+    "founder-contract-identity-recovery-signing-secret-v1",
+  BRUNO_IDENTITY_RECOVERY_SIGNING_SECRET: "founder-contract-identity-recovery-signing-secret-v1",
+  CLERK_WEBHOOK_SIGNING_SECRET: `whsec_${createHash("sha256")
+    .update("founder-contract-clerk-webhook-signing-secret-v1")
+    .digest("base64")}`,
+  BRUNO_CONNECTION_SECRET_ACTIVE_KEY_VERSION: "founder-contract-v1",
+  BRUNO_CONNECTION_SECRET_KEYS_JSON: JSON.stringify({
+    "founder-contract-v1": deterministicConnectionSecret,
+  }),
   BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
     "calendar_reading",
     new Date(),
