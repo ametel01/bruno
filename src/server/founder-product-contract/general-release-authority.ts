@@ -236,8 +236,11 @@ export async function readPersistedFounderGeneralReleaseAuthorityInTransaction(
   );
   let decisionId = decision.id;
   let decisionOutcome = decision.outcome;
+  let decisionSourceRevision = decision.applicationRevision;
+  let decisionRuntimeRevision = decision.runtimeRevision;
   let decisionDigest = decision.evidenceDigests[0] as `sha256:${string}`;
   let decisionDecidedAt = decision.decidedAt;
+  let decisionAuthorityExpiresAt: Date | null = decision.authorityExpiresAt;
   let evidenceDigests = decision.evidenceDigests as `sha256:${string}`[];
   const holdChanged =
     heldCapabilities.length !== retainedHolds.length ||
@@ -272,20 +275,23 @@ export async function readPersistedFounderGeneralReleaseAuthorityInTransaction(
     if (!hold) throw new Error("Initial General Release Hold could not be persisted.");
     decisionId = hold.id;
     decisionOutcome = "hold";
+    decisionSourceRevision = hold.applicationRevision;
+    decisionRuntimeRevision = hold.runtimeRevision;
     decisionDigest = holdDigest;
     decisionDecidedAt = hold.decidedAt;
+    decisionAuthorityExpiresAt = hold.authorityExpiresAt;
     evidenceDigests = hold.evidenceDigests as `sha256:${string}`[];
   }
   return {
     approved: true,
     reason: "approved",
-    sourceRevision: decision.applicationRevision,
-    runtimeRevision: decision.runtimeRevision,
+    sourceRevision: decisionSourceRevision,
+    runtimeRevision: decisionRuntimeRevision,
     decisionDigest,
     decisionId,
     decisionOutcome,
     decisionDecidedAt: decisionDecidedAt.toISOString(),
-    authorityExpiresAt: decision.authorityExpiresAt.toISOString(),
+    authorityExpiresAt: decisionAuthorityExpiresAt?.toISOString() ?? null,
     evidenceDigests,
     capabilities: Object.fromEntries(
       FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST.map((capability) => [
