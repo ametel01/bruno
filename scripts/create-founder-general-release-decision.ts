@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import type { FounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
+import {
+  evaluateFounderProductionProviderQualification,
+  type FounderProductionProviderQualificationSummary,
+} from "@/scripts/create-founder-production-provider-qualification";
 
 export const FOUNDER_MODERATED_SUMMARY_SCHEMA = "bruno.moderated-founder-summary.v1";
 export const FOUNDER_PROVIDER_DECISION_SUMMARY_SCHEMA =
@@ -184,9 +188,11 @@ export function buildFounderInitialGeneralReleaseDecision(input: {
   productContract: FounderProductContractEvidence;
   moderatedSummary: FounderModeratedSummary | null;
   providerSummary: FounderProviderDecisionSummary | null;
+  productionProviderQualificationSummary: FounderProductionProviderQualificationSummary | null;
 }) {
   const reasons: string[] = [];
   const revision = input.productContract.releaseIdentity.sourceRevision;
+  const runtimeRevision = input.productContract.releaseIdentity.runtimeRevision;
   if (
     input.productContract.result !== "passed" ||
     input.productContract.mode !== "release" ||
@@ -264,12 +270,23 @@ export function buildFounderInitialGeneralReleaseDecision(input: {
     }
   }
 
+  const productionProviderQualifications = input.productionProviderQualificationSummary;
+  reasons.push(
+    ...evaluateFounderProductionProviderQualification({
+      summary: productionProviderQualifications,
+      applicationRevision: revision,
+      runtimeRevision,
+      decisionTime: new Date(input.productContract.observedAt),
+    }),
+  );
+
   const payload = {
     schemaVersion: FOUNDER_GENERAL_RELEASE_DECISION_SCHEMA,
     outcome: reasons.length === 0 ? ("approved" as const) : ("denied" as const),
     reasons,
     releaseIdentity: {
       sourceRevision: revision,
+      runtimeRevision,
       productContractRunId: input.productContract.releaseIdentity.runId,
       decidedAt: input.productContract.observedAt,
     },
@@ -277,10 +294,13 @@ export function buildFounderInitialGeneralReleaseDecision(input: {
       productContractDigest: input.productContract.summaryDigest,
       moderatedFounderDigest: study?.evidenceDigest ?? null,
       providerDecisionDigest: providers?.evidenceDigest ?? null,
+      productionProviderQualificationDigest:
+        productionProviderQualifications?.evidenceDigest ?? null,
     },
     metrics: study?.participants ?? null,
     criticalFailures: study?.criticalFailures ?? null,
     providers: providers?.providers ?? null,
+    productionProviderQualifications: productionProviderQualifications?.qualifications ?? null,
     providerPolicy: {
       requiredForRelease: [
         "openai",
@@ -308,6 +328,12 @@ export function buildFounderInitialGeneralReleaseDecision(input: {
         "credentials",
         "prompts",
         "provider_responses",
+        "payment_details",
+        "webhook_secrets",
+        "provider_payloads",
+        "provider_identities",
+        "store_ids",
+        "product_ids",
       ],
     },
   } as const;

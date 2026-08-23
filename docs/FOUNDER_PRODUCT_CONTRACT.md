@@ -16,6 +16,7 @@ release authority and is destroyed with the runner.
 
 ```bash
 BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION="$(git rev-parse HEAD)" \
+BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION="founder-contract-v1" \
 BRUNO_FOUNDER_CONTRACT_RUN_ID="local-$(git rev-parse --short HEAD)" \
 BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT="1" \
 BRUNO_FOUNDER_CONTRACT_OBSERVED_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" \
@@ -38,7 +39,8 @@ with the OS and browser versions used. Each attended record is bound to the app 
 the canonical resume, review, approve, and deny tasks with a passed outcome. The workflow rejects
 release mode if either attended record is absent, malformed, or incomplete.
 
-The retained JSON is an allowlisted summary bound to the source revision and GitHub run identity.
+The retained JSON is an allowlisted summary bound to the source revision, exact runtime revision,
+and GitHub run identity.
 It excludes credentials, authorization codes, message bodies, recipients, prompts, provider
 responses, and infrastructure identifiers. GitHub attests the summary and retains it for 90 days.
 Unit and browser runner output is deliberately not uploaded because it is not part of the evidence
@@ -46,7 +48,7 @@ allowlist.
 
 The same run also emits `founder-initial-general-release-decision.json`. In ordinary CI this is an
 explicit denied decision because attended evidence is absent. A release-mode dispatch may provide
-two JSON inputs containing only allowlisted aggregate counts, exact timestamps, release outcomes,
+three JSON inputs containing only allowlisted aggregate counts, exact timestamps, release outcomes,
 retention controls, and SHA-256 evidence digests:
 
 - `moderated_founder_summary_json` records the 4/4 desktop/phone cohort, cross-device day-two count,
@@ -55,22 +57,40 @@ retention controls, and SHA-256 evidence digests:
 - `provider_decision_summary_json` records each capability's released/hidden outcome, exact source
   revision, qualification and expiry instants, and a distinct sanitized evidence digest for OpenAI,
   Anthropic, Calendar reading, Gmail reading, and one-to-one Gmail sending.
+- `production_provider_qualification_summary_json` records exactly one attended production Clerk
+  qualification, one Lemon Squeezy test-mode qualification, and one attended Lemon Squeezy live
+  canary. Every record binds the same exact application and runtime revisions, environment,
+  observation and expiry instants, result, sanitized digest, and its fixed checklist. The live
+  record also binds separate intended and observed store and product reference digests.
 
 The decision approves only when the product contract is release-eligible, every usability and
 safety threshold passes, all five provider capability decisions are independently released and
-current for the exact app revision, and the attended summaries are complete. Hidden, missing,
-malformed, stale, expired, future-dated, revision-mismatched, or reused provider evidence fails
-closed. The retained decision excludes participant identities, recordings, transcripts,
-credentials, prompts, provider responses, and any unrecognized supplied fields. It also records the
+current for the exact app revision, and the attended summaries are complete. Clerk production,
+Lemon Squeezy test mode, and the attended live canary must all pass independently for the same exact
+application and runtime candidate. Hidden, missing, malformed, stale, expired, future-dated,
+revision-mismatched, or reused provider evidence fails closed. A test-mode record cannot occupy the
+live-canary slot; the live canary's intended store and product digests must match their observed
+references and must not alias each other. The retained decision excludes participant identities,
+recordings, transcripts, credentials, payment details, webhook secrets, prompts, provider payloads,
+provider responses, raw store/product identifiers, and any unrecognized supplied fields. It also records the
 General Release policy boundary: each Founder may authorize OpenAI only, Anthropic only, or both;
 routing uses only those authorized Ready connections; Bruno-funded fallback is prohibited; and
 qualification loss is capability-scoped at Safe Work Checkpoints.
 
-The workflow runs in automated mode for every push to `main`. A release candidate uses the manual
-`release` mode only after attended assistive-technology evidence exists. Before either mode runs,
+The workflow runs in automated mode for every push to `main`. With no external provider summary, CI
+still validates the parser and decision logic and emits an explicit denied decision; deterministic
+Clerk and Lemon Squeezy doubles never create test-mode, attended-production, real-charge, refund, or
+cleanup evidence. A release candidate uses the manual `release` mode only after attended
+assistive-technology evidence exists and supplies the exact immutable runtime revision. Before either mode runs,
 the workflow queries its GitHub Actions history for the exact source revision and fails closed when
 an earlier run for that revision was unsuccessful or remains unresolved. A successful automated run
 does not block the later attended release dispatch. No provider credential is used by either mode.
+
+The qualification booleans and digests are only the allowlisted summary of separately reviewed
+source evidence. They are not the source proof, do not make an existing Clerk or Lemon Squeezy
+account qualified, and must never be authored from deterministic test results. Follow
+[`CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md`](acceptance/CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md)
+for the attended evidence boundary and sanitized handoff.
 
 ## Deterministic lifecycle seam
 

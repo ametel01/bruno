@@ -138,6 +138,13 @@ expired, tampered, preview, production, or Clerk-mode envelopes fail closed. The
 passes the deletion event through Clerk's real webhook verifier. This automated seam is not hosted
 Clerk qualification or attended production evidence.
 
+Initial General Release additionally requires the exact-candidate attended Clerk qualification in
+[`CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md`](acceptance/CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md).
+A configured Clerk instance, successful local login, hosted test, or deterministic lifecycle pass
+does not satisfy it. Retained release evidence contains only the fixed result/checklist fields,
+exact application/runtime revisions and times, and a sanitized digest; it never contains a Clerk
+subject, identity, session material, credentials, or unrestricted webhook payload.
+
 ## Protected preview opt-in
 
 The safe default for previews is Clerk mode. A registration-free Vercel preview is allowed only

@@ -64,6 +64,14 @@ export const FOUNDER_PRODUCT_CONTRACT_INVARIANTS = [
     ],
   },
   {
+    id: "production_provider_qualification_decision",
+    kind: "automated",
+    evidence: [
+      "tests/unit/founder-production-provider-qualification.test.ts",
+      "tests/unit/founder-general-release-decision.test.ts",
+    ],
+  },
+  {
     id: "privacy_lifecycle",
     kind: "automated",
     evidence: [
@@ -162,6 +170,7 @@ export const FOUNDER_PRODUCT_CONTRACT_UNIT_FILES = [
   "tests/unit/founder-product-contract-evidence.test.ts",
   "tests/unit/founder-product-contract-workflow.test.ts",
   "tests/unit/founder-general-release-decision.test.ts",
+  "tests/unit/founder-production-provider-qualification.test.ts",
   "tests/unit/founder-general-release-activation.test.ts",
   "tests/unit/founder-product-contract-harness.test.ts",
   "tests/unit/backup-storage.test.ts",

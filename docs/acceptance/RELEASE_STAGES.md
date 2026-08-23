@@ -107,7 +107,9 @@ delivery, cross-device state, receipts, and payment-without-access recovery.
 Provider qualification also requires an attended production Clerk run plus Lemon Squeezy test-mode
 and live-mode runs. The live canary proves one real charge, signed webhook processing, Product
 Entitlement, Customer Portal access, cancellation, full refund, duplicate and reordered delivery,
-reconciliation, and sanitized cleanup. Existing provider accounts do not satisfy these gates.
+reconciliation, and sanitized cleanup. Existing provider accounts do not satisfy these gates. The
+allowlisted evidence handoff and exact application/runtime binding are defined in
+[`CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md`](CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md).
 
 ## Entitlement expiry and infrastructure cost
 

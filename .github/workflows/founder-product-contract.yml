@@ -14,6 +14,10 @@ on:
         options:
           - ci
           - release
+      runtime_revision:
+        description: Exact immutable Operator runtime revision for the release candidate
+        required: false
+        type: string
       voiceover_evidence_digest:
         description: Sanitized sha256 digest from attended VoiceOver on Safari evidence
         required: false
@@ -44,6 +48,10 @@ on:
         type: string
       provider_decision_summary_json:
         description: Exact-revision provider outcomes and evidence digests
+        required: false
+        type: string
+      production_provider_qualification_summary_json:
+        description: Allowlisted attended Clerk and Lemon test/live qualification summary; no source payloads
         required: false
         type: string
 
@@ -86,6 +94,7 @@ jobs:
       PORT: "3100"
       PLAYWRIGHT_BASE_URL: http://localhost:3100
       BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION: ${{ github.sha }}
+      BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION: ${{ inputs.runtime_revision || 'founder-contract-v1' }}
       BRUNO_FOUNDER_CONTRACT_RUN_ID: github-${{ github.run_id }}
       BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT: ${{ github.run_attempt }}
       BRUNO_FOUNDER_CONTRACT_MODE: ${{ inputs.mode || 'ci' }}
@@ -97,6 +106,7 @@ jobs:
       BRUNO_FOUNDER_CONTRACT_TALKBACK_BROWSER_VERSION: ${{ inputs.talkback_browser_version }}
       BRUNO_FOUNDER_MODERATED_SUMMARY_JSON: ${{ inputs.moderated_founder_summary_json }}
       BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON: ${{ inputs.provider_decision_summary_json }}
+      BRUNO_FOUNDER_PRODUCTION_PROVIDER_QUALIFICATION_SUMMARY_JSON: ${{ inputs.production_provider_qualification_summary_json }}
       BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH: founder-contract-artifacts/scenario-ledger.json
 
     steps:
@@ -110,6 +120,12 @@ jobs:
 
       - name: Install frozen dependencies
         run: bun install --frozen-lockfile
+
+      - name: Require the exact release runtime revision
+        if: inputs.mode == 'release'
+        env:
+          RELEASE_RUNTIME_REVISION: ${{ inputs.runtime_revision }}
+        run: test -n "$RELEASE_RUNTIME_REVISION"
 
       - name: Reject previously failed exact candidate
         env:

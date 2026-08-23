@@ -29,4 +29,14 @@ describe("Founder Product Contract runner topology", () => {
     expect(failureSpec).toContain("retainScenarioExecutions: true");
     expect(failureSpec).toContain("exact candidate contains a failed lifecycle scenario");
   });
+
+  it("binds the exact runtime and consumes only the sanitized external provider summary", () => {
+    expect(runner).toContain('requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION")');
+    expect(runner).toContain("parseFounderProductionProviderQualificationSummary(");
+    expect(runner).toContain(
+      "process.env.BRUNO_FOUNDER_PRODUCTION_PROVIDER_QUALIFICATION_SUMMARY_JSON",
+    );
+    expect(runner).not.toMatch(/CLERK_(SECRET|PUBLISHABLE)_KEY/);
+    expect(runner).not.toMatch(/LEMON_SQUEEZY_(API_KEY|WEBHOOK_SECRET)/);
+  });
 });

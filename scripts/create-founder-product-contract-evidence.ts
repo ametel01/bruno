@@ -42,6 +42,7 @@ export async function createFounderProductContractEvidence(input: {
   browserResultPath: string;
   unitResultPath: string;
   sourceRevision: string;
+  runtimeRevision: string;
   runId: string;
   runAttempt: number;
   mode: ContractMode;
@@ -64,6 +65,7 @@ export function buildFounderProductContractEvidence(input: {
   browser: PlaywrightResult;
   unit: VitestResult;
   sourceRevision: string;
+  runtimeRevision: string;
   runId: string;
   runAttempt: number;
   mode: ContractMode;
@@ -78,6 +80,11 @@ export function buildFounderProductContractEvidence(input: {
   scenarioSigningSecret: string;
 }) {
   requirePattern(input.sourceRevision, /^[a-f0-9]{40}$/, "source revision");
+  requirePattern(
+    input.runtimeRevision,
+    /^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$/,
+    "runtime revision",
+  );
   requirePattern(input.runId, /^[A-Za-z0-9._:-]{1,128}$/, "run ID");
   if (!Number.isSafeInteger(input.runAttempt) || input.runAttempt < 1) {
     throw new Error("Workflow run attempt must be a positive integer.");
@@ -205,6 +212,7 @@ export function buildFounderProductContractEvidence(input: {
     releaseEligible: Boolean(input.mode === "release" && voiceOverEvidence && talkBackEvidence),
     releaseIdentity: {
       sourceRevision: input.sourceRevision,
+      runtimeRevision: input.runtimeRevision,
       runId: input.runId,
     },
     observedAt: input.observedAt,

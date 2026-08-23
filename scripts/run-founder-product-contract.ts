@@ -8,6 +8,7 @@ import {
   parseFounderProviderDecisionSummary,
 } from "@/scripts/create-founder-general-release-decision";
 import { createFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
+import { parseFounderProductionProviderQualificationSummary } from "@/scripts/create-founder-production-provider-qualification";
 import { FOUNDER_PRODUCT_CONTRACT_UNIT_FILES } from "@/src/shared/founder-product-contract";
 import {
   FOUNDER_PRODUCT_CONTRACT_SCENARIO_SIGNING_SECRET_ENV,
@@ -36,6 +37,7 @@ await mkdir(artifactDirectory, { recursive: true });
 await rm(evidencePath, { force: true });
 await rm(generalReleaseDecisionPath, { force: true });
 const sourceRevision = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION");
+const runtimeRevision = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION");
 const observedAt = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_OBSERVED_AT");
 const runId = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID");
 const providerFailureRunId = `fpct-failure:${createHash("sha256").update(runId).digest("hex")}`;
@@ -89,6 +91,7 @@ const deterministicProviderEnvironment = {
   BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: scenarioSigningSecret,
   BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH: scenarioLedgerPath,
   BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION: sourceRevision,
+  BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION: runtimeRevision,
   BRUNO_FOUNDER_CONTRACT_RUN_ID: runId,
   BRUNO_FOUNDER_CONTRACT_OBSERVED_AT: observedAt,
 };
@@ -162,6 +165,7 @@ const evidence = await createFounderProductContractEvidence({
   browserResultPath,
   unitResultPath,
   sourceRevision,
+  runtimeRevision,
   runId,
   runAttempt,
   mode,
@@ -182,6 +186,9 @@ const generalReleaseDecision = buildFounderInitialGeneralReleaseDecision({
   moderatedSummary: parseFounderModeratedSummary(process.env.BRUNO_FOUNDER_MODERATED_SUMMARY_JSON),
   providerSummary: parseFounderProviderDecisionSummary(
     process.env.BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON,
+  ),
+  productionProviderQualificationSummary: parseFounderProductionProviderQualificationSummary(
+    process.env.BRUNO_FOUNDER_PRODUCTION_PROVIDER_QUALIFICATION_SUMMARY_JSON,
   ),
 });
 await writeFile(generalReleaseDecisionPath, `${JSON.stringify(generalReleaseDecision, null, 2)}\n`);

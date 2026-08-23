@@ -5,6 +5,7 @@ import {
   parseFounderProviderDecisionSummary,
 } from "@/scripts/create-founder-general-release-decision";
 import { buildFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
+import { parseFounderProductionProviderQualificationSummary } from "@/scripts/create-founder-production-provider-qualification";
 import {
   FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS,
   FOUNDER_PRODUCT_CONTRACT_LIFECYCLE_SCENARIOS,
@@ -21,6 +22,7 @@ describe("Founder Initial General Release decision", () => {
       productContract: productContract("ci"),
       moderatedSummary: null,
       providerSummary: null,
+      productionProviderQualificationSummary: null,
     });
 
     expect(decision).toMatchObject({
@@ -29,8 +31,13 @@ describe("Founder Initial General Release decision", () => {
         "product_contract_not_release_eligible",
         "moderated_founder_evidence_missing",
         "provider_decision_evidence_missing",
+        "production_provider_qualification_evidence_missing",
       ],
-      evidence: { moderatedFounderDigest: null, providerDecisionDigest: null },
+      evidence: {
+        moderatedFounderDigest: null,
+        providerDecisionDigest: null,
+        productionProviderQualificationDigest: null,
+      },
       retention: {
         releaseEvidenceDays: 90,
         recordingDays: 30,
@@ -44,12 +51,13 @@ describe("Founder Initial General Release decision", () => {
       productContract: productContract("release"),
       moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
       providerSummary: parseFounderProviderDecisionSummary(JSON.stringify(providerSummary())),
+      productionProviderQualificationSummary: parsedProductionProviderQualification(),
     });
 
     expect(decision).toMatchObject({
       outcome: "approved",
       reasons: [],
-      releaseIdentity: { sourceRevision: REVISION },
+      releaseIdentity: { sourceRevision: REVISION, runtimeRevision: "runtime-release-v1" },
       metrics: {
         total: 8,
         desktopFirst: 4,
@@ -74,6 +82,22 @@ describe("Founder Initial General Release decision", () => {
       },
     });
     expect(decision.summaryDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
+  it("keeps an otherwise release-eligible candidate denied when external Clerk/Lemon evidence is absent", () => {
+    const decision = buildFounderInitialGeneralReleaseDecision({
+      productContract: productContract("release"),
+      moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
+      providerSummary: parseFounderProviderDecisionSummary(JSON.stringify(providerSummary())),
+      productionProviderQualificationSummary: null,
+    });
+
+    expect(decision).toMatchObject({
+      outcome: "denied",
+      reasons: ["production_provider_qualification_evidence_missing"],
+      evidence: { productionProviderQualificationDigest: null },
+      productionProviderQualifications: null,
+    });
   });
 
   it.each([
@@ -107,6 +131,7 @@ describe("Founder Initial General Release decision", () => {
       productContract: productContract("release"),
       moderatedSummary: parseFounderModeratedSummary(JSON.stringify({ ...summary, ...override })),
       providerSummary: parseFounderProviderDecisionSummary(JSON.stringify(providerSummary())),
+      productionProviderQualificationSummary: parsedProductionProviderQualification(),
     });
 
     expect(decision.outcome).toBe("denied");
@@ -176,8 +201,18 @@ describe("Founder Initial General Release decision", () => {
     summary.providers.openai.credential = "do-not-retain";
     study.participants.private = "do-not-retain";
     study.criticalFailures.transcript = "do-not-retain";
+    const productionQualification = productionProviderQualification() as ReturnType<
+      typeof productionProviderQualification
+    > & {
+      private?: string;
+      qualifications: Array<Record<string, unknown>>;
+    };
+    productionQualification.private = "do-not-retain";
+    const clerkQualification = productionQualification.qualifications[0];
+    if (!clerkQualification) throw new Error("Expected Clerk qualification.");
+    clerkQualification.identity = "do-not-retain";
 
-    const decision = generalReleaseDecision(summary, study);
+    const decision = generalReleaseDecision(summary, study, productionQualification);
 
     expect(decision.outcome).toBe("approved");
     expect(JSON.stringify(decision)).not.toContain("do-not-retain");
@@ -193,6 +228,7 @@ describe("Founder Initial General Release decision", () => {
       productContract: productContract("release"),
       moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
       providerSummary: malformed,
+      productionProviderQualificationSummary: parsedProductionProviderQualification(),
     });
     expect(malformedDecision).toMatchObject({
       outcome: "denied",
@@ -211,6 +247,7 @@ describe("Founder Initial General Release decision", () => {
         productContract: productContract("release"),
         moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
         providerSummary: missing,
+        productionProviderQualificationSummary: parsedProductionProviderQualification(),
       }),
     ).toMatchObject({
       outcome: "denied",
@@ -219,11 +256,18 @@ describe("Founder Initial General Release decision", () => {
   });
 });
 
-function generalReleaseDecision(summary = providerSummary(), study = moderatedSummary()) {
+function generalReleaseDecision(
+  summary = providerSummary(),
+  study = moderatedSummary(),
+  productionQualification = productionProviderQualification(),
+) {
   return buildFounderInitialGeneralReleaseDecision({
     productContract: productContract("release"),
     moderatedSummary: parseFounderModeratedSummary(JSON.stringify(study)),
     providerSummary: parseFounderProviderDecisionSummary(JSON.stringify(summary)),
+    productionProviderQualificationSummary: parseFounderProductionProviderQualificationSummary(
+      JSON.stringify(productionQualification),
+    ),
   });
 }
 
@@ -235,6 +279,7 @@ function productContract(mode: "ci" | "release") {
     },
     unit: { numPassedTests: 156, numFailedTests: 0, numPendingTests: 0 },
     sourceRevision: REVISION,
+    runtimeRevision: "runtime-release-v1",
     runId: "release-370",
     runAttempt: 1,
     mode,
@@ -326,5 +371,74 @@ function providerSummary() {
       gmailReading: released("4"),
       gmailSending: released("5"),
     },
+  };
+}
+
+function parsedProductionProviderQualification() {
+  return parseFounderProductionProviderQualificationSummary(
+    JSON.stringify(productionProviderQualification()),
+  );
+}
+
+function productionProviderQualification() {
+  const common = (digit: string) => ({
+    applicationRevision: REVISION,
+    runtimeRevision: "runtime-release-v1",
+    observedAt: "2026-08-20T11:00:00.000Z",
+    expiresAt: "2026-08-27T11:00:00.000Z",
+    result: "passed",
+    evidenceDigest: `sha256:${digit.repeat(64)}`,
+    sanitized: true,
+  });
+  const lemonChecks = {
+    checkout: true,
+    signedWebhook: true,
+    checkoutCorrelation: true,
+    productEntitlement: true,
+    customerPortal: true,
+    cancellation: true,
+    fullRefund: true,
+    duplicateDelivery: true,
+    reorderedDelivery: true,
+    reconciliation: true,
+  };
+
+  return {
+    schemaVersion: "bruno.production-provider-qualification-summary.v1",
+    applicationRevision: REVISION,
+    runtimeRevision: "runtime-release-v1",
+    evidenceDigest: `sha256:${"9".repeat(64)}`,
+    qualifications: [
+      {
+        ...common("6"),
+        kind: "clerk_production",
+        evidenceClass: "attended_production",
+        providerEnvironment: "production",
+        checks: {
+          productionAuthentication: true,
+          crossDeviceSession: true,
+          identityRecovery: true,
+          accountClosureBoundary: true,
+        },
+      },
+      {
+        ...common("7"),
+        kind: "lemon_squeezy_test_mode",
+        evidenceClass: "provider_test_mode",
+        providerEnvironment: "test",
+        checks: lemonChecks,
+      },
+      {
+        ...common("8"),
+        kind: "lemon_squeezy_live_canary",
+        evidenceClass: "attended_live_canary",
+        providerEnvironment: "live",
+        intendedStoreDigest: `sha256:${"a".repeat(64)}`,
+        observedStoreDigest: `sha256:${"a".repeat(64)}`,
+        intendedProductDigest: `sha256:${"c".repeat(64)}`,
+        observedProductDigest: `sha256:${"c".repeat(64)}`,
+        checks: { ...lemonChecks, realCharge: true, sanitizedCleanup: true },
+      },
+    ],
   };
 }

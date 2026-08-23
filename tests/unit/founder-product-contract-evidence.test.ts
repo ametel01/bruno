@@ -22,7 +22,11 @@ describe("Founder Product Contract evidence", () => {
     expect(evidence).toMatchObject({
       result: "passed",
       releaseEligible: false,
-      releaseIdentity: { sourceRevision: REVISION, runId: "local-365" },
+      releaseIdentity: {
+        sourceRevision: REVISION,
+        runtimeRevision: "runtime-release-v1",
+        runId: "local-365",
+      },
       execution: {
         reruns: 0,
         unit: { passed: 64, failed: 0, skipped: 0 },
@@ -120,6 +124,12 @@ describe("Founder Product Contract evidence", () => {
     expect(() => buildFounderProductContractEvidence({ ...validInput(), runAttempt: 2 })).toThrow(
       "Workflow reruns cannot authorize Founder Product Contract evidence.",
     );
+  });
+
+  it("requires an exact runtime revision in the release identity", () => {
+    expect(() =>
+      buildFounderProductContractEvidence({ ...validInput(), runtimeRevision: "not valid" }),
+    ).toThrow("runtime revision is invalid");
   });
 
   it("refuses a missing lifecycle ledger in normal CI", () => {
@@ -277,6 +287,7 @@ function validInput() {
     },
     unit: { numPassedTests: 64, numFailedTests: 0, numPendingTests: 0 },
     sourceRevision: REVISION,
+    runtimeRevision: "runtime-release-v1",
     runId: "local-365",
     runAttempt: 1,
     mode: "ci" as const,

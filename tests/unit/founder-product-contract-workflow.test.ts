@@ -60,5 +60,16 @@ describe("Founder Product Contract workflow", () => {
     expect(workflow).not.toContain(
       "secrets.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET || secrets.BRUNO_FOUNDER_CONTRACT_CI_SCENARIO_SIGNING_SECRET",
     );
+    expect(workflow).toContain(
+      "BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION: $" +
+        "{{ inputs.runtime_revision || 'founder-contract-v1' }}",
+    );
+    expect(workflow).toContain("name: Require the exact release runtime revision");
+    expect(workflow).toContain(
+      "BRUNO_FOUNDER_PRODUCTION_PROVIDER_QUALIFICATION_SUMMARY_JSON: $" +
+        "{{ inputs.production_provider_qualification_summary_json }}",
+    );
+    expect(workflow).not.toContain("LEMON_SQUEEZY_API_KEY");
+    expect(workflow).not.toContain("CLERK_SECRET_KEY");
   });
 });
