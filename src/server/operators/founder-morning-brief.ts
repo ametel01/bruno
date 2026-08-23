@@ -14,6 +14,11 @@ import {
   operatorRelationshipEvidence,
   operatorRelationshipRecords,
 } from "@/src/server/db/schema";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import {
+  type FounderOwnerPreviewWorkAuthorityDependencies,
+  withFounderOwnerPreviewWorkAuthority,
+} from "@/src/server/founder-product-contract/work-authority";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
   deriveFounderRecovery,
@@ -378,34 +383,40 @@ export async function getFounderMorningBriefPreferencesForUser(
 export async function updateFounderMorningBriefPreferencesForUser(
   userId: string,
   deliveryLocalTime: string,
-  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
+  dependencies: FounderOwnerPreviewWorkAuthorityDependencies & { now?: () => Date } = {},
 ): Promise<FounderMorningBriefPreferencesDto> {
   if (!/^\d{2}:\d{2}$/.test(deliveryLocalTime)) throw new Error("Delivery time must use HH:mm.");
   const [hours = 0, minutes = 0] = deliveryLocalTime.split(":").map(Number);
   if (hours > 23 || minutes > 59) throw new Error("Delivery time must use a valid 24-hour time.");
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
-  return withConnection(dependencies, async (connection) =>
-    connection.db.transaction(async (tx) => {
+  const now = dependencies.now ?? (() => new Date());
+  return withFounderOwnerPreviewWorkAuthority(
+    {
+      userId,
+      now,
+      requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.coreOperation,
+    },
+    { ...dependencies, generalReleaseAuthority: "work" },
+    async (tx, at) => {
       const [preparation] = await tx
         .select()
         .from(operatorPreparations)
         .where(eq(operatorPreparations.operatorId, operator.id))
         .limit(1);
-      const now = dependencies.now?.() ?? new Date();
       const timezone = preparation?.timezone ?? "UTC";
-      const nextDeliveryAt = nextMorningBriefDeliveryAt(now, timezone, deliveryLocalTime);
+      const nextDeliveryAt = nextMorningBriefDeliveryAt(at, timezone, deliveryLocalTime);
       const [saved] = await tx
         .insert(operatorMorningBriefPreferences)
         .values({
           operatorId: operator.id,
           deliveryLocalTime,
           nextDeliveryAt,
-          createdAt: now,
-          updatedAt: now,
+          createdAt: at,
+          updatedAt: at,
         })
         .onConflictDoUpdate({
           target: operatorMorningBriefPreferences.operatorId,
-          set: { deliveryLocalTime, nextDeliveryAt, updatedAt: now },
+          set: { deliveryLocalTime, nextDeliveryAt, updatedAt: at },
         })
         .returning();
       return {
@@ -414,7 +425,7 @@ export async function updateFounderMorningBriefPreferencesForUser(
         nextDeliveryAt: (saved?.nextDeliveryAt ?? nextDeliveryAt).toISOString(),
         timezone: preparation?.timezone ?? null,
       };
-    }),
+    },
   );
 }
 

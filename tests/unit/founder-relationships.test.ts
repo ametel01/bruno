@@ -156,6 +156,7 @@ describe("Founder Relationship Records", () => {
     const confirmed = await confirmFounderRelationshipCandidateForUser(OWNER_ID, candidateId, {
       createConnection: () => connection,
       now: () => NOW,
+      requireReleaseStageAccess: ALLOW_RELEASE_STAGE_ACCESS,
     });
     expect(confirmed.records).toHaveLength(1);
     expect(confirmed.candidates[0]).toMatchObject({
@@ -198,7 +199,11 @@ describe("Founder Relationship Records", () => {
         commitments: ["Founder will send proposal", "Morgan will review by Friday"],
         status: "closed",
       },
-      { createConnection: () => connection, now: () => new Date(NOW.getTime() + 1000) },
+      {
+        createConnection: () => connection,
+        now: () => new Date(NOW.getTime() + 1000),
+        requireReleaseStageAccess: ALLOW_RELEASE_STAGE_ACCESS,
+      },
     );
     expect(updated.records[0]).toMatchObject({
       relationshipState: "client",
@@ -262,7 +267,11 @@ describe("Founder Relationship Records", () => {
         OTHER_OWNER_ID,
         "00000000-0000-4000-8000-000000003462",
         { nextAction: "Should not cross owners" },
-        { createConnection: () => connection, now: () => NOW },
+        {
+          createConnection: () => connection,
+          now: () => NOW,
+          requireReleaseStageAccess: ALLOW_RELEASE_STAGE_ACCESS,
+        },
       ),
     ).rejects.toMatchObject({ code: "relationship_not_found", status: 404 });
   });

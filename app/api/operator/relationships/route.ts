@@ -22,6 +22,7 @@ export async function GET(): Promise<Response> {
   const accessFailure = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
     "workspace_with_mail",
+    { allowGeneralReleaseSetup: true },
   );
   if (accessFailure) return accessFailure;
   try {
@@ -35,11 +36,6 @@ export async function GET(): Promise<Response> {
 export async function POST(request: Request): Promise<Response> {
   const applicationUser = await requireConfiguredApplicationUser();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
-  const accessFailure = await requireFounderOperatorWorkspaceAccess(
-    applicationUser.userId,
-    "workspace_with_mail",
-  );
-  if (accessFailure) return accessFailure;
   let payload: unknown;
   try {
     payload = await request.json();
@@ -56,6 +52,7 @@ export async function POST(request: Request): Promise<Response> {
       const evidenceAccessFailure = await requireFounderOperatorWorkspaceAccess(
         applicationUser.userId,
         founderRelationshipEvidenceRequirement(observations.value),
+        { allowGeneralReleaseSetup: true },
       );
       if (evidenceAccessFailure) return evidenceAccessFailure;
       const relationships = await ingestFounderRelationshipEvidenceForUser(
@@ -64,6 +61,12 @@ export async function POST(request: Request): Promise<Response> {
       );
       return Response.json({ relationships }, { headers: noStoreHeaders() });
     }
+    const accessFailure = await requireFounderOperatorWorkspaceAccess(
+      applicationUser.userId,
+      "workspace",
+      { allowGeneralReleaseSetup: true },
+    );
+    if (accessFailure) return accessFailure;
     if (payload.action === "confirm_candidate") {
       const candidateId = readId(payload.candidateId);
       if (!candidateId) return validationResponse("Relationship Candidate is required.");

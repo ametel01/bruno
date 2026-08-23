@@ -31,7 +31,8 @@ export async function POST(
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
   const accessFailure = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
-    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
+    { allowGeneralReleaseSetup: true },
   );
   if (accessFailure) return accessFailure;
   const { actionId } = await context.params;

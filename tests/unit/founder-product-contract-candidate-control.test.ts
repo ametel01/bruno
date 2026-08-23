@@ -8,9 +8,15 @@ import {
   founderReleaseCandidateControlKey,
   founderReleaseCandidateControlName,
 } from "@/scripts/founder-product-contract-candidate-control";
+import { buildDeterministicFounderGeneralReleaseAuthorityFixture } from "@/src/testing/founder-general-release-authority";
 
 const REVISION = "a".repeat(40);
 const RUNTIME_REVISION = "runtime-release-v1";
+const NOW = new Date("2026-08-23T08:00:00.000Z");
+const CANDIDATE_ENV = {
+  VERCEL_GIT_COMMIT_SHA: REVISION,
+  BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION: RUNTIME_REVISION,
+};
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -72,6 +78,8 @@ describe("Founder release candidate control", () => {
       decisionPath,
       priorJobStatus: "success",
       token: "github-test-token",
+      env: CANDIDATE_ENV,
+      now: NOW,
       request: async (_url, init) => {
         requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
         return jsonResponse({ id: 42 });
@@ -95,6 +103,8 @@ describe("Founder release candidate control", () => {
         decisionPath,
         priorJobStatus,
         token: "github-test-token",
+        env: CANDIDATE_ENV,
+        now: NOW,
         request: async (_url, init) => {
           requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
           return jsonResponse({ id: 42 });
@@ -113,6 +123,8 @@ describe("Founder release candidate control", () => {
         decisionPath,
         priorJobStatus: "success",
         token: "github-test-token",
+        env: CANDIDATE_ENV,
+        now: NOW,
         request: async () => new Response("unavailable", { status: 503 }),
       }),
     ).rejects.toThrow("could not be finalized");
@@ -129,6 +141,8 @@ describe("Founder release candidate control", () => {
         decisionPath,
         priorJobStatus: "success",
         token: "github-test-token",
+        env: CANDIDATE_ENV,
+        now: NOW,
         request: async (_url, init) => {
           committedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
           throw new TypeError("response lost after commit");
@@ -143,14 +157,18 @@ async function writeDecision(outcome: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "bruno-candidate-control-"));
   temporaryDirectories.push(directory);
   const path = join(directory, "decision.json");
-  await writeFile(
-    path,
-    JSON.stringify({
-      schemaVersion: "bruno.founder-initial-general-release-decision.v1",
-      outcome,
-    }),
-    "utf8",
-  );
+  const decision =
+    outcome === "approved"
+      ? buildDeterministicFounderGeneralReleaseAuthorityFixture({
+          sourceRevision: REVISION,
+          runtimeRevision: RUNTIME_REVISION,
+          decidedAt: NOW,
+        })
+      : JSON.stringify({
+          schemaVersion: "bruno.founder-initial-general-release-decision.v1",
+          outcome,
+        });
+  await writeFile(path, decision, "utf8");
   return path;
 }
 

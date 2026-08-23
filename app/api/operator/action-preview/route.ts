@@ -33,6 +33,7 @@ export async function GET(
   const accessFailure = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
     "workspace",
+    { allowGeneralReleaseSetup: true },
   );
   if (accessFailure) return accessFailure;
   const preview = await (dependencies.getPreview ?? getFounderActionPreviewForUser)(
@@ -53,6 +54,7 @@ export async function POST(
   const accessFailure = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
     FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+    { allowGeneralReleaseSetup: true },
   );
   if (accessFailure) return accessFailure;
   let payload: unknown;

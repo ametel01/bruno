@@ -1,8 +1,11 @@
 import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildTestAnthropicAcceptanceRelease } from "@/scripts/founder-anthropic-test-release";
+import { buildTestOpenAiConnectedAcceptanceRelease } from "@/scripts/founder-openai-test-release";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   founderGeneralReleaseActivations,
+  founderReleaseDecisions,
   operatorActionPreviews,
   operatorAiConnections,
   operatorConversationMessages,
@@ -312,7 +315,9 @@ describe("Founder Conversation application seam", () => {
     expect(operator.id).toBeTruthy();
   });
 
-  it("routes public General Release work through a released Anthropic-only connection", async () => {
+  it("preserves a retained OpenAI Hold and routes General Release only through Anthropic", async () => {
+    const applicationRevision = "3".repeat(40);
+    const runtimeRevision = "runtime-general-release-v1";
     const operator = await ensureFounderOperatorForUser(OWNER_ID, {
       createConnection: () => connection,
       now: () => now,
@@ -340,9 +345,33 @@ describe("Founder Conversation application seam", () => {
       authorizedAt: now,
       lastVerifiedAt: now,
     });
+    const [releaseDecision] = await connection.db
+      .insert(founderReleaseDecisions)
+      .values({
+        stage: "initial_general_release",
+        outcome: "enter",
+        applicationRevision,
+        runtimeRevision,
+        capabilityManifest: [
+          "openai",
+          "anthropic",
+          "calendar_reading",
+          "gmail_reading",
+          "gmail_sending",
+        ],
+        evidenceDigests: Array.from(
+          { length: 12 },
+          (_, index) => `sha256:${index.toString(16).repeat(64)}`,
+        ),
+        authorityExpiresAt: new Date(now.valueOf() + 8 * 24 * 60 * 60 * 1_000),
+        decidedAt: new Date(now.valueOf() - 1),
+      })
+      .returning({ id: founderReleaseDecisions.id });
+    if (!releaseDecision) throw new Error("General Release Decision fixture was not persisted.");
     await connection.db.insert(founderGeneralReleaseActivations).values({
       userId: OWNER_ID,
       operatorId: operator.id,
+      releaseDecisionId: releaseDecision.id,
       status: "setup",
       serviceBusinessConfirmedAt: now,
       geographyCode: "PH",
@@ -352,6 +381,26 @@ describe("Founder Conversation application seam", () => {
       capacityObservedAt: now,
       createdAt: now,
       updatedAt: now,
+    });
+    await connection.db.insert(founderReleaseDecisions).values({
+      stage: "initial_general_release",
+      outcome: "hold",
+      applicationRevision,
+      runtimeRevision,
+      capabilityManifest: [
+        "openai",
+        "anthropic",
+        "calendar_reading",
+        "gmail_reading",
+        "gmail_sending",
+      ],
+      affectedCapabilities: ["openai"],
+      evidenceDigests: Array.from(
+        { length: 13 },
+        (_, index) => `sha256:${(index + 1).toString(16).repeat(64)}`,
+      ),
+      authorityExpiresAt: new Date(now.valueOf() + 8 * 24 * 60 * 60 * 1_000),
+      decidedAt: now,
     });
     let anthropicCalls = 0;
     const sent = await sendFounderConversationMessageForUser(
@@ -369,6 +418,18 @@ describe("Founder Conversation application seam", () => {
           },
         },
         routingPolicy: MULTI_PROVIDER_POLICY,
+        env: {
+          VERCEL_GIT_COMMIT_SHA: applicationRevision,
+          BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION: runtimeRevision,
+          BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
+            now,
+            applicationRevision,
+          ),
+          BRUNO_ANTHROPIC_CONNECTED_ACCEPTANCE_RELEASE: buildTestAnthropicAcceptanceRelease(
+            now,
+            applicationRevision,
+          ),
+        },
         requestId: "request-general-release-anthropic",
         now: () => now,
         requireReadyConnection: async () => ({

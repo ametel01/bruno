@@ -7,6 +7,14 @@ const mocks = vi.hoisted(() => ({
   createAction: vi.fn(),
   decideAction: vi.fn(),
   executeAction: vi.fn(),
+  reconcileAction: vi.fn(),
+  requireWorkspaceAccess: vi.fn(),
+  accessErrorResponse: vi.fn(),
+}));
+
+vi.mock("@/app/api/operator/_shared/owner-preview-access", () => ({
+  requireFounderOperatorWorkspaceAccess: mocks.requireWorkspaceAccess,
+  founderOperatorAccessErrorResponse: mocks.accessErrorResponse,
 }));
 
 vi.mock("@/src/server/users/configured-application-user", () => ({
@@ -32,6 +40,12 @@ const ACTION = {
 describe("Founder Proposed Action routes", () => {
   beforeEach(() => {
     mocks.requireApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+    mocks.requireWorkspaceAccess.mockResolvedValue(null);
+    mocks.accessErrorResponse.mockImplementation((error) =>
+      error instanceof FounderReleaseStageAccessError
+        ? Response.json({ error: { code: error.code } }, { status: error.status })
+        : null,
+    );
     mocks.getActions.mockResolvedValue([ACTION]);
     mocks.createAction.mockResolvedValue(ACTION);
     mocks.decideAction.mockResolvedValue({
@@ -44,6 +58,11 @@ describe("Founder Proposed Action routes", () => {
       duplicate: false,
       receipt: { id: "receipt-351" },
     });
+    mocks.reconcileAction.mockResolvedValue({
+      status: "succeeded",
+      duplicate: false,
+      receipt: { id: "receipt-352" },
+    });
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -54,6 +73,9 @@ describe("Founder Proposed Action routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ actions: [ACTION] });
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, "workspace", {
+      allowGeneralReleaseSetup: true,
+    });
     expect(mocks.getActions).toHaveBeenCalledWith(USER_ID);
   });
 
@@ -73,6 +95,9 @@ describe("Founder Proposed Action routes", () => {
       }),
     );
     expect(response.status).toBe(201);
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, "ai_provider", {
+      allowGeneralReleaseSetup: true,
+    });
     expect(mocks.createAction).toHaveBeenCalledWith(
       USER_ID,
       expect.objectContaining({
@@ -162,5 +187,29 @@ describe("Founder Proposed Action routes", () => {
     );
     expect(response.status).toBe(400);
     expect(mocks.executeAction).not.toHaveBeenCalled();
+  });
+
+  it("reconciles an uncertain action through General Release setup access", async () => {
+    mocks.requireWorkspaceAccess.mockImplementation(async (_userId, requirement) =>
+      requirement === "core_operation" ||
+      (Array.isArray(requirement) &&
+        (requirement.includes("calendar_reading") || requirement.includes("gmail_reading")))
+        ? Response.json({ error: { code: "owner_preview_access_required" } }, { status: 403 })
+        : null,
+    );
+    const { POST } = await import("@/app/api/operator/proposed-actions/[actionId]/reconcile/route");
+    const response = await POST(
+      new Request(`http://localhost/api/operator/proposed-actions/${ACTION_ID}/reconcile`, {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ actionId: ACTION_ID }) },
+      { reconcileAction: mocks.reconcileAction },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, ["gmail_sending"], {
+      allowGeneralReleaseSetup: true,
+    });
+    expect(mocks.reconcileAction).toHaveBeenCalledWith(USER_ID, ACTION_ID);
   });
 });

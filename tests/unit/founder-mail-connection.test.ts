@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
@@ -95,6 +96,41 @@ describe("Founder Google Gmail reading application seam", () => {
     ).resolves.toBeNull();
   });
 
+  it("preserves saved state, denial cleanup, and disconnect after reading qualification expires", async () => {
+    const adapter = mailAdapter();
+    const started = await startFounderGoogleMailAuthorizationForUser(
+      OWNER_ID,
+      dependencies(adapter),
+    );
+    const deniedState = new URL(started.authorization?.authorizationUrl ?? "").searchParams.get(
+      "state",
+    );
+    await expect(
+      denyFounderGoogleMailAuthorizationForState(deniedState ?? "", {
+        createConnection: () => connection,
+        env: {},
+        now: () => NOW,
+      }),
+    ).resolves.toMatchObject({ status: "needs_attention" });
+
+    await connect(adapter);
+    await expect(
+      getFounderGoogleMailConnectionForUser(OWNER_ID, {
+        createConnection: () => connection,
+        env: {},
+      }),
+    ).resolves.toMatchObject({ status: "selecting", accountLabel: "founder@example.com" });
+    await expect(
+      disconnectFounderGoogleMailForUser(OWNER_ID, {
+        createConnection: () => connection,
+        adapter,
+        env: {},
+        keyring: KEYRING,
+        now: () => NOW,
+      }),
+    ).resolves.toMatchObject({ status: "disconnected" });
+  });
+
   it("persists a contextual offer decision on the Founder operator", async () => {
     await expect(
       getFounderGoogleMailOfferDispositionForUser(OWNER_ID, dependenciesForOffer()),
@@ -105,6 +141,29 @@ describe("Founder Google Gmail reading application seam", () => {
     await expect(
       getFounderGoogleMailOfferDispositionForUser(OWNER_ID, dependenciesForOffer()),
     ).resolves.toBe("dismissed");
+  });
+
+  it("rechecks Gmail capability while holding the Founder lifecycle lock", async () => {
+    const competingConnection = createDatabaseConnection();
+    let checkedInsideLock = false;
+    try {
+      await expect(
+        startFounderGoogleMailAuthorizationForUser(OWNER_ID, {
+          ...dependencies(mailAdapter()),
+          getOwnerPreviewAccess: async () => {
+            const rows = await competingConnection.db.execute<{ acquired: boolean }>(
+              sql`select pg_try_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${OWNER_ID}`}, 0)) as acquired`,
+            );
+            expect(rows[0]?.acquired).toBe(false);
+            checkedInsideLock = true;
+            return { admitted: true, availableCapabilities: ["gmail_reading"] };
+          },
+        }),
+      ).resolves.toMatchObject({ connection: { status: "authorizing" } });
+      expect(checkedInsideLock).toBe(true);
+    } finally {
+      await competingConnection.close();
+    }
   });
 
   it("uses a separate read-only grant, keeps labels unselected, and accepts empty live evidence", async () => {
@@ -287,6 +346,10 @@ describe("Founder Google Gmail reading application seam", () => {
       keyring: KEYRING,
       now: () => NOW,
       env: ENV,
+      getOwnerPreviewAccess: async () => ({
+        admitted: true as const,
+        availableCapabilities: ["gmail_reading" as const],
+      }),
     };
   }
 

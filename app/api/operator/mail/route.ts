@@ -1,6 +1,7 @@
 import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
-import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import { hasFounderGeneralReleaseSetupAccessForUser } from "@/src/server/founder-product-contract/initial-general-release";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import { isFounderGoogleMailReadingReleased } from "@/src/server/operators/founder-google-reading-release";
 import {
   disconnectFounderGoogleMailForUser,
   FounderMailConnectionError,
@@ -11,7 +12,6 @@ import {
   startFounderGoogleMailAuthorizationForUser,
   verifyFounderGoogleMailForUser,
 } from "@/src/server/operators/founder-mail-connection";
-import { isFounderGoogleMailReadingReleased } from "@/src/server/operators/founder-google-reading-release";
 import type { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import { requireConfiguredApplicationUser as defaultRequireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
@@ -39,16 +39,9 @@ export async function GET(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
-  if (
-    !(await (
-      dependencies.hasGeneralReleaseSetupAccess ?? hasFounderGeneralReleaseSetupAccessForUser
-    )(applicationUser.userId))
-  ) {
-    return ownerPreviewUnavailableResponse();
-  }
   const accessError = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
-    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+    "workspace",
     {
       allowGeneralReleaseSetup: true,
       ...(dependencies.hasGeneralReleaseSetupAccess
@@ -57,9 +50,6 @@ export async function GET(
     },
   );
   if (accessError) return accessError;
-  if (!(dependencies.isMailReadingReleased ?? isFounderGoogleMailReadingReleased)()) {
-    return providerNotReleasedResponse();
-  }
   const [connection, disposition] = await Promise.all([
     (dependencies.getConnection ?? getFounderGoogleMailConnectionForUser)(applicationUser.userId),
     (dependencies.getOfferDisposition ?? getFounderGoogleMailOfferDispositionForUser)(
@@ -92,13 +82,17 @@ export async function POST(
       if (
         !(await (
           dependencies.hasGeneralReleaseSetupAccess ?? hasFounderGeneralReleaseSetupAccessForUser
-        )(applicationUser.userId))
+        )(
+          applicationUser.userId,
+          {},
+          FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailRelationshipEvidence,
+        ))
       ) {
         return ownerPreviewUnavailableResponse();
       }
       const accessError = await requireFounderOperatorWorkspaceAccess(
         applicationUser.userId,
-        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailRelationshipEvidence,
         {
           allowGeneralReleaseSetup: true,
           ...(dependencies.hasGeneralReleaseSetupAccess

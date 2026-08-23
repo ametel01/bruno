@@ -1,23 +1,25 @@
 import { readFile } from "node:fs/promises";
+import {
+  FOUNDER_GENERAL_RELEASE_DECISION_ENV,
+  readFounderGeneralReleaseAuthority,
+} from "@/src/server/founder-product-contract/general-release-authority";
 
-const DECISION_SCHEMA = "bruno.founder-initial-general-release-decision.v1";
-
-export async function assertFounderReleaseDecisionApproved(path: string): Promise<void> {
-  let parsed: unknown;
+export async function assertFounderReleaseDecisionApproved(
+  path: string,
+  env: Record<string, string | undefined> = process.env,
+  now = new Date(),
+): Promise<void> {
+  let raw: string;
   try {
-    parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+    raw = await readFile(path, "utf8");
   } catch {
     throw new Error("Founder Initial General Release decision artifact is unavailable.");
   }
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    Array.isArray(parsed) ||
-    !("schemaVersion" in parsed) ||
-    parsed.schemaVersion !== DECISION_SCHEMA ||
-    !("outcome" in parsed) ||
-    parsed.outcome !== "approved"
-  ) {
+  const authority = readFounderGeneralReleaseAuthority(
+    { ...env, [FOUNDER_GENERAL_RELEASE_DECISION_ENV]: raw },
+    now,
+  );
+  if (!authority.approved) {
     throw new Error("Founder Initial General Release decision denied this exact candidate.");
   }
 }

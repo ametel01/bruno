@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildTestGoogleMailSendingAcceptanceRelease } from "@/scripts/founder-google-mail-sending-test-release";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
@@ -141,12 +141,18 @@ describe("Founder approved Gmail execution", () => {
   it("sends exactly one approved message and persists an immutable receipt", async () => {
     const action = await approveAction();
     const rawMessages: string[] = [];
+    const competingConnection = createDatabaseConnection();
     const result = await execute(action.id, {
       sendMessage: async ({ rawMessage }) => {
+        const rows = await competingConnection.db.execute<{ acquired: boolean }>(
+          sql`select pg_try_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${OWNER_ID}`}, 0)) as acquired`,
+        );
+        expect(rows[0]?.acquired).toBe(false);
         rawMessages.push(rawMessage);
         return { ok: true, providerMessageId: "gmail-351", providerThreadId: "thread-351" };
       },
     });
+    await competingConnection.close();
 
     expect(result).toMatchObject({ status: "succeeded", duplicate: false });
     expect(result.receipt).toMatchObject({
@@ -318,11 +324,20 @@ describe("Founder approved Gmail execution", () => {
       .set({ state: "executing", updatedAt: NOW })
       .where(eq(operatorProposedActions.id, action.id));
 
+    let authorityChecks = 0;
+    const requireReleaseStageAccess: NonNullable<
+      FounderMailExecutionDependencies["requireReleaseStageAccess"]
+    > = async (_tx, input) => {
+      authorityChecks += 1;
+      expect(input.requiredCapabilities).toEqual(["gmail_sending"]);
+    };
     const reconciled = await reconcileFounderGmailActionForUser(OWNER_ID, action.id, {
       createConnection: () => connection,
       now: () => new Date(NOW.getTime() + 6 * 60 * 1000),
+      requireReleaseStageAccess,
     });
     expect(reconciled).toMatchObject({ status: "outcome_uncertain", duplicate: false });
+    expect(authorityChecks).toBe(1);
     expect((await connection.db.select().from(operatorActionReceipts))[0]?.outcome).toBe(
       "outcome_uncertain",
     );

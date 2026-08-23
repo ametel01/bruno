@@ -6,6 +6,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
 import {
+  founderGeneralReleaseActivations,
   founderInfrastructureRetirements,
   founderRecoveryArchiveDeletionReceipts,
   founderRecoveryArchives,
@@ -462,6 +463,7 @@ export async function reconcileFounderRecoveryArchives(input: {
     const latestAdmissionByUserAndStage = new Map<string, (typeof decisions)[number]>();
     for (const decision of decisions) {
       if (decision.outcome !== "enter" && decision.outcome !== "resume") continue;
+      if (!decision.userId) continue;
       const key = `${decision.userId}:${decision.stage}`;
       if (!latestAdmissionByUserAndStage.has(key)) {
         latestAdmissionByUserAndStage.set(key, decision);
@@ -471,18 +473,44 @@ export async function reconcileFounderRecoveryArchives(input: {
     for (const [key, latestDecision] of latestByUserAndStage) {
       if (latestDecision.outcome === "deny") continue;
       const admission = latestAdmissionByUserAndStage.get(key);
-      if (!admission) continue;
+      if (!admission?.userId) continue;
       const current = latestAdmittedDecisionByUser.get(admission.userId);
       if (!current || current.decidedAt < admission.decidedAt) {
         latestAdmittedDecisionByUser.set(admission.userId, admission);
       }
     }
-    const eligibleUsers = [...latestAdmittedDecisionByUser.values()]
+    const previewEligibleUsers = [...latestAdmittedDecisionByUser.values()]
       .filter(
         (decision) =>
+          decision.userId !== null &&
           (latestRetirementByUser.get(decision.userId) ?? new Date(0)) < decision.decidedAt,
       )
-      .map((decision) => decision.userId);
+      .flatMap((decision) => (decision.userId ? [decision.userId] : []));
+    const generalReleaseAdmissions = await connection.db
+      .select({
+        userId: founderGeneralReleaseActivations.userId,
+        decidedAt: founderReleaseDecisions.decidedAt,
+      })
+      .from(founderGeneralReleaseActivations)
+      .innerJoin(
+        operators,
+        and(
+          eq(operators.id, founderGeneralReleaseActivations.operatorId),
+          eq(operators.status, "active"),
+        ),
+      )
+      .innerJoin(
+        founderReleaseDecisions,
+        eq(founderReleaseDecisions.id, founderGeneralReleaseActivations.releaseDecisionId),
+      )
+      .where(inArray(founderGeneralReleaseActivations.status, ["activation_pending", "activated"]));
+    const generalReleaseEligibleUsers = generalReleaseAdmissions
+      .filter(
+        (admission) =>
+          (latestRetirementByUser.get(admission.userId) ?? new Date(0)) < admission.decidedAt,
+      )
+      .map((admission) => admission.userId);
+    const eligibleUsers = [...new Set([...previewEligibleUsers, ...generalReleaseEligibleUsers])];
     const retainedArchives = await connection.db
       .select({ userId: founderRecoveryArchives.userId })
       .from(founderRecoveryArchives)
@@ -679,7 +707,32 @@ async function requireScheduledRecoveryArchiveAuthorityInTransaction(
     )
     .filter((decision): decision is (typeof decisions)[number] => Boolean(decision))
     .sort((left, right) => right.decidedAt.valueOf() - left.decidedAt.valueOf());
-  const admission = admissions[0];
+  const [generalReleaseAdmission] = await tx
+    .select({
+      stage: founderReleaseDecisions.stage,
+      outcome: founderReleaseDecisions.outcome,
+      runtimeRevision: founderReleaseDecisions.runtimeRevision,
+      decidedAt: founderReleaseDecisions.decidedAt,
+    })
+    .from(founderGeneralReleaseActivations)
+    .innerJoin(
+      founderReleaseDecisions,
+      eq(founderReleaseDecisions.id, founderGeneralReleaseActivations.releaseDecisionId),
+    )
+    .where(
+      and(
+        eq(founderGeneralReleaseActivations.userId, userId),
+        eq(founderGeneralReleaseActivations.operatorId, operatorId),
+        inArray(founderGeneralReleaseActivations.status, ["activation_pending", "activated"]),
+        eq(founderReleaseDecisions.stage, "initial_general_release"),
+        inArray(founderReleaseDecisions.outcome, ["enter", "resume"]),
+      ),
+    )
+    .orderBy(desc(founderReleaseDecisions.decidedAt))
+    .limit(1);
+  const admission = [...admissions, ...(generalReleaseAdmission ? [generalReleaseAdmission] : [])]
+    .sort((left, right) => right.decidedAt.valueOf() - left.decidedAt.valueOf())
+    .at(0);
   if (!admission) throw new Error("Scheduled Recovery Archive requires prior admission.");
   const [retirement] = await tx
     .select({ absenceVerifiedAt: founderInfrastructureRetirements.absenceVerifiedAt })

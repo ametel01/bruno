@@ -57,6 +57,7 @@ import {
   FOUNDER_GENERAL_RELEASE_ACTIVATION_WINDOW_MS,
   type FounderGeneralReleaseActivationDto,
   FounderGeneralReleaseError,
+  founderGeneralReleaseSetupAuthorizesInTransaction,
   getFounderGeneralReleaseActivationForUser,
   reconcileFounderGeneralReleaseDeadlineForUser,
   requireFounderGeneralReleasePurchaseDecisionInTransaction,
@@ -170,6 +171,21 @@ export type FounderLifecycleOutcome = {
     retirementCompleted: true;
   };
   initialGeneralRelease?: {
+    missingDecisionAdmittedNobody: boolean;
+    deniedDecisionAdmittedNobody: boolean;
+    staleDecisionAdmittedNobody: boolean;
+    unboundSetupDenied: boolean;
+    holdBlockedAdmission: boolean;
+    heldCapabilityPaused: boolean;
+    unaffectedCapabilityAvailable: boolean;
+    configurationRecoveryDidNotResume: boolean;
+    explicitResumeRestoredCapability: boolean;
+    resumeReconfirmationSurfaced: boolean;
+    gmailPublicSetupSeamPassed: boolean;
+    gmailHoldBlockedProviderEffects: boolean;
+    gmailDisconnectPreservedDuringHold: boolean;
+    gmailResumeRestoredPublicSetup: boolean;
+    activationBoundToExactReleaseDecision: boolean;
     abandonedSetupCreatedNoDroplet: boolean;
     explicitCreateRequired: boolean;
     exactActivationWindow: boolean;
@@ -276,6 +292,16 @@ type LifecycleDependencies = {
     status: number;
     generalRelease?: FounderGeneralReleaseActivationDto;
     error?: { code?: string; message?: string };
+  }>;
+  generalReleaseGmailBoundary?: (
+    phase: "approved" | "held" | "resumed",
+    observedAt: Date,
+  ) => Promise<{
+    getAllowed: boolean;
+    startAllowed: boolean;
+    callbackAllowed: boolean;
+    disconnectAllowed: boolean;
+    providerEffectsStarted: number;
   }>;
   identityRecoveryPublicSeam?: (
     input: LifecycleInput,
@@ -642,6 +668,7 @@ async function executeInitialGeneralReleaseContractScenario(
   }
 
   const availabilityEnvironment = {
+    ...process.env,
     BRUNO_INITIAL_GENERAL_RELEASE_AVAILABILITY: "open",
     BRUNO_INITIAL_GENERAL_RELEASE_GEOGRAPHIES: "PH",
     BRUNO_INITIAL_GENERAL_RELEASE_AVAILABILITY_MESSAGE:
@@ -656,6 +683,69 @@ async function executeInitialGeneralReleaseContractScenario(
   if (!application) {
     throw new Error("The public General Release application boundary is unavailable.");
   }
+  const gmailBoundary = dependencies.generalReleaseGmailBoundary;
+  if (!gmailBoundary) {
+    throw new Error("The public General Release Gmail boundary is unavailable.");
+  }
+  const [initialReleaseDecision] = await connection.db
+    .select()
+    .from(founderReleaseDecisions)
+    .where(eq(founderReleaseDecisions.stage, "initial_general_release"))
+    .orderBy(desc(founderReleaseDecisions.decidedAt))
+    .limit(1);
+  if (initialReleaseDecision?.outcome !== "enter") {
+    throw new Error("The deterministic exact-candidate General Release Decision is unavailable.");
+  }
+  const confirmEligibility = (now: Date) =>
+    application(
+      {
+        action: "confirm_eligibility",
+        serviceBusinessConfirmed: true,
+        geographyCode: "PH",
+      },
+      now,
+    );
+  const activationCount = async () =>
+    (
+      await connection.db
+        .select({ id: founderGeneralReleaseActivations.id })
+        .from(founderGeneralReleaseActivations)
+        .where(eq(founderGeneralReleaseActivations.userId, input.userId))
+    ).length;
+
+  await connection.db
+    .delete(founderReleaseDecisions)
+    .where(eq(founderReleaseDecisions.id, initialReleaseDecision.id));
+  const missingDecision = await confirmEligibility(input.now);
+  const missingDecisionAdmittedNobody =
+    missingDecision.status === 503 &&
+    missingDecision.error?.code === "general_release_decision_required" &&
+    (await activationCount()) === 0;
+  await connection.db.insert(founderReleaseDecisions).values(initialReleaseDecision);
+
+  await connection.db
+    .update(founderReleaseDecisions)
+    .set({ outcome: "deny" })
+    .where(eq(founderReleaseDecisions.id, initialReleaseDecision.id));
+  const deniedDecision = await confirmEligibility(input.now);
+  const deniedDecisionAdmittedNobody =
+    deniedDecision.status === 503 &&
+    deniedDecision.error?.code === "general_release_decision_required" &&
+    (await activationCount()) === 0;
+  await connection.db
+    .update(founderReleaseDecisions)
+    .set({ outcome: "enter", authorityExpiresAt: input.now })
+    .where(eq(founderReleaseDecisions.id, initialReleaseDecision.id));
+  const staleDecision = await confirmEligibility(input.now);
+  const staleDecisionAdmittedNobody =
+    staleDecision.status === 503 &&
+    staleDecision.error?.code === "general_release_decision_required" &&
+    (await activationCount()) === 0;
+  await connection.db
+    .update(founderReleaseDecisions)
+    .set({ authorityExpiresAt: initialReleaseDecision.authorityExpiresAt })
+    .where(eq(founderReleaseDecisions.id, initialReleaseDecision.id));
+
   const eligibility = await application(
     {
       action: "confirm_eligibility",
@@ -665,22 +755,137 @@ async function executeInitialGeneralReleaseContractScenario(
     input.now,
   );
   requireGeneralReleaseApplicationStatus(eligibility, 200, "Eligibility confirmation");
+  const [boundSetup] = await connection.db
+    .select()
+    .from(founderGeneralReleaseActivations)
+    .where(eq(founderGeneralReleaseActivations.userId, input.userId))
+    .limit(1);
+  if (!boundSetup?.releaseDecisionId) {
+    throw new Error("The deterministic General Release setup was not bound.");
+  }
+  const approvedGmailBoundary = await gmailBoundary("approved", input.now);
+  await connection.db
+    .update(founderGeneralReleaseActivations)
+    .set({ releaseDecisionId: null })
+    .where(eq(founderGeneralReleaseActivations.id, boundSetup.id));
+  const unboundCreate = await application({ action: "create_operator" }, input.now);
+  const [stillUnbound] = await connection.db
+    .select({ releaseDecisionId: founderGeneralReleaseActivations.releaseDecisionId })
+    .from(founderGeneralReleaseActivations)
+    .where(eq(founderGeneralReleaseActivations.id, boundSetup.id));
+  const unboundSetupDenied =
+    unboundCreate.status === 409 &&
+    unboundCreate.error?.code === "general_release_decision_required" &&
+    stillUnbound?.releaseDecisionId === null;
+  await connection.db
+    .update(founderGeneralReleaseActivations)
+    .set({ releaseDecisionId: boundSetup.releaseDecisionId })
+    .where(eq(founderGeneralReleaseActivations.id, boundSetup.id));
+
+  const holdAt =
+    input.now <= initialReleaseDecision.decidedAt
+      ? new Date(initialReleaseDecision.decidedAt.valueOf() + 1)
+      : input.now;
+  const holdDigest = founderProductContractDigest(
+    JSON.stringify({
+      kind: "initial_general_release_contract_hold",
+      capability: "gmail_sending",
+      observedAt: holdAt.toISOString(),
+    }),
+  );
+  await connection.db.insert(founderReleaseDecisions).values({
+    stage: "initial_general_release",
+    outcome: "hold",
+    applicationRevision: initialReleaseDecision.applicationRevision,
+    runtimeRevision: initialReleaseDecision.runtimeRevision,
+    capabilityManifest: initialReleaseDecision.capabilityManifest,
+    affectedCapabilities: ["gmail_sending"],
+    evidenceDigests: [holdDigest, ...initialReleaseDecision.evidenceDigests],
+    authorityExpiresAt: initialReleaseDecision.authorityExpiresAt,
+    decidedAt: holdAt,
+  });
+  const holdAdmission = await confirmEligibility(holdAt);
+  const holdBlockedAdmission =
+    holdAdmission.status === 503 && holdAdmission.error?.code === "general_release_hold";
+  const [unaffectedCapabilityAvailable, heldCapabilityPaused, stillHeldAfterRecovery] =
+    await connection.db.transaction(async (tx) => [
+      await founderGeneralReleaseSetupAuthorizesInTransaction(
+        tx,
+        input.userId,
+        holdAt,
+        ["openai"],
+        availabilityEnvironment,
+      ),
+      !(await founderGeneralReleaseSetupAuthorizesInTransaction(
+        tx,
+        input.userId,
+        holdAt,
+        ["gmail_sending"],
+        availabilityEnvironment,
+      )),
+      !(await founderGeneralReleaseSetupAuthorizesInTransaction(
+        tx,
+        input.userId,
+        holdAt,
+        ["gmail_sending"],
+        availabilityEnvironment,
+      )),
+    ]);
+  const heldGmailBoundary = await gmailBoundary("held", holdAt);
+  const resumeAt = new Date(holdAt.valueOf() + 1);
+  const [resumeDecision] = await connection.db
+    .insert(founderReleaseDecisions)
+    .values({
+      stage: "initial_general_release",
+      outcome: "resume",
+      applicationRevision: initialReleaseDecision.applicationRevision,
+      runtimeRevision: initialReleaseDecision.runtimeRevision,
+      capabilityManifest: initialReleaseDecision.capabilityManifest,
+      evidenceDigests: Array.from(
+        { length: 12 },
+        (_, index) => `sha256:${(index + 32).toString(16).padStart(64, "0")}`,
+      ),
+      authorityExpiresAt: initialReleaseDecision.authorityExpiresAt,
+      decidedAt: resumeAt,
+    })
+    .returning({ id: founderReleaseDecisions.id });
+  if (!resumeDecision) throw new Error("The deterministic General Release Resume was not saved.");
+  const explicitResumeRestoredCapability = await connection.db.transaction((tx) =>
+    founderGeneralReleaseSetupAuthorizesInTransaction(
+      tx,
+      input.userId,
+      resumeAt,
+      ["gmail_sending"],
+      availabilityEnvironment,
+    ),
+  );
+  const resumeProjection = await getFounderGeneralReleaseActivationForUser(input.userId, {
+    createConnection: () => connection,
+    env: availabilityEnvironment,
+    now: () => resumeAt,
+  });
+  requireGeneralReleaseApplicationStatus(
+    await confirmEligibility(resumeAt),
+    200,
+    "Explicit General Release Resume",
+  );
+  const resumedGmailBoundary = await gmailBoundary("resumed", resumeAt);
   const runnersAfterAbandonedSetup = await connection.db
     .select({ id: runners.id })
     .from(runners)
     .where(eq(runners.userId, input.userId));
-  const prematureCreate = await application({ action: "create_operator" }, input.now);
+  const prematureCreate = await application({ action: "create_operator" }, resumeAt);
   const runnersAfterPrematureCreate = await connection.db
     .select({ id: runners.id })
     .from(runners)
     .where(eq(runners.userId, input.userId));
   await confirmFounderCoreProcessingConsentForUser(input.userId, {
     createConnection: () => connection,
-    now: () => input.now,
+    now: () => resumeAt,
     applicationRevision: dependencies.applicationRevision,
     routingPolicy: getActiveFounderAiCompatibilityPolicy(true, true),
   });
-  const createResponse = await application({ action: "create_operator" }, input.now);
+  const createResponse = await application({ action: "create_operator" }, resumeAt);
   const created = requireGeneralReleaseApplicationStatus(
     createResponse,
     201,
@@ -689,7 +894,7 @@ async function executeInitialGeneralReleaseContractScenario(
   let prematureCheckoutBlocked = false;
   try {
     await connection.db.transaction((tx) =>
-      requireFounderGeneralReleasePurchaseDecisionInTransaction(tx, input.userId, input.now),
+      requireFounderGeneralReleasePurchaseDecisionInTransaction(tx, input.userId, resumeAt),
     );
   } catch (error) {
     if (
@@ -700,7 +905,7 @@ async function executeInitialGeneralReleaseContractScenario(
     }
     prematureCheckoutBlocked = true;
   }
-  const activationAt = new Date(input.now.valueOf() + 1);
+  const activationAt = new Date(resumeAt.valueOf() + 1);
   await openFounderCoreBriefForUser(input.userId, {
     createConnection: () => connection,
     now: () => activationAt,
@@ -725,6 +930,13 @@ async function executeInitialGeneralReleaseContractScenario(
   if (!persistedActivated?.entitlementDueAt) {
     throw new Error("The deterministic General Release activation was not persisted.");
   }
+  const [boundReleaseDecision] = persistedActivated.releaseDecisionId
+    ? await connection.db
+        .select()
+        .from(founderReleaseDecisions)
+        .where(eq(founderReleaseDecisions.id, persistedActivated.releaseDecisionId))
+        .limit(1)
+    : [];
 
   const declineAt = new Date(activationAt.valueOf() + 1);
   const declineResponse = await application({ action: "decline_offer" }, declineAt);
@@ -752,6 +964,42 @@ async function executeInitialGeneralReleaseContractScenario(
     : null;
   const activationDueAt = created.activation.dueAt ? new Date(created.activation.dueAt) : null;
   const proof = {
+    missingDecisionAdmittedNobody,
+    deniedDecisionAdmittedNobody,
+    staleDecisionAdmittedNobody,
+    unboundSetupDenied,
+    holdBlockedAdmission,
+    heldCapabilityPaused,
+    unaffectedCapabilityAvailable,
+    configurationRecoveryDidNotResume: stillHeldAfterRecovery,
+    explicitResumeRestoredCapability,
+    resumeReconfirmationSurfaced:
+      resumeProjection.setup.requiresReleaseReconfirmation && !resumeProjection.setup.canCreate,
+    gmailPublicSetupSeamPassed:
+      approvedGmailBoundary.getAllowed &&
+      approvedGmailBoundary.startAllowed &&
+      approvedGmailBoundary.callbackAllowed &&
+      approvedGmailBoundary.disconnectAllowed &&
+      approvedGmailBoundary.providerEffectsStarted === 2,
+    gmailHoldBlockedProviderEffects:
+      !heldGmailBoundary.getAllowed &&
+      !heldGmailBoundary.startAllowed &&
+      !heldGmailBoundary.callbackAllowed &&
+      heldGmailBoundary.providerEffectsStarted === 0,
+    gmailDisconnectPreservedDuringHold: heldGmailBoundary.disconnectAllowed,
+    gmailResumeRestoredPublicSetup:
+      resumedGmailBoundary.getAllowed &&
+      resumedGmailBoundary.startAllowed &&
+      resumedGmailBoundary.callbackAllowed &&
+      resumedGmailBoundary.disconnectAllowed &&
+      resumedGmailBoundary.providerEffectsStarted === 2,
+    activationBoundToExactReleaseDecision:
+      persistedActivated.releaseDecisionId === resumeDecision.id &&
+      boundReleaseDecision?.id === resumeDecision.id &&
+      boundReleaseDecision?.stage === "initial_general_release" &&
+      ["enter", "resume"].includes(boundReleaseDecision.outcome) &&
+      boundReleaseDecision.applicationRevision === dependencies.applicationRevision &&
+      boundReleaseDecision.runtimeRevision === process.env.BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION,
     abandonedSetupCreatedNoDroplet: runnersAfterAbandonedSetup.length === runnersBefore.length,
     explicitCreateRequired:
       prematureCreate.status === 409 &&

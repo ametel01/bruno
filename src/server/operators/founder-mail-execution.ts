@@ -10,21 +10,19 @@ import {
   operatorActionDecisions,
   operatorActionExecutionAttempts,
   operatorActionReceipts,
-  operatorMailConnections,
   operatorMailSendingConnections,
-  operatorPrimaryCommunicationsSuites,
   operatorProposedActions,
 } from "@/src/server/db/schema";
 import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
+import { founderGeneralReleaseAuthorizesWorkAuthorityInTransaction } from "@/src/server/founder-product-contract/initial-general-release";
+import { lockFounderProductContractLifecycleInTransaction } from "@/src/server/founder-product-contract/operator-authority";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
+  FounderReleaseStageAccessError,
   requireFounderOwnerPreviewAccessForUser,
   requireFounderOwnerPreviewAccessInTransaction,
 } from "@/src/server/founder-product-contract/release-stage-access";
-import {
-  assertFounderExternalActionsNotPausedInTransaction,
-  type FounderAiWorkTransaction,
-} from "@/src/server/operators/founder-ai-work";
+import { assertFounderExternalActionsNotPausedInTransaction } from "@/src/server/operators/founder-ai-work";
 import {
   createGoogleMailSendingAdapter,
   decryptFounderGoogleMailSendingAccessToken,
@@ -32,8 +30,8 @@ import {
   type FounderMailSendingConnectionDependencies,
   GOOGLE_MAIL_SENDING_PROVIDER,
   isFounderGoogleMailSendingReleased,
-  REQUIRED_MAIL_SENDING_SCOPE,
 } from "@/src/server/operators/founder-mail-sending-connection";
+import { selectUsableFounderMailSendingConnectionInTransaction } from "@/src/server/operators/founder-mail-sending-readiness";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
   claimFounderActionAuthorizationForUser,
@@ -106,7 +104,8 @@ export async function executeFounderApprovedGmailActionForUser(
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
   const adapter = dependencies.adapter ?? createGoogleMailSendingAdapter({ env: dependencies.env });
-  if (!adapter.sendMessage)
+  const sendMessage = adapter.sendMessage?.bind(adapter);
+  if (!sendMessage)
     throw new FounderMailExecutionError(
       "execution_unavailable",
       "The released Gmail sending transport is not configured safely.",
@@ -114,36 +113,14 @@ export async function executeFounderApprovedGmailActionForUser(
 
   try {
     const preflightAt = now();
-    if (dependencies.requireReleaseStageAccessForUser) {
-      await dependencies.requireReleaseStageAccessForUser(
-        userId,
-        preflightAt,
-        {
-          createConnection: () => connection,
-          ...(dependencies.env ? { env: dependencies.env } : {}),
-        },
-        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
-      );
-    } else if (!dependencies.requireReleaseStageAccess) {
-      await requireFounderOwnerPreviewAccessForUser(
-        userId,
-        preflightAt,
-        {
-          createConnection: () => connection,
-          ...(dependencies.env ? { env: dependencies.env } : {}),
-        },
-        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
-      );
-    }
+    await preflightFounderMailExecutionAuthority(userId, preflightAt, connection, dependencies);
     const prepared = await connection.db.transaction(async (tx) => {
-      await (
-        dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction
-      )(tx, {
+      await requireFounderMailExecutionAuthorityInTransaction(
+        tx,
         userId,
-        now: preflightAt,
-        applicationRevision: readFounderApplicationRevision({ env: dependencies.env }) ?? "",
-        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
-      });
+        preflightAt,
+        dependencies,
+      );
       const [action] = await tx
         .select()
         .from(operatorProposedActions)
@@ -188,7 +165,11 @@ export async function executeFounderApprovedGmailActionForUser(
       if (check.reason) throw new FounderMailExecutionError("execution_blocked", check.reason);
       await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id, checkedAt);
       const email = parseExactEmail(action.destination, action.materialContent);
-      const sending = await selectReadySending(tx, operator.id, checkedAt);
+      const sending = await selectUsableFounderMailSendingConnectionInTransaction(
+        tx,
+        operator.id,
+        checkedAt,
+      );
       if (!sending) {
         throw new FounderMailExecutionError(
           "execution_blocked",
@@ -269,14 +250,7 @@ export async function executeFounderApprovedGmailActionForUser(
         .limit(1);
       if (existingStart) return { kind: "in_progress" as const };
       const checkedAt = now();
-      await (
-        dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction
-      )(tx, {
-        userId,
-        now: checkedAt,
-        applicationRevision: readFounderApplicationRevision({ env: dependencies.env }) ?? "",
-        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
-      });
+      await requireFounderMailExecutionAuthorityInTransaction(tx, userId, checkedAt, dependencies);
       await assertFounderExternalActionsNotPausedInTransaction(tx, operator.id, checkedAt);
       const check = await recheckFounderProposedActionForExecution(
         tx,
@@ -291,7 +265,11 @@ export async function executeFounderApprovedGmailActionForUser(
           .where(eq(operatorProposedActions.id, action.id));
         throw new FounderMailExecutionError("execution_blocked", check.reason);
       }
-      const sending = await selectReadySending(tx, operator.id, checkedAt);
+      const sending = await selectUsableFounderMailSendingConnectionInTransaction(
+        tx,
+        operator.id,
+        checkedAt,
+      );
       if (!sending) {
         await tx
           .update(operatorProposedActions)
@@ -348,7 +326,7 @@ export async function executeFounderApprovedGmailActionForUser(
     if (started.kind === "in_progress")
       return { status: "in_progress", receipt: null, duplicate: true };
 
-    await assertFounderMailSubmissionStillReady(
+    const submission = await submitFounderMailWhileAuthorityLocked(
       connection,
       userId,
       operator.id,
@@ -356,37 +334,49 @@ export async function executeFounderApprovedGmailActionForUser(
       expectedVersion,
       started,
       now,
-      dependencies.env,
-      dependencies.requireReleaseStageAccess,
+      dependencies,
+      async () => {
+        try {
+          return {
+            submitted: true as const,
+            result: await sendMessage({
+              accessToken: decryptFounderGoogleMailSendingAccessToken(
+                started.sending,
+                dependencies,
+              ),
+              rawMessage: started.rawMessage,
+            }),
+          };
+        } catch (error) {
+          return { submitted: false as const, error };
+        }
+      },
     );
-
-    let result: Awaited<ReturnType<NonNullable<FounderGoogleMailSendingAdapter["sendMessage"]>>>;
-    try {
-      result = await adapter.sendMessage({
-        accessToken: decryptFounderGoogleMailSendingAccessToken(started.sending, dependencies),
-        rawMessage: started.rawMessage,
-      });
-    } catch (error) {
+    if (!submission.submitted) {
       return finalizeExecution(
         connection,
         operator.id,
         started,
         {
           outcome: "outcome_uncertain",
-          reason: error instanceof Error ? error.message : "Gmail did not prove the outcome.",
+          reason:
+            submission.error instanceof Error
+              ? submission.error.message
+              : "Gmail did not prove the outcome.",
         },
         now,
       );
     }
-    if (!result.ok)
+    const result = submission.result;
+    if (!result?.ok)
       return finalizeExecution(
         connection,
         operator.id,
         started,
         {
           outcome: "failed",
-          reason: result.message,
-          errorCode: result.code,
+          reason: result?.message ?? "Gmail did not prove the outcome.",
+          ...(result?.code ? { errorCode: result.code } : {}),
         },
         now,
       );
@@ -404,6 +394,79 @@ export async function executeFounderApprovedGmailActionForUser(
     );
   } finally {
     if (ownsConnection) await connection.close();
+  }
+}
+
+async function preflightFounderMailExecutionAuthority(
+  userId: string,
+  now: Date,
+  connection: DatabaseConnection,
+  dependencies: FounderMailExecutionDependencies,
+): Promise<void> {
+  try {
+    if (dependencies.requireReleaseStageAccessForUser) {
+      await dependencies.requireReleaseStageAccessForUser(
+        userId,
+        now,
+        {
+          createConnection: () => connection,
+          ...(dependencies.env ? { env: dependencies.env } : {}),
+        },
+        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
+      );
+      return;
+    }
+    if (dependencies.requireReleaseStageAccess) return;
+    await requireFounderOwnerPreviewAccessForUser(
+      userId,
+      now,
+      {
+        createConnection: () => connection,
+        ...(dependencies.env ? { env: dependencies.env } : {}),
+      },
+      FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
+    );
+  } catch (error) {
+    if (!(error instanceof FounderReleaseStageAccessError)) throw error;
+    const authorized = await connection.db.transaction((tx) =>
+      founderGeneralReleaseAuthorizesWorkAuthorityInTransaction(
+        tx,
+        userId,
+        now,
+        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
+        dependencies.env ?? process.env,
+      ),
+    );
+    if (!authorized) throw error;
+  }
+}
+
+async function requireFounderMailExecutionAuthorityInTransaction(
+  tx: ExecutionTransaction,
+  userId: string,
+  now: Date,
+  dependencies: FounderMailExecutionDependencies,
+): Promise<void> {
+  try {
+    await (dependencies.requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction)(
+      tx,
+      {
+        userId,
+        now,
+        applicationRevision: readFounderApplicationRevision({ env: dependencies.env }) ?? "",
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
+      },
+    );
+  } catch (error) {
+    if (!(error instanceof FounderReleaseStageAccessError)) throw error;
+    const authorized = await founderGeneralReleaseAuthorizesWorkAuthorityInTransaction(
+      tx,
+      userId,
+      now,
+      FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
+      dependencies.env ?? process.env,
+    );
+    if (!authorized) throw error;
   }
 }
 
@@ -506,6 +569,7 @@ export async function reconcileFounderGmailActionForUser(
         reason: "The execution worker stopped before Gmail provided a verifiable outcome.",
       },
       now,
+      { userId, dependencies },
     );
   } finally {
     if (ownsConnection) await connection.close();
@@ -558,53 +622,6 @@ function buildMessageIdentity(actionId: string, version: number): string {
   return `bruno-gmail-message-${actionId}-v${version}`;
 }
 
-async function selectReadySending(tx: FounderAiWorkTransaction, operatorId: string, at: Date) {
-  const [sending] = await tx
-    .select()
-    .from(operatorMailSendingConnections)
-    .where(
-      and(
-        eq(operatorMailSendingConnections.operatorId, operatorId),
-        eq(operatorMailSendingConnections.provider, GOOGLE_MAIL_SENDING_PROVIDER),
-        eq(operatorMailSendingConnections.status, "ready"),
-        eq(operatorMailSendingConnections.authorizationState, "authorized"),
-      ),
-    )
-    .limit(1);
-  if (
-    !sending?.accessTokenCiphertext ||
-    !sending.refreshTokenCiphertext ||
-    !sending.grantedScopes.includes(REQUIRED_MAIL_SENDING_SCOPE) ||
-    sending.revokedAt ||
-    !sending.tokenExpiresAt ||
-    sending.tokenExpiresAt <= at
-  )
-    return null;
-  const [[mail], [suite]] = await Promise.all([
-    tx
-      .select()
-      .from(operatorMailConnections)
-      .where(eq(operatorMailConnections.operatorId, operatorId))
-      .limit(1),
-    tx
-      .select()
-      .from(operatorPrimaryCommunicationsSuites)
-      .where(eq(operatorPrimaryCommunicationsSuites.operatorId, operatorId))
-      .limit(1),
-  ]);
-  if (
-    mail?.status !== "ready" ||
-    mail.authorizationState !== "authorized" ||
-    mail.revokedAt ||
-    mail.providerSubjectId !== sending.providerSubjectId ||
-    suite?.status !== "active" ||
-    suite.mailConnectionId !== mail.id ||
-    sending.mailConnectionId !== mail.id
-  )
-    return null;
-  return sending;
-}
-
 async function selectValidAuthorization(
   tx: ExecutionTransaction,
   operatorId: string,
@@ -640,7 +657,7 @@ async function selectReceipt(tx: ExecutionTransaction, proposedActionId: string)
   return receipt ?? null;
 }
 
-async function assertFounderMailSubmissionStillReady(
+async function submitFounderMailWhileAuthorityLocked<T>(
   connection: DatabaseConnection,
   userId: string,
   operatorId: string,
@@ -652,17 +669,13 @@ async function assertFounderMailSubmissionStillReady(
     sending: typeof operatorMailSendingConnections.$inferSelect;
   },
   now: () => Date,
-  environment: Record<string, string | undefined> | undefined,
-  requireReleaseStageAccess: typeof requireFounderOwnerPreviewAccessInTransaction | undefined,
-): Promise<void> {
-  await connection.db.transaction(async (tx) => {
+  dependencies: FounderMailExecutionDependencies,
+  submit: () => Promise<T>,
+): Promise<T> {
+  return await connection.db.transaction(async (tx) => {
     const checkedAt = now();
-    await (requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction)(tx, {
-      userId,
-      now: checkedAt,
-      applicationRevision: readFounderApplicationRevision({ env: environment }) ?? "",
-      requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
-    });
+    await lockFounderProductContractLifecycleInTransaction(tx, userId);
+    await requireFounderMailExecutionAuthorityInTransaction(tx, userId, checkedAt, dependencies);
     const [action] = await tx
       .select()
       .from(operatorProposedActions)
@@ -678,7 +691,11 @@ async function assertFounderMailSubmissionStillReady(
     const check = await recheckFounderProposedActionForExecution(tx, operatorId, action, checkedAt);
     if (check.reason) throw new FounderMailExecutionError("execution_blocked", check.reason);
     await assertFounderExternalActionsNotPausedInTransaction(tx, operatorId, checkedAt);
-    const sending = await selectReadySending(tx, operatorId, checkedAt);
+    const sending = await selectUsableFounderMailSendingConnectionInTransaction(
+      tx,
+      operatorId,
+      checkedAt,
+    );
     if (
       !sending ||
       sending.id !== started.sending.id ||
@@ -694,6 +711,7 @@ async function assertFounderMailSubmissionStillReady(
         "execution_blocked",
         "The approval changed before submission.",
       );
+    return await submit();
   });
 }
 
@@ -716,10 +734,23 @@ async function finalizeExecution(
     errorCode?: string;
   },
   now: () => Date,
+  authority?: { userId: string; dependencies: FounderMailExecutionDependencies },
 ): Promise<FounderMailExecutionResult> {
   const receipt = await connection.db.transaction(async (tx) => {
-    const existing = await selectReceipt(tx, started.action.id);
+    let existing = await selectReceipt(tx, started.action.id);
     if (existing) return existing;
+    if (authority) {
+      const checkedAt = now();
+      await lockFounderProductContractLifecycleInTransaction(tx, authority.userId);
+      existing = await selectReceipt(tx, started.action.id);
+      if (existing) return existing;
+      await requireFounderMailExecutionAuthorityInTransaction(
+        tx,
+        authority.userId,
+        checkedAt,
+        authority.dependencies,
+      );
+    }
     const at = now();
     const phase =
       result.outcome === "succeeded"

@@ -82,7 +82,9 @@ describe("Founder Conversation route", () => {
     const response = await GET(new Request("http://localhost/api/operator/conversation"));
 
     expect(response.status).toBe(403);
-    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, "workspace");
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, "workspace", {
+      allowGeneralReleaseSetup: true,
+    });
     expect(mocks.getConversation).not.toHaveBeenCalled();
   });
 

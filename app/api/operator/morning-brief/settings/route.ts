@@ -1,4 +1,7 @@
-import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
+import {
+  founderOperatorAccessErrorResponse,
+  requireFounderOperatorWorkspaceAccess,
+} from "@/app/api/operator/_shared/owner-preview-access";
 import {
   getFounderMorningBriefPreferencesForUser,
   updateFounderMorningBriefPreferencesForUser,
@@ -8,10 +11,16 @@ import { requireConfiguredApplicationUser as defaultRequireConfiguredApplication
 
 export const dynamic = "force-dynamic";
 
+type Dependencies = {
+  requireApplicationUser?: typeof requireConfiguredApplicationUser;
+  getPreferences?: typeof getFounderMorningBriefPreferencesForUser;
+  updatePreferences?: typeof updateFounderMorningBriefPreferencesForUser;
+};
+
 export async function GET(
   _request: Request,
   _context?: unknown,
-  dependencies: { requireApplicationUser?: typeof requireConfiguredApplicationUser } = {},
+  dependencies: Dependencies = {},
 ): Promise<Response> {
   const applicationUser = await (
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
@@ -20,16 +29,19 @@ export async function GET(
   const accessFailure = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
     "workspace",
+    { allowGeneralReleaseSetup: true },
   );
   if (accessFailure) return accessFailure;
-  const preferences = await getFounderMorningBriefPreferencesForUser(applicationUser.userId);
+  const preferences = await (
+    dependencies.getPreferences ?? getFounderMorningBriefPreferencesForUser
+  )(applicationUser.userId);
   return Response.json({ preferences }, { headers: noStoreHeaders() });
 }
 
 export async function POST(
   request: Request,
   _context?: unknown,
-  dependencies: { requireApplicationUser?: typeof requireConfiguredApplicationUser } = {},
+  dependencies: Dependencies = {},
 ): Promise<Response> {
   const applicationUser = await (
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
@@ -38,6 +50,7 @@ export async function POST(
   const accessFailure = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
     "workspace",
+    { allowGeneralReleaseSetup: true },
   );
   if (accessFailure) return accessFailure;
   let payload: unknown;
@@ -52,12 +65,13 @@ export async function POST(
       : null;
   if (!deliveryLocalTime) return validationResponse("Choose a delivery time.");
   try {
-    const preferences = await updateFounderMorningBriefPreferencesForUser(
-      applicationUser.userId,
-      deliveryLocalTime,
-    );
+    const preferences = await (
+      dependencies.updatePreferences ?? updateFounderMorningBriefPreferencesForUser
+    )(applicationUser.userId, deliveryLocalTime);
     return Response.json({ preferences }, { headers: noStoreHeaders() });
   } catch (error) {
+    const accessResponse = founderOperatorAccessErrorResponse(error);
+    if (accessResponse) return accessResponse;
     return validationResponse(
       error instanceof Error ? error.message : "Could not save delivery time.",
     );

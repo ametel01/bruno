@@ -13,6 +13,11 @@ import {
   operatorPrimaryCommunicationsSuites,
   operators,
 } from "@/src/server/db/schema";
+import {
+  type FounderOwnerPreviewAccess,
+  FounderReleaseStageAccessError,
+} from "@/src/server/founder-product-contract/release-stage-access";
+import { withFounderOwnerPreviewWorkAuthority } from "@/src/server/founder-product-contract/work-authority";
 import { reconcileFounderCoreOperationForUser } from "@/src/server/operators/founder-core-operation";
 import { isFounderGoogleMailReadingReleased } from "@/src/server/operators/founder-google-reading-release";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
@@ -184,6 +189,7 @@ export type FounderMailConnectionDependencies = {
   keyring?: OperatorSecretKeyring;
   env?: Record<string, string | undefined>;
   randomBytes?: (size: number) => Buffer;
+  getOwnerPreviewAccess?: (userId: string, now: Date) => Promise<FounderOwnerPreviewAccess>;
   preserveCredentialsOnUnconfirmedRevocation?: boolean;
 };
 
@@ -210,7 +216,6 @@ export async function getFounderGoogleMailConnectionForUser(
   userId: string,
   dependencies: FounderMailConnectionDependencies = {},
 ): Promise<FounderMailConnectionDto | null> {
-  if (!isFounderGoogleMailReadingReleased(dependencies.env)) return null;
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
@@ -229,7 +234,6 @@ export async function getFounderGoogleMailOfferDispositionForUser(
   userId: string,
   dependencies: FounderMailConnectionDependencies = {},
 ): Promise<FounderMailOfferDisposition | null> {
-  if (!isFounderGoogleMailReadingReleased(dependencies.env)) return null;
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
@@ -281,11 +285,19 @@ export async function startFounderGoogleMailAuthorizationForUser(
     );
     let authorization: { authorizationUrl: string; expiresAt: Date };
     try {
-      authorization = await adapter.createAuthorizationUrl({
-        state,
-        reconnecting: Boolean(current?.connection.providerSubjectId),
+      authorization = await runFounderMailProviderEffect({
+        connection,
+        userId,
+        at: now(),
+        dependencies,
+        effect: () =>
+          adapter.createAuthorizationUrl({
+            state,
+            reconnecting: Boolean(current?.connection.providerSubjectId),
+          }),
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof FounderMailConnectionError) throw error;
       const failed = await persistConnectionFailure({
         connection,
         operatorId: operator.id,
@@ -420,9 +432,28 @@ export async function completeFounderGoogleMailAuthorizationForState(
       return found;
     });
 
+    const [authorizationOwner] = await connection.db
+      .select({ userId: operators.userId })
+      .from(operators)
+      .where(eq(operators.id, pending.operatorId))
+      .limit(1);
+    if (!authorizationOwner) {
+      throw new FounderMailConnectionError(
+        "connection_unavailable",
+        "Gmail connection owner could not be verified.",
+        503,
+      );
+    }
+
     try {
       const keyring = resolveKeyring(dependencies);
-      const tokens = await adapter.exchangeAuthorizationCode({ code });
+      const tokens = await runFounderMailProviderEffect({
+        connection,
+        userId: authorizationOwner.userId,
+        at: now(),
+        dependencies,
+        effect: () => adapter.exchangeAuthorizationCode({ code }),
+      });
       const previousRefreshToken = pending.refreshTokenCiphertext
         ? decryptToken(
             pending.refreshTokenCiphertext,
@@ -471,7 +502,13 @@ export async function completeFounderGoogleMailAuthorizationForState(
           env: dependencies.env,
         });
       }
-      const identity = await adapter.getIdentity({ accessToken: tokens.accessToken });
+      const identity = await runFounderMailProviderEffect({
+        connection,
+        userId: authorizationOwner.userId,
+        at: now(),
+        dependencies,
+        effect: () => adapter.getIdentity({ accessToken: tokens.accessToken }),
+      });
       if (!identity.providerSubjectId || !identity.accountLabel) {
         return await persistConnectionFailure({
           connection,
@@ -497,7 +534,13 @@ export async function completeFounderGoogleMailAuthorizationForState(
           env: dependencies.env,
         });
       }
-      const resources = await adapter.listResources({ accessToken: tokens.accessToken });
+      const resources = await runFounderMailProviderEffect({
+        connection,
+        userId: authorizationOwner.userId,
+        at: now(),
+        dependencies,
+        effect: () => adapter.listResources({ accessToken: tokens.accessToken }),
+      });
       if (resources.length > MAX_PROVIDER_RESOURCES) {
         throw new FounderMailConnectionError(
           "mail_resource_list_too_large",
@@ -570,7 +613,8 @@ export async function completeFounderGoogleMailAuthorizationForState(
     } catch (error) {
       if (
         error instanceof FounderMailConnectionError &&
-        error.code !== "mail_resource_list_too_large"
+        error.code !== "mail_resource_list_too_large" &&
+        error.code !== "release_stage_access_required"
       ) {
         throw error;
       }
@@ -588,6 +632,7 @@ export async function completeFounderGoogleMailAuthorizationForState(
             ? error.message
             : "Bruno could not verify the Gmail connection. Try again.",
         authorizationState: "authorized",
+        evidenceState: "unavailable",
         env: dependencies.env,
       });
     }
@@ -600,7 +645,7 @@ export async function denyFounderGoogleMailAuthorizationForState(
   state: string,
   dependencies: FounderMailConnectionDependencies = {},
 ): Promise<FounderMailConnectionDto | null> {
-  if (!isFounderGoogleMailReadingReleased(dependencies.env) || !state.trim()) return null;
+  if (!state.trim()) return null;
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
@@ -637,64 +682,70 @@ export async function selectFounderGoogleMailResourcesForUser(
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
   try {
-    return await connection.db.transaction(async (tx) => {
-      await lockOperator(tx, operator.id);
-      const current = await selectConnectionBundle(tx, operator.id, true);
-      if (!current?.connection.providerSubjectId) {
-        throw new FounderMailConnectionError(
-          "mail_not_connected",
-          "Connect Gmail reading before selecting labels.",
-          409,
-        );
-      }
-      const available = current.resources.filter((resource) => resource.status === "available");
-      const availableIds = new Set(available.map((resource) => resource.providerResourceId));
-      if (normalizedIds.some((id) => !availableIds.has(id))) {
-        throw new FounderMailConnectionError(
-          "mail_selection_invalid",
-          "Choose only Gmail labels Bruno found in your account.",
-          400,
-        );
-      }
-      const at = now();
-      await tx
-        .update(operatorMailResources)
-        .set({ selected: false, updatedAt: at })
-        .where(eq(operatorMailResources.connectionId, current.connection.id));
-      await tx
-        .update(operatorMailResources)
-        .set({ selected: true, selectionReviewedAt: at, updatedAt: at })
-        .where(
-          and(
-            eq(operatorMailResources.connectionId, current.connection.id),
-            inArray(operatorMailResources.providerResourceId, normalizedIds),
-          ),
-        );
-      const [saved] = await tx
-        .update(operatorMailConnections)
-        .set({
-          status: "verifying",
-          evidenceState: "unknown",
-          failureCode: null,
-          recoveryMessage: null,
-          updatedAt: at,
-        })
-        .where(eq(operatorMailConnections.id, current.connection.id))
-        .returning();
-      if (!saved)
-        throw new FounderMailConnectionError(
-          "connection_unavailable",
-          "Gmail label selection could not be saved.",
-          503,
-        );
-      const bundle = await selectConnectionBundle(tx, operator.id);
-      if (!bundle)
-        throw new FounderMailConnectionError(
-          "connection_unavailable",
-          "Gmail reading connection could not be reloaded.",
-          503,
-        );
-      return toDto(bundle);
+    return await runFounderMailProviderEffect({
+      connection,
+      userId,
+      at: now(),
+      dependencies,
+      effect: async (tx) => {
+        await lockOperator(tx, operator.id);
+        const current = await selectConnectionBundle(tx, operator.id, true);
+        if (!current?.connection.providerSubjectId) {
+          throw new FounderMailConnectionError(
+            "mail_not_connected",
+            "Connect Gmail reading before selecting labels.",
+            409,
+          );
+        }
+        const available = current.resources.filter((resource) => resource.status === "available");
+        const availableIds = new Set(available.map((resource) => resource.providerResourceId));
+        if (normalizedIds.some((id) => !availableIds.has(id))) {
+          throw new FounderMailConnectionError(
+            "mail_selection_invalid",
+            "Choose only Gmail labels Bruno found in your account.",
+            400,
+          );
+        }
+        const at = now();
+        await tx
+          .update(operatorMailResources)
+          .set({ selected: false, updatedAt: at })
+          .where(eq(operatorMailResources.connectionId, current.connection.id));
+        await tx
+          .update(operatorMailResources)
+          .set({ selected: true, selectionReviewedAt: at, updatedAt: at })
+          .where(
+            and(
+              eq(operatorMailResources.connectionId, current.connection.id),
+              inArray(operatorMailResources.providerResourceId, normalizedIds),
+            ),
+          );
+        const [saved] = await tx
+          .update(operatorMailConnections)
+          .set({
+            status: "verifying",
+            evidenceState: "unknown",
+            failureCode: null,
+            recoveryMessage: null,
+            updatedAt: at,
+          })
+          .where(eq(operatorMailConnections.id, current.connection.id))
+          .returning();
+        if (!saved)
+          throw new FounderMailConnectionError(
+            "connection_unavailable",
+            "Gmail label selection could not be saved.",
+            503,
+          );
+        const bundle = await selectConnectionBundle(tx, operator.id);
+        if (!bundle)
+          throw new FounderMailConnectionError(
+            "connection_unavailable",
+            "Gmail reading connection could not be reloaded.",
+            503,
+          );
+        return toDto(bundle);
+      },
     });
   } finally {
     if (ownsConnection) await connection.close();
@@ -756,12 +807,19 @@ export async function verifyFounderGoogleMailForUser(
     );
     let verification: Awaited<ReturnType<FounderGoogleMailAdapter["verifySelectedResources"]>>;
     try {
-      verification = await adapter.verifySelectedResources({
-        accessToken,
-        refreshToken,
-        resources: selected.map(toProviderResource),
-        timeMin: new Date(now().getTime() - EVIDENCE_WINDOW_MS),
-        timeMax: now(),
+      verification = await runFounderMailProviderEffect({
+        connection,
+        userId,
+        at: now(),
+        dependencies,
+        effect: () =>
+          adapter.verifySelectedResources({
+            accessToken,
+            refreshToken,
+            resources: selected.map(toProviderResource),
+            timeMin: new Date(now().getTime() - EVIDENCE_WINDOW_MS),
+            timeMax: now(),
+          }),
       });
     } catch {
       return await persistConnectionFailure({
@@ -869,11 +927,18 @@ export async function verifyFounderGoogleMailForUser(
     });
     if (verification.evidenceState === "current" && adapter.readSelectedResources) {
       try {
-        const observations = await adapter.readSelectedResources({
-          accessToken: verification.accessToken ?? accessToken,
-          resources: selected.map(toProviderResource),
-          timeMin: new Date(now().getTime() - EVIDENCE_WINDOW_MS),
-          timeMax: now(),
+        const observations = await runFounderMailProviderEffect({
+          connection,
+          userId,
+          at: now(),
+          dependencies,
+          effect: () =>
+            adapter.readSelectedResources?.({
+              accessToken: verification.accessToken ?? accessToken,
+              resources: selected.map(toProviderResource),
+              timeMin: new Date(now().getTime() - EVIDENCE_WINDOW_MS),
+              timeMax: now(),
+            }) ?? Promise.resolve([]),
         });
         await ingestFounderRelationshipEvidenceForUser(
           userId,
@@ -915,7 +980,6 @@ export async function disconnectFounderGoogleMailForUser(
   userId: string,
   dependencies: FounderMailConnectionDependencies = {},
 ): Promise<FounderMailConnectionDto | null> {
-  assertReleased(dependencies.env);
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
@@ -1707,6 +1771,49 @@ async function lockOperator(tx: FounderMailTransaction, operatorId: string): Pro
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:founder-operator:${operatorId}`}, 0))`,
   );
+}
+
+async function runFounderMailProviderEffect<T>(input: {
+  connection: DatabaseConnection;
+  userId: string;
+  at: Date;
+  dependencies: FounderMailConnectionDependencies;
+  effect: (tx: FounderMailTransaction) => Promise<T>;
+}): Promise<T> {
+  try {
+    return await withFounderOwnerPreviewWorkAuthority(
+      {
+        userId: input.userId,
+        now: () => input.at,
+        requiredCapabilities: ["gmail_reading"],
+      },
+      {
+        createConnection: () => input.connection,
+        ...(input.dependencies.env ? { env: input.dependencies.env } : {}),
+        generalReleaseAuthority: "setup",
+        ...(input.dependencies.getOwnerPreviewAccess
+          ? {
+              requireReleaseStageAccess: async (_tx, accessInput) => {
+                const access = await input.dependencies.getOwnerPreviewAccess?.(
+                  accessInput.userId,
+                  accessInput.now,
+                );
+                if (!access?.admitted || !access.availableCapabilities.includes("gmail_reading")) {
+                  throw new FounderReleaseStageAccessError("owner_preview");
+                }
+              },
+            }
+          : {}),
+      },
+      input.effect,
+    );
+  } catch (error) {
+    if (!(error instanceof FounderReleaseStageAccessError)) throw error;
+    throw new FounderMailConnectionError(
+      "release_stage_access_required",
+      "Gmail reading is paused under the current Release Decision.",
+    );
+  }
 }
 
 async function lockOperatorIfKnown(

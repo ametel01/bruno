@@ -33,6 +33,7 @@ export async function POST(
   const accessFailure = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
     "workspace",
+    { allowGeneralReleaseSetup: true },
   );
   if (accessFailure) return accessFailure;
   const { actionId } = await context.params;

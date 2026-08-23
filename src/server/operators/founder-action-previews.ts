@@ -108,7 +108,7 @@ export async function editFounderActionPreviewForUser(
       now,
       requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
     },
-    dependencies,
+    { ...dependencies, generalReleaseAuthority: "work" },
     async (tx, at) => {
       await lockOperator(tx, operator.id);
       const preview = await ensurePreview(
@@ -168,7 +168,7 @@ export async function dismissFounderMailSendingOfferForUser(
       now,
       requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
     },
-    dependencies,
+    { ...dependencies, generalReleaseAuthority: "work" },
     async (tx, at) => {
       await lockOperator(tx, operator.id);
       const preview = await ensurePreview(tx, operator.id, at, {

@@ -60,6 +60,7 @@ export async function assessFounderOwnerPreviewPromotionEvidenceForUser(input: {
     if (
       !decision ||
       (decision.outcome !== "enter" && decision.outcome !== "resume") ||
+      !decision.operatorId ||
       decision.applicationRevision !== input.applicationRevision ||
       decision.runtimeRevision !== input.runtimeRevision
     ) {

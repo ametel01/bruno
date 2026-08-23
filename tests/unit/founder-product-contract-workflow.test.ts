@@ -12,10 +12,13 @@ describe("Founder Product Contract workflow", () => {
     new URL("../../.github/workflows/founder-product-contract.yml", import.meta.url),
     "utf8",
   );
+  const parsedWorkflow = parse(workflow) as {
+    on: { workflow_dispatch: { inputs: Record<string, { type: string }> } };
+    jobs: { contract: { steps: WorkflowStep[] } };
+  };
 
   it("binds ledger production to the exact run and keeps release signing isolated", () => {
-    const steps = (parse(workflow) as { jobs: { contract: { steps: WorkflowStep[] } } }).jobs
-      .contract.steps;
+    const steps = parsedWorkflow.jobs.contract.steps;
     const ciContractStep = steps.find(
       ({ name }) => name === "Run all-or-nothing Founder Product Contract (ci)",
     );
@@ -68,8 +71,60 @@ describe("Founder Product Contract workflow", () => {
         "{{ vars.BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION }}",
     );
     expect(workflow).not.toContain("|| 'founder-contract-v1'");
-    expect(workflow).not.toContain("runtime_revision:");
+    expect(workflow).not.toMatch(/^\s+runtime_revision:/m);
     expect(workflow).not.toContain("inputs.runtime_revision");
+    expect(workflow).toContain(
+      "BRUNO_FOUNDER_CONTRACT_VOICEOVER_ATTEMPTS: $" + "{{ inputs.voiceover_attempts }}",
+    );
+    expect(workflow).toContain(
+      "BRUNO_FOUNDER_CONTRACT_TALKBACK_ATTEMPTS: $" + "{{ inputs.talkback_attempts }}",
+    );
+    expect(workflow).toContain(
+      "BRUNO_FOUNDER_CONTRACT_VOICEOVER_INDEPENDENT_HUMAN_REVIEWERS: $" +
+        "{{ inputs.voiceover_independent_human_reviewers }}",
+    );
+    expect(workflow).toContain(
+      "BRUNO_FOUNDER_CONTRACT_TALKBACK_INDEPENDENT_HUMAN_REVIEWERS: $" +
+        "{{ inputs.talkback_independent_human_reviewers }}",
+    );
+    for (const prohibitedSource of [
+      "AUTOMATED_RUNS",
+      "OWNER_PARTICIPANTS",
+      "SELF_TESTS",
+      "FRIEND_OR_FAMILY_PARTICIPANTS",
+      "SUPPORT_INTERVENTIONS",
+      "EXTERNAL_BETA_PARTICIPANTS",
+      "COACHED_PARTICIPANTS",
+      "FACILITATOR_RESCUES",
+      "TRUSTED_PREVIEW_PARTICIPANTS",
+      "BUILD_TEAM_PARTICIPANTS",
+    ]) {
+      expect(workflow).toContain(`BRUNO_FOUNDER_CONTRACT_VOICEOVER_${prohibitedSource}:`);
+      expect(workflow).toContain(`BRUNO_FOUNDER_CONTRACT_TALKBACK_${prohibitedSource}:`);
+    }
+    for (const technology of ["voiceover", "talkback"]) {
+      for (const claim of [
+        "attempts",
+        "failures",
+        "flakes",
+        "skips",
+        "independent_human_reviewers",
+        "automated_runs",
+        "owner_participants",
+        "self_tests",
+        "friend_or_family_participants",
+        "support_interventions",
+        "external_beta_participants",
+        "coached_participants",
+        "facilitator_rescues",
+        "trusted_preview_participants",
+        "build_team_participants",
+      ]) {
+        expect(parsedWorkflow.on.workflow_dispatch.inputs[`${technology}_${claim}`]?.type).toBe(
+          "string",
+        );
+      }
+    }
     expect(workflow).toContain(
       "BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST: $" +
         "{{ vars.BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST }}",
@@ -96,15 +151,34 @@ describe("Founder Product Contract workflow", () => {
       "BRUNO_FOUNDER_CANDIDATE_CHECK_RUN_ID: $" +
         "{{ steps.release_candidate_control.outputs.check_run_id }}",
     );
+    expect(workflow).toContain("VERCEL_GIT_COMMIT_SHA: $" + "{{ github.sha }}");
+    expect(workflow).toContain(
+      "BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION: $" +
+        "{{ env.BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION }}",
+    );
     expect(workflow).toContain(
       "run: bun scripts/founder-product-contract-candidate-control.ts finalize",
     );
     expect(workflow).not.toContain("founder-product-contract-candidate-release-");
     expect(workflow).not.toContain('runtime_digest="$(printf');
     expect(workflow).toContain(
+      "BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON: $" +
+        "{{ inputs.provider_decision_summary_json }}",
+    );
+    expect(workflow).toContain("provider outcomes, clean-attempt metadata");
+    expect(workflow).toContain(
       "BRUNO_FOUNDER_PRODUCTION_PROVIDER_QUALIFICATION_SUMMARY_JSON: $" +
         "{{ inputs.production_provider_qualification_summary_json }}",
     );
+    expect(workflow).toContain("Clerk and Lemon clean-attempt qualification summary");
+    expect(workflow).toContain("general_release_operational_summary_json:");
+    expect(workflow).toContain(
+      "BRUNO_FOUNDER_GENERAL_RELEASE_OPERATIONAL_SUMMARY_JSON: $" +
+        "{{ inputs.general_release_operational_summary_json }}",
+    );
+    expect(workflow).toContain("clean-attempt operational, privacy, billing, recovery");
+    expect(workflow).not.toContain("BRUNO_INITIAL_GENERAL_RELEASE_DECISION:");
+    expect(workflow).not.toContain("founder:release:import-decision");
     expect(workflow).not.toContain("LEMON_SQUEEZY_API_KEY");
     expect(workflow).not.toContain("CLERK_SECRET_KEY");
   });

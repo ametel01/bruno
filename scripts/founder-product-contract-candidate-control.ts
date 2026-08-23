@@ -66,6 +66,8 @@ export async function finalizeFounderReleaseCandidateControl(input: {
   priorJobStatus: string;
   token: string;
   request?: typeof fetch;
+  env?: Record<string, string | undefined>;
+  now?: Date;
 }): Promise<void> {
   if (
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository) ||
@@ -79,7 +81,11 @@ export async function finalizeFounderReleaseCandidateControl(input: {
   }
   let decisionApproved = false;
   try {
-    await assertFounderReleaseDecisionApproved(input.decisionPath);
+    await assertFounderReleaseDecisionApproved(
+      input.decisionPath,
+      input.env ?? process.env,
+      input.now ?? new Date(),
+    );
     decisionApproved = true;
   } catch {
     decisionApproved = false;
@@ -93,7 +99,7 @@ export async function finalizeFounderReleaseCandidateControl(input: {
       body: JSON.stringify({
         status: "completed",
         conclusion: qualified ? "success" : "failure",
-        completed_at: new Date().toISOString(),
+        completed_at: (input.now ?? new Date()).toISOString(),
         output: {
           title: qualified
             ? "Founder release candidate approved"

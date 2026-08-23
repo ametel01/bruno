@@ -16,14 +16,40 @@ import {
 export const FOUNDER_MODERATED_SUMMARY_SCHEMA = "bruno.moderated-founder-summary.v1";
 export const FOUNDER_PROVIDER_DECISION_SUMMARY_SCHEMA =
   "bruno.founder-provider-decision-summary.v1";
+export const FOUNDER_GENERAL_RELEASE_OPERATIONAL_SUMMARY_SCHEMA =
+  "bruno.founder-general-release-operational-summary.v1";
 export const FOUNDER_GENERAL_RELEASE_DECISION_SCHEMA =
   "bruno.founder-initial-general-release-decision.v1";
 export const FOUNDER_PROVIDER_DECISION_MAX_AGE_MS = 8 * 24 * 60 * 60 * 1_000;
+export const FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST = [
+  "openai",
+  "anthropic",
+  "calendar_reading",
+  "gmail_reading",
+  "gmail_sending",
+] as const;
 
 export type FounderModeratedSummary = {
   schemaVersion: typeof FOUNDER_MODERATED_SUMMARY_SCHEMA;
+  applicationRevision: string;
+  runtimeRevision: string;
   evidenceDigest: `sha256:${string}`;
   observedAt: string;
+  attempts: 1;
+  failures: 0;
+  flakes: 0;
+  skips: 0;
+  participantBoundary: {
+    freshIndependentNontechnicalFounders: 8;
+    ownerParticipants: 0;
+    trustedPreviewParticipants: 0;
+    coachedParticipants: 0;
+    externalBetaParticipants: 0;
+    buildTeamParticipants: 0;
+    selfOrFriendTestParticipants: 0;
+    facilitatorRescues: 0;
+    supportInterventions: 0;
+  };
   participants: {
     total: number;
     desktopFirst: number;
@@ -48,12 +74,52 @@ export type FounderModeratedSummary = {
   };
 };
 
+const OPERATIONAL_EVIDENCE_KINDS = [
+  "operational",
+  "privacy",
+  "billing",
+  "recovery",
+  "retirement",
+] as const;
+
+type OperationalEvidenceKind = (typeof OPERATIONAL_EVIDENCE_KINDS)[number];
+
+type OperationalEvidenceRecord = {
+  result: "passed" | "failed";
+  evidenceDigest: `sha256:${string}`;
+  attempts: 1;
+  failures: 0;
+  flakes: 0;
+  skips: 0;
+};
+
+export type FounderGeneralReleaseOperationalSummary = {
+  schemaVersion: typeof FOUNDER_GENERAL_RELEASE_OPERATIONAL_SUMMARY_SCHEMA;
+  applicationRevision: string;
+  runtimeRevision: string;
+  evidenceDigest: `sha256:${string}`;
+  observedAt: string;
+  expiresAt: string;
+  sanitized: true;
+  candidate: {
+    externalBetaFindingsResolved: true;
+    unresolvedCriticalFindings: 0;
+    findingsResolvedAt: string;
+    frozenAt: string;
+  };
+  evidence: Record<OperationalEvidenceKind, OperationalEvidenceRecord>;
+};
+
 type ProviderDecision = {
   outcome: "released" | "hidden";
   sourceRevision: string;
   qualifiedAt: string;
   expiresAt: string;
   evidenceDigest: `sha256:${string}`;
+  attempts: 1;
+  failures: 0;
+  flakes: 0;
+  skips: 0;
 };
 
 export type FounderProviderDecisionSummary = {
@@ -76,8 +142,16 @@ export function parseFounderModeratedSummary(
   const value = parseRecord(raw, "Moderated Founder summary");
   if (
     value.schemaVersion !== FOUNDER_MODERATED_SUMMARY_SCHEMA ||
+    !isGitRevision(value.applicationRevision) ||
+    typeof value.runtimeRevision !== "string" ||
+    !value.runtimeRevision.trim() ||
     !isEvidenceDigest(value.evidenceDigest) ||
     !isExactInstant(value.observedAt) ||
+    value.attempts !== 1 ||
+    value.failures !== 0 ||
+    value.flakes !== 0 ||
+    value.skips !== 0 ||
+    !isEvidenceRecord(value.participantBoundary) ||
     !isEvidenceRecord(value.participants) ||
     !isEvidenceRecord(value.criticalFailures) ||
     !isEvidenceRecord(value.retention)
@@ -101,10 +175,22 @@ export function parseFounderModeratedSummary(
     "founderCredentialHandling",
   ];
   const participants = value.participants;
+  const participantBoundary = value.participantBoundary;
   const criticalFailures = value.criticalFailures;
   const retention = value.retention;
   if (
     !participantKeys.every((key) => isCount(participants[key])) ||
+    participantBoundary.freshIndependentNontechnicalFounders !== 8 ||
+    ![
+      "ownerParticipants",
+      "trustedPreviewParticipants",
+      "coachedParticipants",
+      "externalBetaParticipants",
+      "buildTeamParticipants",
+      "selfOrFriendTestParticipants",
+      "facilitatorRescues",
+      "supportInterventions",
+    ].every((key) => participantBoundary[key] === 0) ||
     !failureKeys.every((key) => isCount(criticalFailures[key])) ||
     retention.releaseEvidenceDays !== 90 ||
     retention.recordingDays !== 30 ||
@@ -115,8 +201,25 @@ export function parseFounderModeratedSummary(
   }
   return {
     schemaVersion: FOUNDER_MODERATED_SUMMARY_SCHEMA,
+    applicationRevision: value.applicationRevision as string,
+    runtimeRevision: value.runtimeRevision as string,
     evidenceDigest: value.evidenceDigest as `sha256:${string}`,
     observedAt: value.observedAt as string,
+    attempts: 1,
+    failures: 0,
+    flakes: 0,
+    skips: 0,
+    participantBoundary: {
+      freshIndependentNontechnicalFounders: 8,
+      ownerParticipants: 0,
+      trustedPreviewParticipants: 0,
+      coachedParticipants: 0,
+      externalBetaParticipants: 0,
+      buildTeamParticipants: 0,
+      selfOrFriendTestParticipants: 0,
+      facilitatorRescues: 0,
+      supportInterventions: 0,
+    },
     participants: {
       total: participants.total as number,
       desktopFirst: participants.desktopFirst as number,
@@ -141,6 +244,85 @@ export function parseFounderModeratedSummary(
       deidentifiedMetricMonths: 24,
       controlsApplied: true,
     },
+  };
+}
+
+export function parseFounderGeneralReleaseOperationalSummary(
+  raw: string | undefined,
+): FounderGeneralReleaseOperationalSummary | null {
+  if (!raw?.trim()) return null;
+  const value = tryParseEvidenceRecord(raw);
+  if (
+    !value ||
+    value.schemaVersion !== FOUNDER_GENERAL_RELEASE_OPERATIONAL_SUMMARY_SCHEMA ||
+    !isGitRevision(value.applicationRevision) ||
+    typeof value.runtimeRevision !== "string" ||
+    !value.runtimeRevision.trim() ||
+    !isEvidenceDigest(value.evidenceDigest) ||
+    !isExactInstant(value.observedAt) ||
+    !isExactInstant(value.expiresAt) ||
+    value.sanitized !== true ||
+    !isEvidenceRecord(value.candidate) ||
+    !isEvidenceRecord(value.evidence)
+  ) {
+    return null;
+  }
+  const candidate = value.candidate;
+  if (
+    candidate.externalBetaFindingsResolved !== true ||
+    candidate.unresolvedCriticalFindings !== 0 ||
+    !isExactInstant(candidate.findingsResolvedAt) ||
+    !isExactInstant(candidate.frozenAt) ||
+    new Date(candidate.findingsResolvedAt as string) >= new Date(candidate.frozenAt as string) ||
+    new Date(candidate.frozenAt as string) > new Date(value.observedAt as string)
+  ) {
+    return null;
+  }
+  const evidence = value.evidence;
+  for (const kind of OPERATIONAL_EVIDENCE_KINDS) {
+    const record = evidence[kind];
+    if (
+      !isEvidenceRecord(record) ||
+      (record.result !== "passed" && record.result !== "failed") ||
+      !isEvidenceDigest(record.evidenceDigest) ||
+      record.attempts !== 1 ||
+      record.failures !== 0 ||
+      record.flakes !== 0 ||
+      record.skips !== 0
+    ) {
+      return null;
+    }
+  }
+  return {
+    schemaVersion: FOUNDER_GENERAL_RELEASE_OPERATIONAL_SUMMARY_SCHEMA,
+    applicationRevision: value.applicationRevision as string,
+    runtimeRevision: value.runtimeRevision as string,
+    evidenceDigest: value.evidenceDigest as `sha256:${string}`,
+    observedAt: value.observedAt as string,
+    expiresAt: value.expiresAt as string,
+    sanitized: true,
+    candidate: {
+      externalBetaFindingsResolved: true,
+      unresolvedCriticalFindings: 0,
+      findingsResolvedAt: candidate.findingsResolvedAt as string,
+      frozenAt: candidate.frozenAt as string,
+    },
+    evidence: Object.fromEntries(
+      OPERATIONAL_EVIDENCE_KINDS.map((kind) => {
+        const record = evidence[kind] as Record<string, unknown>;
+        return [
+          kind,
+          {
+            result: record.result as "passed" | "failed",
+            evidenceDigest: record.evidenceDigest as `sha256:${string}`,
+            attempts: 1,
+            failures: 0,
+            flakes: 0,
+            skips: 0,
+          },
+        ];
+      }),
+    ) as FounderGeneralReleaseOperationalSummary["evidence"],
   };
 }
 
@@ -172,7 +354,11 @@ export function parseFounderProviderDecisionSummary(
       !isGitRevision(decision.sourceRevision) ||
       !isExactInstant(decision.qualifiedAt) ||
       !isExactInstant(decision.expiresAt) ||
-      !isEvidenceDigest(decision.evidenceDigest)
+      !isEvidenceDigest(decision.evidenceDigest) ||
+      decision.attempts !== 1 ||
+      decision.failures !== 0 ||
+      decision.flakes !== 0 ||
+      decision.skips !== 0
     ) {
       return null;
     }
@@ -198,6 +384,7 @@ export function buildFounderInitialGeneralReleaseDecision(input: {
   providerSummary: FounderProviderDecisionSummary | null;
   productionProviderQualificationSummary: FounderProductionProviderQualificationSummary | null;
   productionProviderLiveTargetAuthority: FounderProductionProviderLiveTargetAuthority | null;
+  operationalSummary: FounderGeneralReleaseOperationalSummary | null;
   decisionTime: Date;
 }) {
   const reasons: string[] = [];
@@ -219,6 +406,16 @@ export function buildFounderInitialGeneralReleaseDecision(input: {
   if (!study) {
     reasons.push("moderated_founder_evidence_missing");
   } else {
+    if (study.applicationRevision !== revision || study.runtimeRevision !== runtimeRevision) {
+      reasons.push("founder_usability_candidate_mismatch");
+    }
+    const studyObservedAt = new Date(study.observedAt);
+    if (
+      studyObservedAt > decisionTime ||
+      decisionTime.valueOf() - studyObservedAt.valueOf() > FOUNDER_PROVIDER_DECISION_MAX_AGE_MS
+    ) {
+      reasons.push("founder_usability_evidence_stale");
+    }
     if (
       study.participants.total !== 8 ||
       study.participants.desktopFirst !== 4 ||
@@ -238,6 +435,65 @@ export function buildFounderInitialGeneralReleaseDecision(input: {
     }
     if (Object.values(study.criticalFailures).some((count) => count !== 0)) {
       reasons.push("critical_failure_present");
+    }
+  }
+
+  const operational = input.operationalSummary;
+  if (!operational) {
+    reasons.push("operational_release_evidence_missing");
+  } else {
+    if (
+      operational.applicationRevision !== revision ||
+      operational.runtimeRevision !== runtimeRevision
+    ) {
+      reasons.push("operational_release_candidate_mismatch");
+    }
+    const operationalObservedAt = new Date(operational.observedAt);
+    const operationalExpiresAt = new Date(operational.expiresAt);
+    if (
+      operationalObservedAt > decisionTime ||
+      operationalExpiresAt <= decisionTime ||
+      decisionTime.valueOf() - operationalObservedAt.valueOf() >
+        FOUNDER_PROVIDER_DECISION_MAX_AGE_MS ||
+      operationalExpiresAt.valueOf() - operationalObservedAt.valueOf() >
+        FOUNDER_PROVIDER_DECISION_MAX_AGE_MS
+    ) {
+      reasons.push("operational_release_evidence_stale");
+    }
+    for (const kind of OPERATIONAL_EVIDENCE_KINDS) {
+      if (operational.evidence[kind].result !== "passed") {
+        reasons.push(`${kind}_evidence_failed`);
+      }
+    }
+    if (study && new Date(study.observedAt) < new Date(operational.candidate.frozenAt)) {
+      reasons.push("founder_usability_evidence_before_candidate_freeze");
+    }
+  }
+
+  const accessibilityEvidence = attendedAccessibilityEvidence(input.productContract);
+  if (!accessibilityEvidence) {
+    reasons.push("accessibility_evidence_missing_or_unclean");
+  } else {
+    for (const evidence of Object.values(accessibilityEvidence)) {
+      if (
+        evidence.appSourceRevision !== revision ||
+        evidence.appRuntimeRevision !== runtimeRevision
+      ) {
+        if (!reasons.includes("accessibility_candidate_mismatch"))
+          reasons.push("accessibility_candidate_mismatch");
+      }
+      const observedAt = new Date(evidence.observedAt);
+      if (
+        observedAt > decisionTime ||
+        decisionTime.valueOf() - observedAt.valueOf() > FOUNDER_PROVIDER_DECISION_MAX_AGE_MS
+      ) {
+        if (!reasons.includes("accessibility_evidence_stale"))
+          reasons.push("accessibility_evidence_stale");
+      }
+      if (operational && observedAt < new Date(operational.candidate.frozenAt)) {
+        if (!reasons.includes("accessibility_evidence_before_candidate_freeze"))
+          reasons.push("accessibility_evidence_before_candidate_freeze");
+      }
     }
   }
 
@@ -308,10 +564,47 @@ export function buildFounderInitialGeneralReleaseDecision(input: {
     }
   }
 
+  const accessibilityDigests = accessibilityEvidence
+    ? {
+        voiceOverDigest: accessibilityEvidence.voiceOver.digest,
+        talkBackDigest: accessibilityEvidence.talkBack.digest,
+      }
+    : null;
+  const completeEvidenceDigests = [
+    input.productContract.summaryDigest,
+    ...(accessibilityDigests ? Object.values(accessibilityDigests) : []),
+    ...(study ? [study.evidenceDigest] : []),
+    ...(providers
+      ? [
+          providers.evidenceDigest,
+          ...Object.values(providers.providers).map(({ evidenceDigest }) => evidenceDigest),
+        ]
+      : []),
+    ...(productionProviderQualifications
+      ? [
+          productionProviderQualifications.evidenceDigest,
+          ...productionProviderQualifications.qualifications.map(
+            ({ evidenceDigest }) => evidenceDigest,
+          ),
+        ]
+      : []),
+    ...(operational
+      ? [
+          operational.evidenceDigest,
+          ...OPERATIONAL_EVIDENCE_KINDS.map((kind) => operational.evidence[kind].evidenceDigest),
+        ]
+      : []),
+  ];
+  if (new Set(completeEvidenceDigests).size !== completeEvidenceDigests.length) {
+    reasons.push("release_evidence_digest_reused");
+  }
+
   const payload = {
     schemaVersion: FOUNDER_GENERAL_RELEASE_DECISION_SCHEMA,
+    stage: "initial_general_release",
     outcome: reasons.length === 0 ? ("approved" as const) : ("denied" as const),
     reasons,
+    capabilityManifest: [...FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST],
     releaseIdentity: {
       sourceRevision: revision,
       runtimeRevision,
@@ -320,11 +613,20 @@ export function buildFounderInitialGeneralReleaseDecision(input: {
     },
     evidence: {
       productContractDigest: input.productContract.summaryDigest,
+      voiceOverDigest: accessibilityDigests?.voiceOverDigest ?? null,
+      talkBackDigest: accessibilityDigests?.talkBackDigest ?? null,
       moderatedFounderDigest: study?.evidenceDigest ?? null,
       providerDecisionDigest: providers?.evidenceDigest ?? null,
       productionProviderQualificationDigest:
         productionProviderQualifications?.evidenceDigest ?? null,
+      operationalDigest: operational?.evidence.operational.evidenceDigest ?? null,
+      privacyDigest: operational?.evidence.privacy.evidenceDigest ?? null,
+      billingDigest: operational?.evidence.billing.evidenceDigest ?? null,
+      recoveryDigest: operational?.evidence.recovery.evidenceDigest ?? null,
+      retirementDigest: operational?.evidence.retirement.evidenceDigest ?? null,
     },
+    authorityExpiresAt: operational?.expiresAt ?? null,
+    candidate: operational?.candidate ?? null,
     metrics: study?.participants ?? null,
     criticalFailures: study?.criticalFailures ?? null,
     providers: providers?.providers ?? null,
@@ -372,6 +674,73 @@ export function buildFounderInitialGeneralReleaseDecision(input: {
   };
 }
 
+function attendedAccessibilityEvidence(productContract: FounderProductContractEvidence): {
+  voiceOver: AttendedAccessibilityEvidence;
+  talkBack: AttendedAccessibilityEvidence;
+} | null {
+  const evidenceFor = (
+    id: "voiceover_safari" | "talkback_chrome",
+  ): AttendedAccessibilityEvidence | null => {
+    const invariant = productContract.invariants.find((candidate) => candidate.id === id);
+    const evidence = invariant?.evidence[0];
+    if (
+      !evidence ||
+      typeof evidence !== "object" ||
+      !("digest" in evidence) ||
+      !("appSourceRevision" in evidence) ||
+      !("appRuntimeRevision" in evidence) ||
+      !("observedAt" in evidence) ||
+      evidence.attempts !== 1 ||
+      evidence.failures !== 0 ||
+      evidence.flakes !== 0 ||
+      evidence.skips !== 0 ||
+      evidence.evidenceClass !== "independent_attended_human_accessibility_review" ||
+      !isEvidenceRecord(evidence.participantBoundary) ||
+      evidence.participantBoundary.independentHumanReviewers !== 1 ||
+      evidence.participantBoundary.automatedRuns !== 0 ||
+      evidence.participantBoundary.ownerParticipants !== 0 ||
+      evidence.participantBoundary.selfTests !== 0 ||
+      evidence.participantBoundary.friendOrFamilyParticipants !== 0 ||
+      evidence.participantBoundary.supportInterventions !== 0 ||
+      evidence.participantBoundary.externalBetaParticipants !== 0 ||
+      evidence.participantBoundary.coachedParticipants !== 0 ||
+      evidence.participantBoundary.facilitatorRescues !== 0 ||
+      evidence.participantBoundary.trustedPreviewParticipants !== 0 ||
+      evidence.participantBoundary.buildTeamParticipants !== 0
+    )
+      return null;
+    return evidence as AttendedAccessibilityEvidence;
+  };
+  const voiceOver = evidenceFor("voiceover_safari");
+  const talkBack = evidenceFor("talkback_chrome");
+  return voiceOver && talkBack ? { voiceOver, talkBack } : null;
+}
+
+type AttendedAccessibilityEvidence = {
+  digest: `sha256:${string}`;
+  appSourceRevision: string;
+  appRuntimeRevision: string;
+  observedAt: string;
+  attempts: 1;
+  failures: 0;
+  flakes: 0;
+  skips: 0;
+  evidenceClass: "independent_attended_human_accessibility_review";
+  participantBoundary: {
+    independentHumanReviewers: 1;
+    automatedRuns: 0;
+    ownerParticipants: 0;
+    selfTests: 0;
+    friendOrFamilyParticipants: 0;
+    supportInterventions: 0;
+    externalBetaParticipants: 0;
+    coachedParticipants: 0;
+    facilitatorRescues: 0;
+    trustedPreviewParticipants: 0;
+    buildTeamParticipants: 0;
+  };
+};
+
 function parseRecord(raw: string, label: string): Record<string, unknown> {
   const value = tryParseEvidenceRecord(raw);
   if (value) return value;
@@ -386,6 +755,10 @@ function sanitizeProviderDecision(value: unknown): ProviderDecision {
     qualifiedAt: decision.qualifiedAt as string,
     expiresAt: decision.expiresAt as string,
     evidenceDigest: decision.evidenceDigest as `sha256:${string}`,
+    attempts: 1,
+    failures: 0,
+    flakes: 0,
+    skips: 0,
   };
 }
 

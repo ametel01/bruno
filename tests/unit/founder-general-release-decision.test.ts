@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildFounderInitialGeneralReleaseDecision,
+  parseFounderGeneralReleaseOperationalSummary,
   parseFounderModeratedSummary,
   parseFounderProviderDecisionSummary,
 } from "@/scripts/create-founder-general-release-decision";
@@ -13,7 +14,6 @@ import {
 import { createFounderProductContractScenarioLedger } from "@/src/testing/founder-product-contract";
 
 const REVISION = "a".repeat(40);
-const DIGEST = `sha256:${"b".repeat(64)}`;
 const SIGNING_SECRET = "founder-contract-test-secret";
 const RUNTIME_REVISION = "runtime-release-v1";
 const DECISION_TIME = new Date("2026-08-20T12:00:00.000Z");
@@ -26,6 +26,7 @@ describe("Founder Initial General Release decision", () => {
   it("denies a CI artifact without attended usability, accessibility, or provider evidence", () => {
     const decision = buildFounderInitialGeneralReleaseDecision({
       ...decisionAuthorities(),
+      operationalSummary: null,
       productContract: productContract("ci"),
       moderatedSummary: null,
       providerSummary: null,
@@ -37,6 +38,8 @@ describe("Founder Initial General Release decision", () => {
       reasons: [
         "product_contract_not_release_eligible",
         "moderated_founder_evidence_missing",
+        "operational_release_evidence_missing",
+        "accessibility_evidence_missing_or_unclean",
         "provider_decision_evidence_missing",
         "production_provider_qualification_evidence_missing",
       ],
@@ -66,6 +69,14 @@ describe("Founder Initial General Release decision", () => {
       outcome: "approved",
       reasons: [],
       releaseIdentity: { sourceRevision: REVISION, runtimeRevision: "runtime-release-v1" },
+      stage: "initial_general_release",
+      capabilityManifest: [
+        "openai",
+        "anthropic",
+        "calendar_reading",
+        "gmail_reading",
+        "gmail_sending",
+      ],
       metrics: {
         total: 8,
         desktopFirst: 4,
@@ -90,6 +101,200 @@ describe("Founder Initial General Release decision", () => {
       },
     });
     expect(decision.summaryDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(decision.evidence).toMatchObject({
+      voiceOverDigest: `sha256:${"ab".repeat(32)}`,
+      talkBackDigest: `sha256:${"ac".repeat(32)}`,
+      operationalDigest: operationalSummary().evidence.operational.evidenceDigest,
+      privacyDigest: operationalSummary().evidence.privacy.evidenceDigest,
+      billingDigest: operationalSummary().evidence.billing.evidenceDigest,
+      recoveryDigest: operationalSummary().evidence.recovery.evidenceDigest,
+      retirementDigest: operationalSummary().evidence.retirement.evidenceDigest,
+    });
+  });
+
+  it("rejects coached, preview, self/friend, or facilitator-rescued study participants", () => {
+    for (const boundary of [
+      "ownerParticipants",
+      "trustedPreviewParticipants",
+      "coachedParticipants",
+      "externalBetaParticipants",
+      "selfOrFriendTestParticipants",
+      "facilitatorRescues",
+    ] as const) {
+      const summary = moderatedSummary();
+      summary.participantBoundary[boundary] = 1 as never;
+      expect(() => parseFounderModeratedSummary(JSON.stringify(summary))).toThrow(
+        "Moderated Founder summary is invalid.",
+      );
+    }
+  });
+
+  it.each([
+    ["attempts", 2],
+    ["failures", 1],
+    ["flakes", 1],
+    ["skips", 1],
+  ] as const)("rejects moderated Founder evidence with unclean %s history", (field, value) => {
+    const summary = moderatedSummary();
+    summary[field] = value;
+
+    expect(() => parseFounderModeratedSummary(JSON.stringify(summary))).toThrow(
+      "Moderated Founder summary is invalid.",
+    );
+  });
+
+  it("requires External Beta findings resolved before freeze and separate passing operations", () => {
+    const beforeResolution = operationalSummary();
+    beforeResolution.candidate.findingsResolvedAt = "2026-08-20T11:00:00.000Z";
+    beforeResolution.candidate.frozenAt = "2026-08-20T10:30:00.000Z";
+    expect(
+      parseFounderGeneralReleaseOperationalSummary(JSON.stringify(beforeResolution)),
+    ).toBeNull();
+
+    const resolvedAtFreeze = operationalSummary();
+    resolvedAtFreeze.candidate.findingsResolvedAt = resolvedAtFreeze.candidate.frozenAt;
+    expect(
+      parseFounderGeneralReleaseOperationalSummary(JSON.stringify(resolvedAtFreeze)),
+    ).toBeNull();
+
+    const failedPrivacy = operationalSummary();
+    failedPrivacy.evidence.privacy.result = "failed";
+    const decision = buildFounderInitialGeneralReleaseDecision({
+      ...decisionAuthorities(),
+      operationalSummary: parseFounderGeneralReleaseOperationalSummary(
+        JSON.stringify(failedPrivacy),
+      ),
+      productContract: productContract("release"),
+      moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
+      providerSummary: parseFounderProviderDecisionSummary(JSON.stringify(providerSummary())),
+      productionProviderQualificationSummary: parsedProductionProviderQualification(),
+    });
+    expect(decision).toMatchObject({ outcome: "denied", reasons: ["privacy_evidence_failed"] });
+  });
+
+  it("denies cohort and attended accessibility evidence observed before candidate freeze", () => {
+    const study = moderatedSummary();
+    study.observedAt = "2026-08-20T10:00:00.000Z";
+    const decision = buildFounderInitialGeneralReleaseDecision({
+      ...decisionAuthorities(),
+      productContract: productContract("release", "2026-08-20T10:00:00.000Z"),
+      moderatedSummary: parseFounderModeratedSummary(JSON.stringify(study)),
+      providerSummary: parseFounderProviderDecisionSummary(JSON.stringify(providerSummary())),
+      productionProviderQualificationSummary: parsedProductionProviderQualification(),
+    });
+
+    expect(decision.outcome).toBe("denied");
+    expect(decision.reasons).toEqual(
+      expect.arrayContaining([
+        "founder_usability_evidence_before_candidate_freeze",
+        "accessibility_evidence_before_candidate_freeze",
+      ]),
+    );
+  });
+
+  it("denies structurally altered release evidence when attended attempt metadata is absent", () => {
+    const contract = structuredClone(productContract("release"));
+    const voiceOver = contract.invariants.find(({ id }) => id === "voiceover_safari")?.evidence[0];
+    if (!voiceOver || typeof voiceOver !== "object") {
+      throw new Error("VoiceOver evidence fixture is unavailable.");
+    }
+    delete (voiceOver as Record<string, unknown>).attempts;
+    (contract as { releaseEligible: boolean }).releaseEligible = true;
+    (contract as { result: "passed" | "failed" }).result = "passed";
+
+    const decision = buildFounderInitialGeneralReleaseDecision({
+      ...decisionAuthorities(),
+      productContract: contract,
+      moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
+      providerSummary: parseFounderProviderDecisionSummary(JSON.stringify(providerSummary())),
+      productionProviderQualificationSummary: parsedProductionProviderQualification(),
+    });
+
+    expect(decision).toMatchObject({
+      outcome: "denied",
+      reasons: ["accessibility_evidence_missing_or_unclean"],
+      evidence: { voiceOverDigest: null, talkBackDigest: null },
+    });
+  });
+
+  it("denies structurally altered attended evidence when the independent-human boundary is absent", () => {
+    const contract = structuredClone(productContract("release"));
+    const talkBack = contract.invariants.find(({ id }) => id === "talkback_chrome")?.evidence[0];
+    if (!talkBack || typeof talkBack !== "object") {
+      throw new Error("TalkBack evidence fixture is unavailable.");
+    }
+    delete (talkBack as Record<string, unknown>).participantBoundary;
+    (contract as { releaseEligible: boolean }).releaseEligible = true;
+    (contract as { result: "passed" | "failed" }).result = "passed";
+
+    const decision = buildFounderInitialGeneralReleaseDecision({
+      ...decisionAuthorities(),
+      productContract: contract,
+      moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
+      providerSummary: parseFounderProviderDecisionSummary(JSON.stringify(providerSummary())),
+      productionProviderQualificationSummary: parsedProductionProviderQualification(),
+    });
+
+    expect(decision).toMatchObject({
+      outcome: "denied",
+      reasons: ["accessibility_evidence_missing_or_unclean"],
+      evidence: { voiceOverDigest: null, talkBackDigest: null },
+    });
+  });
+
+  it.each([
+    "selfTests",
+    "coachedParticipants",
+    "facilitatorRescues",
+    "trustedPreviewParticipants",
+    "buildTeamParticipants",
+  ] as const)("denies attended evidence with prohibited %s", (field) => {
+    const contract = structuredClone(productContract("release"));
+    const voiceOver = contract.invariants.find(({ id }) => id === "voiceover_safari")?.evidence[0];
+    if (!voiceOver || typeof voiceOver !== "object") {
+      throw new Error("VoiceOver evidence fixture is unavailable.");
+    }
+    const boundary = (voiceOver as Record<string, unknown>).participantBoundary;
+    if (!boundary || typeof boundary !== "object") {
+      throw new Error("VoiceOver participant boundary fixture is unavailable.");
+    }
+    (boundary as Record<string, unknown>)[field] = 1;
+
+    const decision = buildFounderInitialGeneralReleaseDecision({
+      ...decisionAuthorities(),
+      productContract: contract,
+      moderatedSummary: parseFounderModeratedSummary(JSON.stringify(moderatedSummary())),
+      providerSummary: parseFounderProviderDecisionSummary(JSON.stringify(providerSummary())),
+      productionProviderQualificationSummary: parsedProductionProviderQualification(),
+    });
+
+    expect(decision).toMatchObject({
+      outcome: "denied",
+      reasons: ["accessibility_evidence_missing_or_unclean"],
+    });
+  });
+
+  it.each([
+    ["capability", "attempts"],
+    ["capability", "failures"],
+    ["capability", "flakes"],
+    ["capability", "skips"],
+    ["operational", "attempts"],
+    ["operational", "failures"],
+    ["operational", "flakes"],
+    ["operational", "skips"],
+  ] as const)("rejects unclean %s evidence %s metadata", (evidenceClass, field) => {
+    const provider = providerSummary();
+    const operational = operationalSummary();
+    const target =
+      evidenceClass === "capability" ? provider.providers.openai : operational.evidence.operational;
+    target[field] = field === "attempts" ? 2 : 1;
+
+    if (evidenceClass === "capability") {
+      expect(parseFounderProviderDecisionSummary(JSON.stringify(provider))).toBeNull();
+    } else {
+      expect(parseFounderGeneralReleaseOperationalSummary(JSON.stringify(operational))).toBeNull();
+    }
   });
 
   it("keeps an otherwise release-eligible candidate denied when external Clerk/Lemon evidence is absent", () => {
@@ -188,7 +393,11 @@ describe("Founder Initial General Release decision", () => {
 
     expect(generalReleaseDecision(summary)).toMatchObject({
       outcome: "denied",
-      reasons: ["provider_evidence_not_independent", "external_provider_evidence_digest_reused"],
+      reasons: [
+        "provider_evidence_not_independent",
+        "external_provider_evidence_digest_reused",
+        "release_evidence_digest_reused",
+      ],
     });
   });
 
@@ -219,7 +428,7 @@ describe("Founder Initial General Release decision", () => {
 
     expect(generalReleaseDecision(summary, moderatedSummary(), qualification)).toMatchObject({
       outcome: "denied",
-      reasons: ["external_provider_evidence_digest_reused"],
+      reasons: ["external_provider_evidence_digest_reused", "release_evidence_digest_reused"],
     });
   });
 
@@ -316,7 +525,7 @@ function generalReleaseDecision(
   });
 }
 
-function productContract(mode: "ci" | "release") {
+function productContract(mode: "ci" | "release", attendedObservedAt = "2026-08-20T11:00:00.000Z") {
   return buildFounderProductContractEvidence({
     browser: {
       config: { projects: FOUNDER_PRODUCT_CONTRACT_BROWSER_PROJECTS.map((name) => ({ name })) },
@@ -340,12 +549,46 @@ function productContract(mode: "ci" | "release") {
     scenarioSigningSecret: SIGNING_SECRET,
     ...(mode === "release"
       ? {
-          voiceOverDigest: DIGEST,
+          voiceOverDigest: `sha256:${"ab".repeat(32)}`,
           voiceOverOsVersion: "macOS 15.6",
           voiceOverBrowserVersion: "Safari 26.0",
-          talkBackDigest: DIGEST,
+          voiceOverObservedAt: attendedObservedAt,
+          voiceOverRuntimeRevision: RUNTIME_REVISION,
+          voiceOverAttempts: 1,
+          voiceOverFailures: 0,
+          voiceOverFlakes: 0,
+          voiceOverSkips: 0,
+          voiceOverIndependentHumanReviewers: 1,
+          voiceOverAutomatedRuns: 0,
+          voiceOverOwnerParticipants: 0,
+          voiceOverSelfTests: 0,
+          voiceOverFriendOrFamilyParticipants: 0,
+          voiceOverSupportInterventions: 0,
+          voiceOverExternalBetaParticipants: 0,
+          voiceOverCoachedParticipants: 0,
+          voiceOverFacilitatorRescues: 0,
+          voiceOverTrustedPreviewParticipants: 0,
+          voiceOverBuildTeamParticipants: 0,
+          talkBackDigest: `sha256:${"ac".repeat(32)}`,
           talkBackOsVersion: "Android 16",
           talkBackBrowserVersion: "Chrome 140",
+          talkBackObservedAt: attendedObservedAt,
+          talkBackRuntimeRevision: RUNTIME_REVISION,
+          talkBackAttempts: 1,
+          talkBackFailures: 0,
+          talkBackFlakes: 0,
+          talkBackSkips: 0,
+          talkBackIndependentHumanReviewers: 1,
+          talkBackAutomatedRuns: 0,
+          talkBackOwnerParticipants: 0,
+          talkBackSelfTests: 0,
+          talkBackFriendOrFamilyParticipants: 0,
+          talkBackSupportInterventions: 0,
+          talkBackExternalBetaParticipants: 0,
+          talkBackCoachedParticipants: 0,
+          talkBackFacilitatorRescues: 0,
+          talkBackTrustedPreviewParticipants: 0,
+          talkBackBuildTeamParticipants: 0,
         }
       : {}),
   });
@@ -372,6 +615,9 @@ function lifecycleScenarioResults() {
 function decisionAuthorities(decisionTime = DECISION_TIME) {
   return {
     productionProviderLiveTargetAuthority: LIVE_TARGET_AUTHORITY,
+    operationalSummary: parseFounderGeneralReleaseOperationalSummary(
+      JSON.stringify(operationalSummary()),
+    ),
     decisionTime,
   };
 }
@@ -379,8 +625,25 @@ function decisionAuthorities(decisionTime = DECISION_TIME) {
 function moderatedSummary() {
   return {
     schemaVersion: "bruno.moderated-founder-summary.v1",
-    evidenceDigest: DIGEST,
+    applicationRevision: REVISION,
+    runtimeRevision: RUNTIME_REVISION,
+    evidenceDigest: `sha256:${"ad".repeat(32)}`,
     observedAt: "2026-08-20T11:00:00.000Z",
+    attempts: 1,
+    failures: 0,
+    flakes: 0,
+    skips: 0,
+    participantBoundary: {
+      freshIndependentNontechnicalFounders: 8,
+      ownerParticipants: 0,
+      trustedPreviewParticipants: 0,
+      coachedParticipants: 0,
+      externalBetaParticipants: 0,
+      buildTeamParticipants: 0,
+      selfOrFriendTestParticipants: 0,
+      facilitatorRescues: 0,
+      supportInterventions: 0,
+    },
     participants: {
       total: 8,
       desktopFirst: 4,
@@ -413,17 +676,54 @@ function providerSummary() {
     qualifiedAt: "2026-08-20T11:00:00.000Z",
     expiresAt: "2026-08-27T11:00:00.000Z",
     evidenceDigest: `sha256:${digit.repeat(64)}` as `sha256:${string}`,
+    attempts: 1,
+    failures: 0,
+    flakes: 0,
+    skips: 0,
   });
   return {
     schemaVersion: "bruno.founder-provider-decision-summary.v1",
     sourceRevision: REVISION,
-    evidenceDigest: DIGEST,
+    evidenceDigest: `sha256:${"b".repeat(64)}`,
     providers: {
       openai: released("1"),
       anthropic: released("2"),
       calendarReading: released("3"),
       gmailReading: released("4"),
       gmailSending: released("5"),
+    },
+  };
+}
+
+function operationalSummary() {
+  const record = (digit: string) => ({
+    result: "passed",
+    evidenceDigest: `sha256:${digit.repeat(32)}`,
+    attempts: 1,
+    failures: 0,
+    flakes: 0,
+    skips: 0,
+  });
+  return {
+    schemaVersion: "bruno.founder-general-release-operational-summary.v1",
+    applicationRevision: REVISION,
+    runtimeRevision: RUNTIME_REVISION,
+    evidenceDigest: `sha256:${"ae".repeat(32)}`,
+    observedAt: "2026-08-20T11:30:00.000Z",
+    expiresAt: "2026-08-27T11:30:00.000Z",
+    sanitized: true,
+    candidate: {
+      externalBetaFindingsResolved: true,
+      unresolvedCriticalFindings: 0,
+      findingsResolvedAt: "2026-08-20T10:00:00.000Z",
+      frozenAt: "2026-08-20T10:30:00.000Z",
+    },
+    evidence: {
+      operational: record("af"),
+      privacy: record("ba"),
+      billing: record("bc"),
+      recovery: record("bd"),
+      retirement: record("be"),
     },
   };
 }
@@ -441,6 +741,10 @@ function productionProviderQualification() {
     observedAt: "2026-08-20T11:00:00.000Z",
     expiresAt: "2026-08-27T11:00:00.000Z",
     result: "passed",
+    attempts: 1,
+    failures: 0,
+    flakes: 0,
+    skips: 0,
     evidenceDigest: `sha256:${digit.repeat(64)}`,
     sanitized: true,
   });

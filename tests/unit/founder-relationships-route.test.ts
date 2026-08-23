@@ -48,8 +48,10 @@ describe("Founder Relationships route", () => {
     const response = await POST(ingestRequest("mail"));
 
     expect(response.status).toBe(403);
-    expect(mocks.requireWorkspaceAccess).toHaveBeenNthCalledWith(1, USER_ID, "workspace_with_mail");
-    expect(mocks.requireWorkspaceAccess).toHaveBeenNthCalledWith(2, USER_ID, ["gmail_reading"]);
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, ["gmail_reading"], {
+      allowGeneralReleaseSetup: true,
+    });
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledTimes(1);
     expect(mocks.ingestEvidence).not.toHaveBeenCalled();
   });
 
@@ -64,17 +66,29 @@ describe("Founder Relationships route", () => {
     const response = await GET();
 
     expect(response.status).toBe(403);
-    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, "workspace_with_mail");
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, "workspace_with_mail", {
+      allowGeneralReleaseSetup: true,
+    });
     expect(mocks.ingestEvidence).not.toHaveBeenCalled();
   });
 
-  it("requires Calendar capability before Calendar evidence reaches the application seam", async () => {
+  it("allows Calendar evidence through a Gmail-only Hold and checks only Calendar", async () => {
+    const unrelatedHold = Response.json(
+      { error: { code: "owner_preview_access_required" } },
+      { status: 403 },
+    );
+    mocks.requireWorkspaceAccess.mockImplementation(async (_userId, requirement) =>
+      Array.isArray(requirement) && requirement.includes("gmail_reading") ? unrelatedHold : null,
+    );
     const { POST } = await import("@/app/api/operator/relationships/route");
 
     const response = await POST(ingestRequest("calendar"));
 
     expect(response.status).toBe(200);
-    expect(mocks.requireWorkspaceAccess).toHaveBeenNthCalledWith(2, USER_ID, ["calendar_reading"]);
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, ["calendar_reading"], {
+      allowGeneralReleaseSetup: true,
+    });
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledTimes(1);
     expect(mocks.ingestEvidence).toHaveBeenCalledOnce();
   });
 

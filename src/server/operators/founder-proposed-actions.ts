@@ -216,7 +216,7 @@ export async function createFounderProposedActionForUser(
       now,
       requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
     },
-    dependencies,
+    { ...dependencies, generalReleaseAuthority: "work" },
     async (tx, at) => {
       await lockOperator(tx, operator.id);
       const policy = await ensureAuthorityPolicy(tx, operator.id, at);
@@ -427,7 +427,7 @@ export async function reviseFounderProposedActionForUser(
       now,
       requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
     },
-    dependencies,
+    { ...dependencies, generalReleaseAuthority: "work" },
     async (tx, at) => {
       await lockOperator(tx, operator.id);
       const [action] = await tx
@@ -693,7 +693,7 @@ export async function decideFounderProposedActionForUser(
         now,
         requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
       },
-      dependencies,
+      { ...dependencies, generalReleaseAuthority: "work" },
       decide,
     );
   }

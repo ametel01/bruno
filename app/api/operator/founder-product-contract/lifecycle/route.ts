@@ -2,18 +2,23 @@ import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import { users } from "@/src/server/db/schema";
+import { createFounderContractIdentityHeaders } from "@/src/server/founder-product-contract/deterministic-identity";
 import {
   deterministicFounderContractConnectionRevoked,
   deterministicFounderLifecycleProviders,
   type FounderLifecycleFailureOperation,
 } from "@/src/server/founder-product-contract/deterministic-providers";
-import { createFounderContractIdentityHeaders } from "@/src/server/founder-product-contract/deterministic-identity";
 import {
   claimFounderProductContractScenarioExecution,
   completeFounderProductContractScenarioExecution,
   failFounderProductContractScenarioExecution,
   issueFounderProductContractScenarioLedger,
 } from "@/src/server/founder-product-contract/evidence";
+import {
+  type FounderGeneralReleaseActivationDto,
+  getFounderGeneralReleaseActivationForUser,
+  hasFounderGeneralReleaseSetupAccessForUser,
+} from "@/src/server/founder-product-contract/initial-general-release";
 import {
   executeFounderProductContractLifecycleAction,
   type FounderCommerceEvent,
@@ -23,12 +28,10 @@ import {
   type FounderProductContractLifecycleAction,
   readFounderIdentitySeparationSnapshot,
 } from "@/src/server/founder-product-contract/lifecycle";
-import {
-  type FounderGeneralReleaseActivationDto,
-  getFounderGeneralReleaseActivationForUser,
-} from "@/src/server/founder-product-contract/initial-general-release";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import { POST as generalReleasePOST } from "../../general-release/route";
+import { GET as mailSendingCallbackGET } from "../../mail-sending/oauth/callback/route";
+import { GET as mailSendingGET, POST as mailSendingPOST } from "../../mail-sending/route";
 
 export const dynamic = "force-dynamic";
 
@@ -189,6 +192,13 @@ export async function POST(request: Request): Promise<Response> {
         applicationRevision: identity.sourceRevision,
         generalReleaseApplication: (payload, observedAt) =>
           callGeneralReleaseApplication(applicationUser.userId, payload, observedAt),
+        generalReleaseGmailBoundary: (phase, observedAt) =>
+          executeGeneralReleaseGmailThroughPublicSeams({
+            phase,
+            observedAt,
+            userId: applicationUser.userId,
+            baseUrl: localContractBaseUrl(request),
+          }),
         identityRecoveryPublicSeam: (scenario, connection) =>
           executeIdentityRecoveryThroughPublicSeams({
             input: scenario,
@@ -261,6 +271,101 @@ async function getGeneralReleaseStatusAt(
   now: Date,
 ): Promise<FounderGeneralReleaseActivationDto> {
   return getFounderGeneralReleaseActivationForUser(userId, { now: () => now });
+}
+
+async function executeGeneralReleaseGmailThroughPublicSeams(input: {
+  phase: "approved" | "held" | "resumed";
+  observedAt: Date;
+  userId: string;
+  baseUrl: string;
+}): Promise<{
+  getAllowed: boolean;
+  startAllowed: boolean;
+  callbackAllowed: boolean;
+  disconnectAllowed: boolean;
+  providerEffectsStarted: number;
+}> {
+  let providerEffectsStarted = 0;
+  const hasAccess: typeof hasFounderGeneralReleaseSetupAccessForUser = (
+    userId,
+    _dependencies,
+    capabilities,
+  ) =>
+    hasFounderGeneralReleaseSetupAccessForUser(
+      userId,
+      { now: () => input.observedAt },
+      capabilities,
+    );
+  const routeDependencies = {
+    requireApplicationUser: async () => ({ ok: true as const, userId: input.userId }),
+    hasGeneralReleaseSetupAccess: hasAccess,
+  };
+  const getResponse = await mailSendingGET(
+    new Request(new URL("/api/operator/mail-sending", input.baseUrl)),
+    undefined,
+    {
+      ...routeDependencies,
+      getConnection: async () => null,
+      getOffer: async () => true,
+    },
+  );
+  const startResponse = await mailSendingPOST(
+    new Request(new URL("/api/operator/mail-sending", input.baseUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "start" }),
+    }),
+    undefined,
+    {
+      ...routeDependencies,
+      startAuthorization: async () => {
+        providerEffectsStarted += 1;
+        return { connection: null, authorization: null };
+      },
+    },
+  );
+  const callbackResponse = await mailSendingCallbackGET(
+    new Request(
+      new URL(
+        "/api/operator/mail-sending/oauth/callback?state=contract&code=contract",
+        input.baseUrl,
+      ),
+    ),
+    undefined,
+    {
+      resolveAuthorizationUser: async () => input.userId,
+      hasGeneralReleaseSetupAccess: hasAccess,
+      completeAuthorization: async () => {
+        providerEffectsStarted += 1;
+        return { status: "ready" } as never;
+      },
+    },
+  );
+  let disconnected = false;
+  const disconnectResponse = await mailSendingPOST(
+    new Request(new URL("/api/operator/mail-sending", input.baseUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "disconnect" }),
+    }),
+    undefined,
+    {
+      ...routeDependencies,
+      disconnectConnection: async () => {
+        disconnected = true;
+        return null;
+      },
+    },
+  );
+  return {
+    getAllowed: getResponse.status === 200,
+    startAllowed: startResponse.status === 200,
+    callbackAllowed:
+      callbackResponse.status === 303 &&
+      callbackResponse.headers.get("location")?.includes("mail_sending=connected") === true,
+    disconnectAllowed: disconnectResponse.status === 200 && disconnected,
+    providerEffectsStarted,
+  };
 }
 
 async function executeIdentityRecoveryThroughPublicSeams(input: {

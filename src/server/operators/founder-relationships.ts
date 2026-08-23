@@ -186,7 +186,11 @@ export async function ingestFounderRelationshipEvidenceForUser(
         now,
         requiredCapabilities: founderRelationshipEvidenceRequirement(observations),
       },
-      { ...dependencies, createConnection: () => connection },
+      {
+        ...dependencies,
+        createConnection: () => connection,
+        generalReleaseAuthority: "work",
+      },
       async (tx, checkedAt) => {
         await lockOperator(tx, operator.id);
         for (const rawObservation of observations) {
@@ -281,65 +285,77 @@ export async function updateFounderRelationshipRecordForUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
+  const makeId = dependencies.randomUUID ?? randomUUID;
   try {
-    await connection.db.transaction(async (tx) => {
-      await lockOperator(tx, operator.id);
-      const [record] = await tx
-        .select()
-        .from(operatorRelationshipRecords)
-        .where(
-          and(
-            eq(operatorRelationshipRecords.id, recordId),
-            eq(operatorRelationshipRecords.operatorId, operator.id),
-          ),
-        )
-        .limit(1);
-      if (!record)
-        throw new FounderRelationshipsError(
-          "relationship_not_found",
-          "That Relationship Record is not available in this Founder workspace.",
-          404,
-        );
+    await withFounderOwnerPreviewWorkAuthority(
+      {
+        userId,
+        now,
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.coreOperation,
+      },
+      {
+        ...dependencies,
+        createConnection: () => connection,
+        generalReleaseAuthority: "work",
+      },
+      async (tx, at) => {
+        await lockOperator(tx, operator.id);
+        const [record] = await tx
+          .select()
+          .from(operatorRelationshipRecords)
+          .where(
+            and(
+              eq(operatorRelationshipRecords.id, recordId),
+              eq(operatorRelationshipRecords.operatorId, operator.id),
+            ),
+          )
+          .limit(1);
+        if (!record)
+          throw new FounderRelationshipsError(
+            "relationship_not_found",
+            "That Relationship Record is not available in this Founder workspace.",
+            404,
+          );
 
-      const changed = changedFields(record, normalized);
-      if (changed.length === 0) return;
-      const revision = record.revision + 1;
-      const at = now();
-      const nextStatus = normalized.status ?? record.status;
-      const [updated] = await tx
-        .update(operatorRelationshipRecords)
-        .set({
-          ...normalized,
-          closedAt: nextStatus === "active" ? null : (record.closedAt ?? at),
-          revision,
-          updatedAt: at,
-        })
-        .where(
-          and(
-            eq(operatorRelationshipRecords.id, record.id),
-            eq(operatorRelationshipRecords.operatorId, operator.id),
-          ),
-        )
-        .returning();
-      if (!updated)
-        throw new FounderRelationshipsError(
-          "relationship_unavailable",
-          "Relationship Record could not be saved.",
-          503,
+        const changed = changedFields(record, normalized);
+        if (changed.length === 0) return;
+        const revision = record.revision + 1;
+        const nextStatus = normalized.status ?? record.status;
+        const [updated] = await tx
+          .update(operatorRelationshipRecords)
+          .set({
+            ...normalized,
+            closedAt: nextStatus === "active" ? null : (record.closedAt ?? at),
+            revision,
+            updatedAt: at,
+          })
+          .where(
+            and(
+              eq(operatorRelationshipRecords.id, record.id),
+              eq(operatorRelationshipRecords.operatorId, operator.id),
+            ),
+          )
+          .returning();
+        if (!updated)
+          throw new FounderRelationshipsError(
+            "relationship_unavailable",
+            "Relationship Record could not be saved.",
+            503,
+          );
+        await tx.insert(operatorRelationshipCorrections).values(
+          changed.map((field) => ({
+            id: makeId(),
+            operatorId: operator.id,
+            recordId: record.id,
+            revision,
+            field,
+            previousValue: correctionValue(record, field),
+            nextValue: correctionValue(updated, field),
+            createdAt: at,
+          })),
         );
-      await tx.insert(operatorRelationshipCorrections).values(
-        changed.map((field) => ({
-          id: randomUUID(),
-          operatorId: operator.id,
-          recordId: record.id,
-          revision,
-          field,
-          previousValue: correctionValue(record, field),
-          nextValue: correctionValue(updated, field),
-          createdAt: at,
-        })),
-      );
-    });
+      },
+    );
     return await getFounderRelationshipsForUser(userId, {
       createConnection: () => connection,
       now,
@@ -377,82 +393,93 @@ async function resolveCandidate(
   const now = dependencies.now ?? (() => new Date());
   const makeId = dependencies.randomUUID ?? randomUUID;
   try {
-    await connection.db.transaction(async (tx) => {
-      await lockOperator(tx, operator.id);
-      const [candidate] = await tx
-        .select()
-        .from(operatorRelationshipCandidates)
-        .where(
-          and(
-            eq(operatorRelationshipCandidates.id, candidateId),
-            eq(operatorRelationshipCandidates.operatorId, operator.id),
-          ),
-        )
-        .limit(1);
-      if (!candidate)
-        throw new FounderRelationshipsError(
-          "candidate_not_found",
-          "That Relationship Candidate is not available.",
-          404,
-        );
-      if (candidate.status !== "pending")
-        throw new FounderRelationshipsError(
-          "candidate_already_resolved",
-          "That Relationship Candidate has already been resolved.",
-        );
-      const at = now();
-      if (resolution === "rejected") {
+    await withFounderOwnerPreviewWorkAuthority(
+      {
+        userId,
+        now,
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.coreOperation,
+      },
+      {
+        ...dependencies,
+        createConnection: () => connection,
+        generalReleaseAuthority: "work",
+      },
+      async (tx, at) => {
+        await lockOperator(tx, operator.id);
+        const [candidate] = await tx
+          .select()
+          .from(operatorRelationshipCandidates)
+          .where(
+            and(
+              eq(operatorRelationshipCandidates.id, candidateId),
+              eq(operatorRelationshipCandidates.operatorId, operator.id),
+            ),
+          )
+          .limit(1);
+        if (!candidate)
+          throw new FounderRelationshipsError(
+            "candidate_not_found",
+            "That Relationship Candidate is not available.",
+            404,
+          );
+        if (candidate.status !== "pending")
+          throw new FounderRelationshipsError(
+            "candidate_already_resolved",
+            "That Relationship Candidate has already been resolved.",
+          );
+        if (resolution === "rejected") {
+          await tx
+            .update(operatorRelationshipCandidates)
+            .set({ status: "rejected", resolvedAt: at, updatedAt: at })
+            .where(eq(operatorRelationshipCandidates.id, candidate.id));
+          return;
+        }
+
+        const existing = await findExactRecord(tx, operator.id, {
+          provider: candidate.provider ?? "",
+          providerIdentity: candidate.providerIdentity,
+          email: candidate.primaryEmail,
+        });
+        const record =
+          existing ??
+          (
+            await tx
+              .insert(operatorRelationshipRecords)
+              .values({
+                id: makeId(),
+                operatorId: operator.id,
+                displayName: candidate.displayName,
+                company: candidate.company,
+                primaryEmail: candidate.primaryEmail,
+                provider: candidate.provider,
+                providerIdentity: candidate.providerIdentity,
+                founderConfirmedAt: at,
+                createdAt: at,
+                updatedAt: at,
+              })
+              .returning()
+          )[0];
+        if (!record)
+          throw new FounderRelationshipsError(
+            "relationship_unavailable",
+            "Relationship Record could not be created.",
+            503,
+          );
         await tx
           .update(operatorRelationshipCandidates)
-          .set({ status: "rejected", resolvedAt: at, updatedAt: at })
+          .set({ status: "confirmed", proposedRecordId: record.id, resolvedAt: at, updatedAt: at })
           .where(eq(operatorRelationshipCandidates.id, candidate.id));
-        return;
-      }
-
-      const existing = await findExactRecord(tx, operator.id, {
-        provider: candidate.provider ?? "",
-        providerIdentity: candidate.providerIdentity,
-        email: candidate.primaryEmail,
-      });
-      const record =
-        existing ??
-        (
-          await tx
-            .insert(operatorRelationshipRecords)
-            .values({
-              id: makeId(),
-              operatorId: operator.id,
-              displayName: candidate.displayName,
-              company: candidate.company,
-              primaryEmail: candidate.primaryEmail,
-              provider: candidate.provider,
-              providerIdentity: candidate.providerIdentity,
-              founderConfirmedAt: at,
-              createdAt: at,
-              updatedAt: at,
-            })
-            .returning()
-        )[0];
-      if (!record)
-        throw new FounderRelationshipsError(
-          "relationship_unavailable",
-          "Relationship Record could not be created.",
-          503,
-        );
-      await tx
-        .update(operatorRelationshipCandidates)
-        .set({ status: "confirmed", proposedRecordId: record.id, resolvedAt: at, updatedAt: at })
-        .where(eq(operatorRelationshipCandidates.id, candidate.id));
-      await tx
-        .update(operatorRelationshipEvidence)
-        .set({ recordId: record.id, candidateId: null, updatedAt: at })
-        .where(
-          and(
-            eq(operatorRelationshipEvidence.operatorId, operator.id),
-            eq(operatorRelationshipEvidence.candidateId, candidate.id),
-          ),
-        );
-    });
+        await tx
+          .update(operatorRelationshipEvidence)
+          .set({ recordId: record.id, candidateId: null, updatedAt: at })
+          .where(
+            and(
+              eq(operatorRelationshipEvidence.operatorId, operator.id),
+              eq(operatorRelationshipEvidence.candidateId, candidate.id),
+            ),
+          );
+      },
+    );
     return await getFounderRelationshipsForUser(userId, {
       createConnection: () => connection,
       now,

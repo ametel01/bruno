@@ -39,18 +39,16 @@ const CONNECTION = {
 };
 
 describe("Founder Gmail reading route", () => {
-  it("keeps Gmail reading hidden during Owner Preview", async () => {
+  it("preserves a saved Gmail projection for an authenticated workspace", async () => {
     const response = await GET(new Request("http://localhost/api/operator/mail"), undefined, {
       requireApplicationUser: async () => ({ ok: true, userId: USER_ID }),
       getConnection: async () => CONNECTION,
       getOfferDisposition: async () => null,
       isMailReadingReleased: () => true,
     });
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toMatchObject({
-      error: { code: "owner_preview_capability_unavailable" },
-    });
+    expect(await response.json()).toMatchObject({ connection: CONNECTION });
   });
 
   it("blocks setup actions while preserving safe disconnect", async () => {
@@ -147,7 +145,7 @@ describe("Founder Gmail reading route", () => {
     });
   });
 
-  it("fails closed before exposing or starting unqualified Gmail reading", async () => {
+  it("preserves saved state while blocking new work after Gmail reading loses qualification", async () => {
     const getConnection = vi.fn(async () => CONNECTION);
     const startAuthorization = vi.fn();
     const dependencies = {
@@ -173,12 +171,12 @@ describe("Founder Gmail reading route", () => {
       dependencies,
     );
 
-    expect(getResponse.status).toBe(409);
+    expect(getResponse.status).toBe(200);
     expect(startResponse.status).toBe(409);
     expect(await startResponse.json()).toMatchObject({
       error: { code: "provider_not_released" },
     });
-    expect(getConnection).not.toHaveBeenCalled();
+    expect(getConnection).toHaveBeenCalledWith(USER_ID);
     expect(startAuthorization).not.toHaveBeenCalled();
   });
 

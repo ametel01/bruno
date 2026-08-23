@@ -54,6 +54,8 @@ Clerk environment:
   automatic effect of identity loss or recovery.
 
 Record `result: "passed"` only when every check passed in one bounded attended qualification window.
+Every qualification also records `attempts: 1`, `failures: 0`, `flakes: 0`, and `skips: 0`;
+any retry, failure, flake, or skip denies the candidate.
 
 ### 2. Lemon Squeezy test mode
 
@@ -95,6 +97,10 @@ release-denied and are not provider evidence.
       "observedAt": "<exact-ISO-8601-instant>",
       "expiresAt": "<exact-ISO-8601-instant-no-more-than-eight-days-later>",
       "result": "failed",
+      "attempts": 1,
+      "failures": 1,
+      "flakes": 0,
+      "skips": 0,
       "evidenceDigest": "sha256:<independent-sanitized-digest>",
       "sanitized": true,
       "checks": {
@@ -113,6 +119,10 @@ release-denied and are not provider evidence.
       "observedAt": "<exact-ISO-8601-instant>",
       "expiresAt": "<exact-ISO-8601-instant-no-more-than-eight-days-later>",
       "result": "failed",
+      "attempts": 1,
+      "failures": 1,
+      "flakes": 0,
+      "skips": 0,
       "evidenceDigest": "sha256:<independent-sanitized-digest>",
       "sanitized": true,
       "checks": {
@@ -137,6 +147,10 @@ release-denied and are not provider evidence.
       "observedAt": "<exact-ISO-8601-instant>",
       "expiresAt": "<exact-ISO-8601-instant-no-more-than-eight-days-later>",
       "result": "failed",
+      "attempts": 1,
+      "failures": 1,
+      "flakes": 0,
+      "skips": 0,
       "evidenceDigest": "sha256:<independent-sanitized-digest>",
       "sanitized": true,
       "intendedStoreDigest": "sha256:<sanitized-intended-store-reference>",

@@ -45,6 +45,7 @@ export function FounderOperatorPreparation({
   generalReleaseSetupAvailable = false,
   generalReleaseBriefInspectable = false,
   generalReleaseWorkspaceAvailable = false,
+  generalReleasePresentation = false,
   calendarReadingReleased = false,
   mailReadingReleased = false,
   mailSendingReleased = false,
@@ -65,6 +66,7 @@ export function FounderOperatorPreparation({
   generalReleaseSetupAvailable?: boolean;
   generalReleaseBriefInspectable?: boolean;
   generalReleaseWorkspaceAvailable?: boolean;
+  generalReleasePresentation?: boolean;
   calendarReadingReleased?: boolean;
   mailReadingReleased?: boolean;
   mailSendingReleased?: boolean;
@@ -755,11 +757,13 @@ export function FounderOperatorPreparation({
         <section className={styles.card} aria-labelledby="infrastructure-retirement-title">
           <div className={styles.cardHeading}>
             <div>
-              <p className={styles.kicker}>Infrastructure retirement</p>
+              <p className={styles.kicker}>
+                {generalReleasePresentation ? "Operator retirement" : "Infrastructure retirement"}
+              </p>
               <h3 id="infrastructure-retirement-title">
                 {initialInfrastructureRetirement.state === "completed"
-                  ? "Runtime cost stopped"
-                  : "Runtime removal is still being verified"}
+                  ? "Operator cost stopped"
+                  : "Operator retirement is still being verified"}
               </h3>
             </div>
             <span className={styles.confirmed}>
@@ -767,9 +771,13 @@ export function FounderOperatorPreparation({
             </span>
           </div>
           <p className={styles.hint}>
-            {initialInfrastructureRetirement.state === "completed"
-              ? "DigitalOcean independently confirmed that the exact Droplet and firewall are absent."
-              : "Bruno has stopped new work and disabled runtime access. Retirement is not complete until DigitalOcean independently confirms that the exact Droplet and firewall are absent."}
+            {generalReleasePresentation
+              ? initialInfrastructureRetirement.state === "completed"
+                ? "Bruno verified that the retired Operator environment no longer incurs hosting cost."
+                : "Bruno has stopped new work and is verifying that the Operator environment no longer incurs hosting cost."
+              : initialInfrastructureRetirement.state === "completed"
+                ? "DigitalOcean independently confirmed that the exact Droplet and firewall are absent."
+                : "Bruno has stopped new work and disabled runtime access. Retirement is not complete until DigitalOcean independently confirms that the exact Droplet and firewall are absent."}
           </p>
           {initialInfrastructureRetirement.archive.outcome === "failed" ? (
             <p className={styles.error} role="status">
@@ -779,14 +787,17 @@ export function FounderOperatorPreparation({
           ) : null}
           {initialInfrastructureRetirement.needsAttention ? (
             <p className={styles.error} role="status">
-              Provider verification needs another automatic attempt. Bruno will keep checking the
-              same exact resource; it will not broaden deletion scope.
+              {generalReleasePresentation
+                ? "Retirement verification needs another automatic attempt. Bruno will keep checking the same Operator environment."
+                : "Provider verification needs another automatic attempt. Bruno will keep checking the same exact resource; it will not broaden deletion scope."}
             </p>
           ) : null}
-          <p className={styles.hint}>
-            Droplet: {initialInfrastructureRetirement.provider.droplet}. Firewall:{" "}
-            {initialInfrastructureRetirement.provider.firewall}.
-          </p>
+          {!generalReleasePresentation ? (
+            <p className={styles.hint}>
+              Droplet: {initialInfrastructureRetirement.provider.droplet}. Firewall:{" "}
+              {initialInfrastructureRetirement.provider.firewall}.
+            </p>
+          ) : null}
         </section>
       ) : null}
 

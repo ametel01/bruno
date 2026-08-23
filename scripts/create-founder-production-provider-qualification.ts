@@ -20,6 +20,10 @@ type QualificationRecord = {
   observedAt: string;
   expiresAt: string;
   result: QualificationResult;
+  attempts: 1;
+  failures: 0;
+  flakes: 0;
+  skips: 0;
   evidenceDigest: `sha256:${string}`;
   sanitized: true;
   checks: Readonly<Record<string, boolean>>;
@@ -174,6 +178,14 @@ export function evaluateFounderProductionProviderQualification(input: {
     if (qualification.result !== "passed") {
       reasons.push(`${qualification.kind}_failed`);
     }
+    if (
+      qualification.attempts !== 1 ||
+      qualification.failures !== 0 ||
+      qualification.flakes !== 0 ||
+      qualification.skips !== 0
+    ) {
+      reasons.push(`${qualification.kind}_attempts_unclean`);
+    }
     if (Object.values(qualification.checks).some((result) => result !== true)) {
       reasons.push(`${qualification.kind}_incomplete`);
     }
@@ -323,6 +335,10 @@ function sanitizeCommonQualification(
     !isExactInstant(value.observedAt) ||
     !isExactInstant(value.expiresAt) ||
     (value.result !== "passed" && value.result !== "failed") ||
+    value.attempts !== 1 ||
+    value.failures !== 0 ||
+    value.flakes !== 0 ||
+    value.skips !== 0 ||
     !isEvidenceDigest(value.evidenceDigest) ||
     value.sanitized !== true ||
     !isEvidenceRecord(checks) ||
@@ -340,6 +356,10 @@ function sanitizeCommonQualification(
     observedAt: value.observedAt,
     expiresAt: value.expiresAt,
     result: value.result,
+    attempts: 1,
+    failures: 0,
+    flakes: 0,
+    skips: 0,
     evidenceDigest: value.evidenceDigest,
     sanitized: true,
     checks: Object.fromEntries(expected.checkNames.map((check) => [check, checks[check]])) as

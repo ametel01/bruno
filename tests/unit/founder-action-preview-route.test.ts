@@ -3,9 +3,16 @@ import { FounderReleaseStageAccessError } from "@/src/server/founder-product-con
 
 const mocks = vi.hoisted(() => ({
   requireApplicationUser: vi.fn(),
+  requireWorkspaceAccess: vi.fn(),
+  accessErrorResponse: vi.fn(),
   getPreview: vi.fn(),
   editPreview: vi.fn(),
   dismissMailOffer: vi.fn(),
+}));
+
+vi.mock("@/app/api/operator/_shared/owner-preview-access", () => ({
+  requireFounderOperatorWorkspaceAccess: mocks.requireWorkspaceAccess,
+  founderOperatorAccessErrorResponse: mocks.accessErrorResponse,
 }));
 
 vi.mock("@/src/server/users/configured-application-user", () => ({
@@ -43,6 +50,12 @@ const PREVIEW = {
 describe("Action Preview route", () => {
   beforeEach(() => {
     mocks.requireApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+    mocks.requireWorkspaceAccess.mockResolvedValue(null);
+    mocks.accessErrorResponse.mockImplementation((error) =>
+      error instanceof FounderReleaseStageAccessError
+        ? Response.json({ error: { code: error.code } }, { status: error.status })
+        : null,
+    );
     mocks.getPreview.mockResolvedValue(PREVIEW);
     mocks.editPreview.mockResolvedValue(PREVIEW);
     mocks.dismissMailOffer.mockResolvedValue({ ...PREVIEW, mailSendingOffer: "dismissed" });
@@ -56,6 +69,9 @@ describe("Action Preview route", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ preview: PREVIEW });
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, "workspace", {
+      allowGeneralReleaseSetup: true,
+    });
     expect(mocks.getPreview).toHaveBeenCalledWith(USER_ID);
   });
 
@@ -74,6 +90,9 @@ describe("Action Preview route", () => {
       }),
     );
     expect(response.status).toBe(200);
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, "ai_provider", {
+      allowGeneralReleaseSetup: true,
+    });
     expect(mocks.editPreview).toHaveBeenCalledWith(USER_ID, {
       recipientName: "Ada",
       recipientAddress: "ada@example.com",

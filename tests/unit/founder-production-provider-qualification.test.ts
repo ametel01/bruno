@@ -21,6 +21,10 @@ type MutableQualification = {
   observedAt: string;
   expiresAt: string;
   result: string;
+  attempts: number;
+  failures: number;
+  flakes: number;
+  skips: number;
   evidenceDigest: string;
   sanitized: boolean;
   checks: Record<string, boolean>;
@@ -124,6 +128,18 @@ describe("Founder production provider qualification", () => {
       "lemon_squeezy_test_mode_incomplete",
       "lemon_squeezy_live_canary_incomplete",
     ]);
+  });
+
+  it.each([
+    "attempts",
+    "failures",
+    "flakes",
+    "skips",
+  ] as const)("rejects otherwise passing qualification evidence with unclean %s metadata", (field) => {
+    const value = summaryValue();
+    qualification(value, 0)[field] = field === "attempts" ? 2 : 1;
+
+    expect(parseFounderProductionProviderQualificationSummary(JSON.stringify(value))).toBeNull();
   });
 
   it("denies app/runtime mismatches, future, stale, expired, and duplicate evidence", () => {
@@ -232,6 +248,10 @@ function summaryValue(): MutableSummary {
     observedAt: "2026-08-20T11:00:00.000Z",
     expiresAt: "2026-08-27T11:00:00.000Z",
     result: "passed",
+    attempts: 1,
+    failures: 0,
+    flakes: 0,
+    skips: 0,
     evidenceDigest: `sha256:${digit.repeat(64)}`,
     sanitized: true,
   });

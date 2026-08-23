@@ -14,8 +14,8 @@ import {
 import {
   type FounderOwnerPreviewAccess,
   FounderReleaseStageAccessError,
-  getFounderOwnerPreviewAccessForUser,
 } from "@/src/server/founder-product-contract/release-stage-access";
+import { withFounderOwnerPreviewWorkAuthority } from "@/src/server/founder-product-contract/work-authority";
 import { reconcileFounderLimitedOperationForUser } from "@/src/server/operators/founder-limited-operation";
 import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
@@ -214,11 +214,19 @@ export async function startFounderGoogleCalendarAuthorizationForUser(
     );
     let authorization: { authorizationUrl: string; expiresAt: Date };
     try {
-      authorization = await adapter.createAuthorizationUrl({
-        state,
-        reconnecting: Boolean(current?.connection.providerSubjectId),
+      authorization = await runFounderCalendarProviderEffect({
+        connection,
+        userId,
+        at: now(),
+        dependencies,
+        effect: () =>
+          adapter.createAuthorizationUrl({
+            state,
+            reconnecting: Boolean(current?.connection.providerSubjectId),
+          }),
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof FounderCalendarConnectionError) throw error;
       const failed = await persistConnectionFailure({
         connection,
         operatorId: operator.id,
@@ -364,31 +372,15 @@ export async function completeFounderGoogleCalendarAuthorizationForState(
         503,
       );
     }
-    const ownerPreviewAccess = dependencies.getOwnerPreviewAccess
-      ? await dependencies.getOwnerPreviewAccess(owner.userId, now())
-      : await getFounderOwnerPreviewAccessForUser(owner.userId, now(), {
-          createConnection: () => connection,
-          ...(dependencies.env ? { env: dependencies.env } : {}),
-        });
-    if (
-      !ownerPreviewAccess.admitted ||
-      !ownerPreviewAccess.availableCapabilities.includes("calendar_reading")
-    ) {
-      return await persistConnectionFailure({
-        connection,
-        operatorId: pending.operatorId,
-        connectionId: pending.id,
-        now: now(),
-        code: "owner_preview_access_required",
-        message: "Google Calendar authorization paused under the current Release Decision.",
-        authorizationState: "pending",
-        evidenceState: "unavailable",
-      });
-    }
-
     try {
       const keyring = resolveKeyring(dependencies);
-      const tokens = await adapter.exchangeAuthorizationCode({ code });
+      const tokens = await runFounderCalendarProviderEffect({
+        connection,
+        userId: owner.userId,
+        at: now(),
+        dependencies,
+        effect: () => adapter.exchangeAuthorizationCode({ code }),
+      });
       const previousRefreshToken = pending.refreshTokenCiphertext
         ? decryptToken(
             pending.refreshTokenCiphertext,
@@ -423,7 +415,13 @@ export async function completeFounderGoogleCalendarAuthorizationForState(
           authorizationState: "authorized",
         });
       }
-      const identity = await adapter.getIdentity({ accessToken: tokens.accessToken });
+      const identity = await runFounderCalendarProviderEffect({
+        connection,
+        userId: owner.userId,
+        at: now(),
+        dependencies,
+        effect: () => adapter.getIdentity({ accessToken: tokens.accessToken }),
+      });
       if (pending.providerSubjectId && pending.providerSubjectId !== identity.providerSubjectId) {
         return await persistConnectionFailure({
           connection,
@@ -436,7 +434,13 @@ export async function completeFounderGoogleCalendarAuthorizationForState(
           authorizationState: "authorized",
         });
       }
-      const calendars = await adapter.listCalendars({ accessToken: tokens.accessToken });
+      const calendars = await runFounderCalendarProviderEffect({
+        connection,
+        userId: owner.userId,
+        at: now(),
+        dependencies,
+        effect: () => adapter.listCalendars({ accessToken: tokens.accessToken }),
+      });
       if (calendars.length > MAX_PROVIDER_RESOURCES) {
         throw new FounderCalendarConnectionError(
           "calendar_list_too_large",
@@ -507,7 +511,8 @@ export async function completeFounderGoogleCalendarAuthorizationForState(
     } catch (error) {
       if (
         error instanceof FounderCalendarConnectionError &&
-        error.code !== "calendar_list_too_large"
+        error.code !== "calendar_list_too_large" &&
+        error.code !== "release_stage_access_required"
       ) {
         throw error;
       }
@@ -525,6 +530,7 @@ export async function completeFounderGoogleCalendarAuthorizationForState(
             ? error.message
             : "Bruno could not verify the Google Calendar connection. Try again.",
         authorizationState: "authorized",
+        evidenceState: "unavailable",
       });
     }
   } finally {
@@ -550,63 +556,69 @@ export async function selectFounderGoogleCalendarResourcesForUser(
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
   try {
-    const result = await connection.db.transaction(async (tx) => {
-      await lockOperator(tx, operator.id);
-      const current = await selectConnectionBundle(tx, operator.id, true);
-      if (!current?.connection.providerSubjectId) {
-        throw new FounderCalendarConnectionError(
-          "calendar_not_connected",
-          "Connect Google Calendar before selecting calendars.",
-          409,
-        );
-      }
-      const available = current.resources.filter((resource) => resource.status === "available");
-      const availableIds = new Set(available.map((resource) => resource.providerResourceId));
-      if (normalizedIds.some((id) => !availableIds.has(id))) {
-        throw new FounderCalendarConnectionError(
-          "calendar_selection_invalid",
-          "Choose only calendars Bruno found in your Google account.",
-          400,
-        );
-      }
-      await tx
-        .update(operatorCalendarResources)
-        .set({ selected: false, updatedAt: now() })
-        .where(eq(operatorCalendarResources.connectionId, current.connection.id));
-      await tx
-        .update(operatorCalendarResources)
-        .set({ selected: true, selectionReviewedAt: now(), updatedAt: now() })
-        .where(
-          and(
-            eq(operatorCalendarResources.connectionId, current.connection.id),
-            inArray(operatorCalendarResources.providerResourceId, normalizedIds),
-          ),
-        );
-      const [saved] = await tx
-        .update(operatorCalendarConnections)
-        .set({
-          status: "verifying",
-          evidenceState: "unknown",
-          failureCode: null,
-          recoveryMessage: null,
-          updatedAt: now(),
-        })
-        .where(eq(operatorCalendarConnections.id, current.connection.id))
-        .returning();
-      if (!saved)
-        throw new FounderCalendarConnectionError(
-          "connection_unavailable",
-          "Calendar selection could not be saved.",
-          503,
-        );
-      const bundle = await selectConnectionBundle(tx, operator.id);
-      if (!bundle)
-        throw new FounderCalendarConnectionError(
-          "connection_unavailable",
-          "Connection could not be reloaded.",
-          503,
-        );
-      return toDto(bundle);
+    const result = await runFounderCalendarProviderEffect({
+      connection,
+      userId,
+      at: now(),
+      dependencies,
+      effect: async (tx) => {
+        await lockOperator(tx, operator.id);
+        const current = await selectConnectionBundle(tx, operator.id, true);
+        if (!current?.connection.providerSubjectId) {
+          throw new FounderCalendarConnectionError(
+            "calendar_not_connected",
+            "Connect Google Calendar before selecting calendars.",
+            409,
+          );
+        }
+        const available = current.resources.filter((resource) => resource.status === "available");
+        const availableIds = new Set(available.map((resource) => resource.providerResourceId));
+        if (normalizedIds.some((id) => !availableIds.has(id))) {
+          throw new FounderCalendarConnectionError(
+            "calendar_selection_invalid",
+            "Choose only calendars Bruno found in your Google account.",
+            400,
+          );
+        }
+        await tx
+          .update(operatorCalendarResources)
+          .set({ selected: false, updatedAt: now() })
+          .where(eq(operatorCalendarResources.connectionId, current.connection.id));
+        await tx
+          .update(operatorCalendarResources)
+          .set({ selected: true, selectionReviewedAt: now(), updatedAt: now() })
+          .where(
+            and(
+              eq(operatorCalendarResources.connectionId, current.connection.id),
+              inArray(operatorCalendarResources.providerResourceId, normalizedIds),
+            ),
+          );
+        const [saved] = await tx
+          .update(operatorCalendarConnections)
+          .set({
+            status: "verifying",
+            evidenceState: "unknown",
+            failureCode: null,
+            recoveryMessage: null,
+            updatedAt: now(),
+          })
+          .where(eq(operatorCalendarConnections.id, current.connection.id))
+          .returning();
+        if (!saved)
+          throw new FounderCalendarConnectionError(
+            "connection_unavailable",
+            "Calendar selection could not be saved.",
+            503,
+          );
+        const bundle = await selectConnectionBundle(tx, operator.id);
+        if (!bundle)
+          throw new FounderCalendarConnectionError(
+            "connection_unavailable",
+            "Connection could not be reloaded.",
+            503,
+          );
+        return toDto(bundle);
+      },
     });
     return result;
   } finally {
@@ -668,12 +680,19 @@ export async function verifyFounderGoogleCalendarForUser(
     );
     let verification: Awaited<ReturnType<FounderGoogleCalendarAdapter["verifySelectedResources"]>>;
     try {
-      verification = await adapter.verifySelectedResources({
-        accessToken,
-        refreshToken,
-        resources: selected.map(toProviderResource),
-        timeMin: new Date(now().getTime() - 24 * 60 * 60 * 1000),
-        timeMax: new Date(now().getTime() + 7 * 24 * 60 * 60 * 1000),
+      verification = await runFounderCalendarProviderEffect({
+        connection,
+        userId,
+        at: now(),
+        dependencies,
+        effect: () =>
+          adapter.verifySelectedResources({
+            accessToken,
+            refreshToken,
+            resources: selected.map(toProviderResource),
+            timeMin: new Date(now().getTime() - 24 * 60 * 60 * 1000),
+            timeMax: new Date(now().getTime() + 7 * 24 * 60 * 60 * 1000),
+          }),
       });
     } catch {
       return await persistConnectionFailure({
@@ -776,11 +795,18 @@ export async function verifyFounderGoogleCalendarForUser(
     });
     if (verification.evidenceState === "current" && adapter.readSelectedResources) {
       try {
-        const observations = await adapter.readSelectedResources({
-          accessToken: verification.accessToken ?? accessToken,
-          resources: selected.map(toProviderResource),
-          timeMin: new Date(now().getTime() - 24 * 60 * 60 * 1000),
-          timeMax: new Date(now().getTime() + 7 * 24 * 60 * 60 * 1000),
+        const observations = await runFounderCalendarProviderEffect({
+          connection,
+          userId,
+          at: now(),
+          dependencies,
+          effect: () =>
+            adapter.readSelectedResources?.({
+              accessToken: verification.accessToken ?? accessToken,
+              resources: selected.map(toProviderResource),
+              timeMin: new Date(now().getTime() - 24 * 60 * 60 * 1000),
+              timeMax: new Date(now().getTime() + 7 * 24 * 60 * 60 * 1000),
+            }) ?? Promise.resolve([]),
         });
         await ingestFounderRelationshipEvidenceForUser(
           userId,
@@ -1539,6 +1565,52 @@ async function lockOperator(tx: FounderCalendarTransaction, operatorId: string):
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:operator-calendar:${operatorId}`}, 0))`,
   );
+}
+
+async function runFounderCalendarProviderEffect<T>(input: {
+  connection: DatabaseConnection;
+  userId: string;
+  at: Date;
+  dependencies: FounderCalendarConnectionDependencies;
+  effect: (tx: FounderCalendarTransaction) => Promise<T>;
+}): Promise<T> {
+  try {
+    return await withFounderOwnerPreviewWorkAuthority(
+      {
+        userId: input.userId,
+        now: () => input.at,
+        requiredCapabilities: ["calendar_reading"],
+      },
+      {
+        createConnection: () => input.connection,
+        ...(input.dependencies.env ? { env: input.dependencies.env } : {}),
+        generalReleaseAuthority: "setup",
+        ...(input.dependencies.getOwnerPreviewAccess
+          ? {
+              requireReleaseStageAccess: async (_tx, accessInput) => {
+                const access = await input.dependencies.getOwnerPreviewAccess?.(
+                  accessInput.userId,
+                  accessInput.now,
+                );
+                if (
+                  !access?.admitted ||
+                  !access.availableCapabilities.includes("calendar_reading")
+                ) {
+                  throw new FounderReleaseStageAccessError("owner_preview");
+                }
+              },
+            }
+          : {}),
+      },
+      input.effect,
+    );
+  } catch (error) {
+    if (!(error instanceof FounderReleaseStageAccessError)) throw error;
+    throw new FounderCalendarConnectionError(
+      "release_stage_access_required",
+      "Google Calendar authorization paused under the current Release Decision.",
+    );
+  }
 }
 
 function readString(value: unknown): string | null {

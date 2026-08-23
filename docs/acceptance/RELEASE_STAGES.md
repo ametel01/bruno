@@ -320,6 +320,8 @@ Initial General Release requires both OpenAI and Anthropic to be available, but 
 either or both. Bruno.Ai routes only among explicitly connected providers and never silently enrolls
 a provider or uses Bruno-funded capacity.
 
-After Initial General Release, loss of one provider's qualification hides or suspends only that
-provider. Existing work remains at Safe Work Checkpoints, unaffected capabilities stay available,
-and new Founders may choose an available provider or wait for the affected provider to return.
+After Initial General Release, loss of one provider's qualification appends an immutable Hold scoped
+to that provider's dependent capability. Existing work remains at Safe Work Checkpoints and
+unaffected capabilities stay available to already bound, entitled Founders. New public admission is
+closed until a fresh complete exact-candidate decision appends an explicit Resume; provider
+configuration recovering by itself never erases the Hold.

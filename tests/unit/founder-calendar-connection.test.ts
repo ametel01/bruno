@@ -1,12 +1,5 @@
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  completeFounderGoogleCalendarAuthorizationForState,
-  disconnectFounderGoogleCalendarForUser,
-  selectFounderGoogleCalendarResourcesForUser,
-  startFounderGoogleCalendarAuthorizationForUser,
-  verifyFounderGoogleCalendarForUser,
-  type FounderGoogleCalendarAdapter,
-} from "@/src/server/operators/founder-calendar-connection";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   operatorCalendarConnectionReceipts,
@@ -15,6 +8,14 @@ import {
   operatorRuntimes,
   users,
 } from "@/src/server/db/schema";
+import {
+  completeFounderGoogleCalendarAuthorizationForState,
+  disconnectFounderGoogleCalendarForUser,
+  type FounderGoogleCalendarAdapter,
+  selectFounderGoogleCalendarResourcesForUser,
+  startFounderGoogleCalendarAuthorizationForUser,
+  verifyFounderGoogleCalendarForUser,
+} from "@/src/server/operators/founder-calendar-connection";
 import {
   confirmFounderTimezoneForUser,
   ensureFounderOperatorForUser,
@@ -65,6 +66,7 @@ describe("Founder Google Calendar connection application seam", () => {
       adapter,
       keyring: KEYRING,
       now: () => NOW,
+      getOwnerPreviewAccess: CURRENT_CALENDAR_ACCESS,
     });
     const state = new URL(started.authorization?.authorizationUrl ?? "").searchParams.get("state");
     expect(state).toBeTruthy();
@@ -132,6 +134,32 @@ describe("Founder Google Calendar connection application seam", () => {
     });
   });
 
+  it("rechecks Calendar capability while holding the Founder lifecycle lock", async () => {
+    const competingConnection = createDatabaseConnection();
+    let checkedInsideLock = false;
+    try {
+      await expect(
+        startFounderGoogleCalendarAuthorizationForUser(OWNER_ID, {
+          createConnection: () => connection,
+          adapter: calendarAdapter(),
+          keyring: KEYRING,
+          now: () => NOW,
+          getOwnerPreviewAccess: async () => {
+            const rows = await competingConnection.db.execute<{ acquired: boolean }>(
+              sql`select pg_try_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${OWNER_ID}`}, 0)) as acquired`,
+            );
+            expect(rows[0]?.acquired).toBe(false);
+            checkedInsideLock = true;
+            return CURRENT_CALENDAR_ACCESS();
+          },
+        }),
+      ).resolves.toMatchObject({ connection: { status: "authorizing" } });
+      expect(checkedInsideLock).toBe(true);
+    } finally {
+      await competingConnection.close();
+    }
+  });
+
   it("requires explicit resource selection and accepts a live calendar with zero events as current", async () => {
     const adapter = calendarAdapter();
     const connected = await connect(adapter);
@@ -156,6 +184,7 @@ describe("Founder Google Calendar connection application seam", () => {
       adapter,
       keyring: KEYRING,
       now: () => NOW,
+      getOwnerPreviewAccess: CURRENT_CALENDAR_ACCESS,
     });
 
     expect(result).toMatchObject({
@@ -181,6 +210,7 @@ describe("Founder Google Calendar connection application seam", () => {
       adapter,
       keyring: KEYRING,
       now: () => NOW,
+      getOwnerPreviewAccess: CURRENT_CALENDAR_ACCESS,
     });
     await disconnectFounderGoogleCalendarForUser(OWNER_ID, {
       createConnection: () => connection,
@@ -310,6 +340,7 @@ describe("Founder Google Calendar connection application seam", () => {
       adapter,
       keyring: KEYRING,
       now: () => NOW,
+      getOwnerPreviewAccess: CURRENT_CALENDAR_ACCESS,
     });
     const state = new URL(started.authorization?.authorizationUrl ?? "").searchParams.get("state");
     return completeFounderGoogleCalendarAuthorizationForState(state ?? "", "google-code", {
@@ -327,6 +358,7 @@ describe("Founder Google Calendar connection application seam", () => {
       adapter,
       keyring: KEYRING,
       now: () => NOW,
+      getOwnerPreviewAccess: CURRENT_CALENDAR_ACCESS,
     });
     const state = new URL(started.authorization?.authorizationUrl ?? "").searchParams.get("state");
     return completeFounderGoogleCalendarAuthorizationForState(state ?? "", "google-code-2", {

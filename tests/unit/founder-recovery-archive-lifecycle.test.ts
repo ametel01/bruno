@@ -7,6 +7,7 @@ import { FakeBackupObjectStorage } from "@/src/server/backups/backup-storage";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   appMetadata,
+  founderGeneralReleaseActivations,
   founderInfrastructureRetirements,
   founderRecoveryArchiveDeletionReceipts,
   founderRecoveryArchives,
@@ -724,6 +725,87 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
       .from(founderRecoveryArchives)
       .orderBy(founderRecoveryArchives.observedAt);
     expect(archives.at(-1)).toMatchObject({ status: "verified", observedAt: refreshAt });
+  });
+
+  it("schedules a daily archive for a public General Release activation with global authority", async () => {
+    const generalReleaseAt = new Date(START.valueOf() + 2 * 60 * 60 * 1_000);
+    await connection.db
+      .update(operatorRuntimes)
+      .set({ configRevision: "runtime-v2", updatedAt: generalReleaseAt })
+      .where(eq(operatorRuntimes.operatorId, OPERATOR_ID));
+    const [decision] = await connection.db
+      .insert(founderReleaseDecisions)
+      .values({
+        stage: "initial_general_release",
+        outcome: "enter",
+        applicationRevision: APPLICATION_REVISION,
+        runtimeRevision: "runtime-v2",
+        capabilityManifest: [
+          "openai",
+          "anthropic",
+          "calendar_reading",
+          "gmail_reading",
+          "gmail_sending",
+        ],
+        evidenceDigests: Array.from(
+          { length: 12 },
+          (_, index) => `sha256:${index.toString(16).repeat(64)}`,
+        ),
+        authorityExpiresAt: QUALIFICATION_EXPIRES_AT,
+        decidedAt: generalReleaseAt,
+        createdAt: generalReleaseAt,
+      })
+      .returning({ id: founderReleaseDecisions.id });
+    if (!decision) throw new Error("Global General Release fixture is unavailable.");
+    const [runner] = await connection.db
+      .insert(runners)
+      .values({
+        userId: USER_ID,
+        name: "General Release archive fixture",
+        kind: "digitalocean",
+        status: "online",
+        provider: "digitalocean",
+        providerResourceId: "droplet-archive-387",
+        region: "sgp1",
+        sizeSlug: "s-1vcpu-1gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "ready",
+        createdAt: generalReleaseAt,
+        updatedAt: generalReleaseAt,
+      })
+      .returning({ id: runners.id });
+    if (!runner) throw new Error("Global General Release runner fixture is unavailable.");
+    await connection.db.insert(founderGeneralReleaseActivations).values({
+      userId: USER_ID,
+      operatorId: OPERATOR_ID,
+      releaseDecisionId: decision.id,
+      runnerId: runner.id,
+      status: "activation_pending",
+      serviceBusinessConfirmedAt: generalReleaseAt,
+      geographyCode: "PH",
+      admissionState: "eligible",
+      admissionReason: "Public capacity is available.",
+      publishedPriceLabel: "$30/month",
+      capacityObservedAt: generalReleaseAt,
+      createConfirmedAt: generalReleaseAt,
+      setupEvidenceDigest: `sha256:${"f".repeat(64)}`,
+      dropletCreatedAt: generalReleaseAt,
+      createdAt: generalReleaseAt,
+      updatedAt: generalReleaseAt,
+    });
+    const refreshAt = new Date(generalReleaseAt.valueOf() + 23 * 60 * 60 * 1_000);
+
+    await expect(
+      reconcileFounderRecoveryArchives({
+        applicationRevision: APPLICATION_REVISION,
+        now: refreshAt,
+        provider,
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ eligible: 1, created: 1, failed: 0, deleted: 0 });
+    await expect(connection.db.select().from(founderRecoveryArchives)).resolves.toEqual([
+      expect.objectContaining({ userId: USER_ID, status: "verified", observedAt: refreshAt }),
+    ]);
   });
 
   it("admits a production Operator only after persisting its initial verified archive", async () => {
@@ -1915,7 +1997,7 @@ describe("persisted Founder Recovery Archive lifecycle", () => {
 
   async function reset(): Promise<void> {
     await connection.client.unsafe(
-      "delete from founder_recovery_archive_deletion_receipts; delete from founder_infrastructure_retirements; delete from founder_recovery_archives; delete from founder_release_decisions; delete from runners; delete from operator_runtimes; delete from operator_preparations; delete from operators; delete from users",
+      "delete from founder_general_release_activations; delete from founder_recovery_archive_deletion_receipts; delete from founder_infrastructure_retirements; delete from founder_recovery_archives; delete from founder_release_decisions; delete from runners; delete from operator_runtimes; delete from operator_preparations; delete from operators; delete from users",
     );
     await connection.db
       .delete(appMetadata)

@@ -79,8 +79,41 @@ export function FounderGeneralRelease({
       <p className={styles.notice} role="status">
         {status.admission.reason}
       </p>
+      <div className={styles.decision}>
+        <p>
+          Provider choice: {status.release.providerChoice}. Bruno.Ai never silently switches to an
+          account you did not connect.
+        </p>
+        <ul className={styles.checklist} aria-label="Current General Release capabilities">
+          {status.release.capabilities.map((capability) => (
+            <li key={capability.id} data-ready={capability.state === "available"}>
+              {capability.label}: {capability.state === "available" ? "Available" : "Paused"}
+            </li>
+          ))}
+        </ul>
+        <p>
+          Sending is {status.release.sending}. It turns on only after you approve that authority;
+          keeping Sending Off remains a valid choice. Support: {status.release.supportBoundary}.
+        </p>
+      </div>
 
-      {!status.setup.serviceBusinessConfirmed ? (
+      {status.offer.priceLabel ? (
+        <div className={styles.offer}>
+          <p className={styles.eyebrow}>Published Bruno.Ai price</p>
+          <h3>{status.offer.priceLabel}</h3>
+          <p>
+            Bruno.Ai is charged separately. OpenAI or Anthropic subscriptions and usage are paid
+            directly to those providers. There is no permanent free tier or automatic beta
+            conversion.
+          </p>
+          {status.state !== "activated" ? (
+            <p>Checkout opens only after your first evidence-backed Founder Morning Brief.</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {(status.admission.capacity !== "unavailable" && !status.setup.serviceBusinessConfirmed) ||
+      status.setup.requiresReleaseReconfirmation ? (
         <form
           className={styles.form}
           onSubmit={(event) => {
@@ -116,10 +149,20 @@ export function FounderGeneralRelease({
             type="submit"
             disabled={busy || !serviceBusinessConfirmed || geographyCode.length !== 2}
           >
-            {busy ? "Checking…" : "Check public availability"}
+            {busy
+              ? "Checking…"
+              : status.setup.requiresReleaseReconfirmation
+                ? "Reconfirm current release"
+                : "Check public availability"}
           </button>
+          {status.setup.requiresReleaseReconfirmation ? (
+            <p className={styles.notice} role="status">
+              A fresh release decision resumed setup. Reconfirm your business and country before
+              creating the Operator.
+            </p>
+          ) : null}
         </form>
-      ) : (
+      ) : status.setup.serviceBusinessConfirmed ? (
         <ul className={styles.checklist} aria-label="Operator creation requirements">
           <li data-ready={status.setup.readyAiConnection}>At least one Ready AI Connection</li>
           <li data-ready={status.setup.selectedCompanyConnections}>
@@ -129,13 +172,19 @@ export function FounderGeneralRelease({
             Processing Consent and safe Authority Policy
           </li>
         </ul>
+      ) : (
+        <p className={styles.notice}>
+          Public setup remains closed until the exact deployed release is approved and every
+          required capability is current.
+        </p>
       )}
 
       {status.setup.canCreate ? (
         <div className={styles.decision}>
           <p>
-            Bruno.Ai will create one DigitalOcean Droplet only after this explicit decision. The
-            free activation window begins at authoritative Droplet creation.
+            Bruno.Ai will create your isolated Operator environment only after this explicit
+            decision. The free 24-hour activation window begins when Bruno confirms your private
+            environment has been created.
           </p>
           <button
             type="button"
@@ -157,13 +206,6 @@ export function FounderGeneralRelease({
 
       {status.state === "activated" ? (
         <div className={styles.offer}>
-          <p className={styles.eyebrow}>Published paid offer</p>
-          <h3>{status.offer.priceLabel ?? "Price unavailable"}</h3>
-          <p>
-            Bruno.Ai is charged separately. OpenAI or Anthropic subscriptions and usage are paid
-            directly to those providers. There is no permanent free tier or automatic beta
-            conversion.
-          </p>
           <p>
             Your first brief remains free. New Operator work is paused while you decide
             {status.offer.decisionDueAt ? `, until ${formatDate(status.offer.decisionDueAt)}` : ""}.
@@ -175,7 +217,7 @@ export function FounderGeneralRelease({
               disabled={busy}
               onClick={() => void runAction({ action: "decline_offer" })}
             >
-              Not now — retire my Droplet
+              Not now — retire my Operator environment
             </button>
           </div>
         </div>
@@ -189,8 +231,8 @@ export function FounderGeneralRelease({
       {status.state === "retirement_due" || status.state === "retired" ? (
         <p className={styles.notice} role="status">
           {status.state === "retired"
-            ? "Infrastructure Retirement is verified complete."
-            : "New work is stopped. Bruno.Ai is archiving eligible state and retiring the exact Droplet."}
+            ? "The Operator environment is retired and no longer incurring runtime cost."
+            : "New work is stopped. Bruno.Ai is protecting eligible state and retiring the Operator environment."}
         </p>
       ) : null}
       {error ? (

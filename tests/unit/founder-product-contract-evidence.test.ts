@@ -6,9 +6,9 @@ import {
 } from "@/src/shared/founder-product-contract";
 import {
   createFounderProductContractScenarioLedger,
+  type FounderProductContractScenarioResult,
   parseFounderProductContractScenarioLedger,
   sanitizeFounderProductContractScenarioResult,
-  type FounderProductContractScenarioResult,
 } from "@/src/testing/founder-product-contract";
 
 const REVISION = "a".repeat(40);
@@ -45,16 +45,7 @@ describe("Founder Product Contract evidence", () => {
   });
 
   it("binds attended evidence and marks a release-mode pack eligible", () => {
-    const evidence = buildFounderProductContractEvidence({
-      ...validInput(),
-      mode: "release",
-      voiceOverDigest: DIGEST,
-      voiceOverOsVersion: "macOS 15.6",
-      voiceOverBrowserVersion: "Safari 26.0",
-      talkBackDigest: DIGEST,
-      talkBackOsVersion: "Android 16",
-      talkBackBrowserVersion: "Chrome 140",
-    });
+    const evidence = buildFounderProductContractEvidence(validAttendedInput());
 
     expect(evidence.releaseEligible).toBe(true);
     expect(evidence.invariants.filter((invariant) => invariant.kind === "attended")).toEqual([
@@ -70,6 +61,26 @@ describe("Founder Product Contract evidence", () => {
             browser: "Safari",
             browserVersion: "Safari 26.0",
             appSourceRevision: REVISION,
+            appRuntimeRevision: RUNTIME_REVISION,
+            observedAt: "2026-08-20T00:00:00.000Z",
+            attempts: 1,
+            failures: 0,
+            flakes: 0,
+            skips: 0,
+            evidenceClass: "independent_attended_human_accessibility_review",
+            participantBoundary: {
+              independentHumanReviewers: 1,
+              automatedRuns: 0,
+              ownerParticipants: 0,
+              selfTests: 0,
+              friendOrFamilyParticipants: 0,
+              supportInterventions: 0,
+              externalBetaParticipants: 0,
+              coachedParticipants: 0,
+              facilitatorRescues: 0,
+              trustedPreviewParticipants: 0,
+              buildTeamParticipants: 0,
+            },
             outcome: "passed",
           }),
         ],
@@ -86,6 +97,26 @@ describe("Founder Product Contract evidence", () => {
             browser: "Chrome",
             browserVersion: "Chrome 140",
             appSourceRevision: REVISION,
+            appRuntimeRevision: RUNTIME_REVISION,
+            observedAt: "2026-08-20T00:00:00.000Z",
+            attempts: 1,
+            failures: 0,
+            flakes: 0,
+            skips: 0,
+            evidenceClass: "independent_attended_human_accessibility_review",
+            participantBoundary: {
+              independentHumanReviewers: 1,
+              automatedRuns: 0,
+              ownerParticipants: 0,
+              selfTests: 0,
+              friendOrFamilyParticipants: 0,
+              supportInterventions: 0,
+              externalBetaParticipants: 0,
+              coachedParticipants: 0,
+              facilitatorRescues: 0,
+              trustedPreviewParticipants: 0,
+              buildTeamParticipants: 0,
+            },
             outcome: "passed",
           }),
         ],
@@ -153,15 +184,8 @@ describe("Founder Product Contract evidence", () => {
   it("refuses release mode with an empty lifecycle ledger", () => {
     expect(() =>
       buildFounderProductContractEvidence({
-        ...validInput(),
-        mode: "release",
+        ...validAttendedInput(),
         scenarioLedger: signedScenarioLedger([]),
-        voiceOverDigest: DIGEST,
-        voiceOverOsVersion: "macOS 15.6",
-        voiceOverBrowserVersion: "Safari 26.0",
-        talkBackDigest: DIGEST,
-        talkBackOsVersion: "Android 16",
-        talkBackBrowserVersion: "Chrome 140",
       }),
     ).toThrow(
       "Required Founder Product Contract scenario release_stage_admission was not present.",
@@ -194,6 +218,93 @@ describe("Founder Product Contract evidence", () => {
         voiceOverDigest: DIGEST,
       }),
     ).toThrow("VoiceOver evidence metadata is incomplete.");
+  });
+
+  it("requires each attended record to preserve its exact observation time and runtime", () => {
+    expect(() =>
+      buildFounderProductContractEvidence({
+        ...validInput(),
+        voiceOverDigest: DIGEST,
+        voiceOverOsVersion: "macOS 15.6",
+        voiceOverBrowserVersion: "Safari 26.0",
+      }),
+    ).toThrow("VoiceOver evidence metadata is incomplete");
+    expect(() =>
+      buildFounderProductContractEvidence({
+        ...validAttendedInput(),
+        voiceOverObservedAt: "not-a-time",
+      }),
+    ).toThrow("VoiceOver observed time is invalid");
+  });
+
+  it("does not synthesize an omitted zero claim into complete attended evidence", () => {
+    const { voiceOverFailures: _omitted, ...incomplete } = validAttendedInput();
+
+    expect(() => buildFounderProductContractEvidence(incomplete)).toThrow(
+      "VoiceOver evidence metadata is incomplete",
+    );
+  });
+
+  it.each([
+    ["VoiceOver", "voiceOverRuntimeRevision"],
+    ["TalkBack", "talkBackRuntimeRevision"],
+  ] as const)("rejects %s evidence from a different contract runtime", (label, field) => {
+    const input = validAttendedInput();
+    input[field] = "runtime-release-v2";
+
+    expect(() => buildFounderProductContractEvidence(input)).toThrow(
+      `${label} runtime revision does not match the contract`,
+    );
+  });
+
+  it.each([
+    ["VoiceOver", "voiceOverAttempts", 2],
+    ["VoiceOver", "voiceOverFailures", 1],
+    ["VoiceOver", "voiceOverFlakes", 1],
+    ["VoiceOver", "voiceOverSkips", 1],
+    ["TalkBack", "talkBackAttempts", 2],
+    ["TalkBack", "talkBackFailures", 1],
+    ["TalkBack", "talkBackFlakes", 1],
+    ["TalkBack", "talkBackSkips", 1],
+  ] as const)("rejects a non-clean %s attended result", (label, field, value) => {
+    const input = validAttendedInput();
+    input[field] = value;
+
+    expect(() => buildFounderProductContractEvidence(input)).toThrow(
+      `${label} evidence must have exactly one clean attempt`,
+    );
+  });
+
+  it.each([
+    ["VoiceOver", "voiceOverIndependentHumanReviewers", 0],
+    ["VoiceOver", "voiceOverAutomatedRuns", 1],
+    ["VoiceOver", "voiceOverOwnerParticipants", 1],
+    ["VoiceOver", "voiceOverSelfTests", 1],
+    ["VoiceOver", "voiceOverFriendOrFamilyParticipants", 1],
+    ["VoiceOver", "voiceOverSupportInterventions", 1],
+    ["VoiceOver", "voiceOverExternalBetaParticipants", 1],
+    ["VoiceOver", "voiceOverCoachedParticipants", 1],
+    ["VoiceOver", "voiceOverFacilitatorRescues", 1],
+    ["VoiceOver", "voiceOverTrustedPreviewParticipants", 1],
+    ["VoiceOver", "voiceOverBuildTeamParticipants", 1],
+    ["TalkBack", "talkBackIndependentHumanReviewers", 0],
+    ["TalkBack", "talkBackAutomatedRuns", 1],
+    ["TalkBack", "talkBackOwnerParticipants", 1],
+    ["TalkBack", "talkBackSelfTests", 1],
+    ["TalkBack", "talkBackFriendOrFamilyParticipants", 1],
+    ["TalkBack", "talkBackSupportInterventions", 1],
+    ["TalkBack", "talkBackExternalBetaParticipants", 1],
+    ["TalkBack", "talkBackCoachedParticipants", 1],
+    ["TalkBack", "talkBackFacilitatorRescues", 1],
+    ["TalkBack", "talkBackTrustedPreviewParticipants", 1],
+    ["TalkBack", "talkBackBuildTeamParticipants", 1],
+  ] as const)("rejects a prohibited %s participant/source boundary", (label, field, value) => {
+    const input = validAttendedInput();
+    input[field] = value;
+
+    expect(() => buildFounderProductContractEvidence(input)).toThrow(
+      `${label} evidence must come from one independent attended human review with no prohibited participant or source`,
+    );
   });
 
   it("does not retain cleanup fields outside the allowlist", () => {
@@ -308,6 +419,53 @@ function validInput() {
     observedAt: "2026-08-20T00:00:00.000Z",
     scenarioLedger: signedScenarioLedger(),
     scenarioSigningSecret: SIGNING_SECRET,
+  };
+}
+
+function validAttendedInput() {
+  return {
+    ...validInput(),
+    mode: "release" as const,
+    voiceOverDigest: DIGEST,
+    voiceOverOsVersion: "macOS 15.6",
+    voiceOverBrowserVersion: "Safari 26.0",
+    voiceOverObservedAt: "2026-08-20T00:00:00.000Z",
+    voiceOverRuntimeRevision: RUNTIME_REVISION,
+    voiceOverAttempts: 1,
+    voiceOverFailures: 0,
+    voiceOverFlakes: 0,
+    voiceOverSkips: 0,
+    voiceOverIndependentHumanReviewers: 1,
+    voiceOverAutomatedRuns: 0,
+    voiceOverOwnerParticipants: 0,
+    voiceOverSelfTests: 0,
+    voiceOverFriendOrFamilyParticipants: 0,
+    voiceOverSupportInterventions: 0,
+    voiceOverExternalBetaParticipants: 0,
+    voiceOverCoachedParticipants: 0,
+    voiceOverFacilitatorRescues: 0,
+    voiceOverTrustedPreviewParticipants: 0,
+    voiceOverBuildTeamParticipants: 0,
+    talkBackDigest: DIGEST,
+    talkBackOsVersion: "Android 16",
+    talkBackBrowserVersion: "Chrome 140",
+    talkBackObservedAt: "2026-08-20T00:00:00.000Z",
+    talkBackRuntimeRevision: RUNTIME_REVISION,
+    talkBackAttempts: 1,
+    talkBackFailures: 0,
+    talkBackFlakes: 0,
+    talkBackSkips: 0,
+    talkBackIndependentHumanReviewers: 1,
+    talkBackAutomatedRuns: 0,
+    talkBackOwnerParticipants: 0,
+    talkBackSelfTests: 0,
+    talkBackFriendOrFamilyParticipants: 0,
+    talkBackSupportInterventions: 0,
+    talkBackExternalBetaParticipants: 0,
+    talkBackCoachedParticipants: 0,
+    talkBackFacilitatorRescues: 0,
+    talkBackTrustedPreviewParticipants: 0,
+    talkBackBuildTeamParticipants: 0,
   };
 }
 

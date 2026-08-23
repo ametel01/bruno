@@ -209,44 +209,56 @@ describe("Founder Operator preparation shell", () => {
   });
 
   it("never presents a delete request as completed Infrastructure Retirement", () => {
+    const retirement = {
+      state: "in_progress" as const,
+      receiptId: "retirement-374",
+      attemptCount: 2,
+      hardDestructionDueAt: "2026-08-22T00:00:00.000Z",
+      workStoppedAt: "2026-08-22T00:00:00.000Z",
+      credentialsDisabledAt: "2026-08-22T00:00:00.000Z",
+      archive: { outcome: "failed" as const, criticalFailure: true },
+      exactResource: {
+        provider: "digitalocean" as const,
+        dropletId: "droplet-374",
+        firewallId: "firewall-374",
+      },
+      provider: {
+        droplet: "absent" as const,
+        firewall: "unknown" as const,
+        lastCheckedAt: "2026-08-22T00:00:01.000Z",
+        absenceVerifiedAt: null,
+      },
+      billableRuntime: {
+        startedAt: "2026-08-20T00:00:00.000Z",
+        endedAt: null,
+        seconds: null,
+      },
+      needsAttention: true,
+    };
     const html = renderToStaticMarkup(
       createElement(FounderOperatorPreparation, {
         initialOperator: OPERATOR,
-        initialInfrastructureRetirement: {
-          state: "in_progress",
-          receiptId: "retirement-374",
-          attemptCount: 2,
-          hardDestructionDueAt: "2026-08-22T00:00:00.000Z",
-          workStoppedAt: "2026-08-22T00:00:00.000Z",
-          credentialsDisabledAt: "2026-08-22T00:00:00.000Z",
-          archive: { outcome: "failed", criticalFailure: true },
-          exactResource: {
-            provider: "digitalocean",
-            dropletId: "droplet-374",
-            firewallId: "firewall-374",
-          },
-          provider: {
-            droplet: "absent",
-            firewall: "unknown",
-            lastCheckedAt: "2026-08-22T00:00:01.000Z",
-            absenceVerifiedAt: null,
-          },
-          billableRuntime: {
-            startedAt: "2026-08-20T00:00:00.000Z",
-            endedAt: null,
-            seconds: null,
-          },
-          needsAttention: true,
-        },
+        initialInfrastructureRetirement: retirement,
       }),
     );
 
-    expect(html).toContain("Runtime removal is still being verified");
+    expect(html).toContain("Operator retirement is still being verified");
     expect(html).toContain("In progress");
     expect(html).toContain("not complete until DigitalOcean independently confirms");
     expect(html).toContain("critical preservation failure");
     expect(html).toContain("same exact resource");
     expect(html).not.toContain("Runtime cost stopped");
+
+    const generalReleaseHtml = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: OPERATOR,
+        initialInfrastructureRetirement: retirement,
+        generalReleasePresentation: true,
+      }),
+    );
+    expect(generalReleaseHtml).toContain("Operator retirement is still being verified");
+    expect(generalReleaseHtml).toContain("no longer incurs hosting cost");
+    expect(generalReleaseHtml).not.toMatch(/DigitalOcean|Droplet|Firewall|provider verification/i);
   });
 
   it("anchors the next incomplete onboarding step in the Founder workspace", () => {

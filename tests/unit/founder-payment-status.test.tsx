@@ -1,8 +1,61 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { FounderGeneralRelease } from "@/app/operator/_components/founder-general-release";
 import { FounderPaymentStatus } from "@/app/operator/payment/founder-payment-status";
 
 describe("Founder payment status", () => {
+  it("keeps a Hold visible and surfaces explicit Resume re-confirmation", () => {
+    const baseline = generalReleaseStatus(false);
+    const newApplicant = {
+      ...baseline,
+      release: { ...baseline.release, qualified: false, decisionState: "denied" as const },
+      setup: { ...baseline.setup, serviceBusinessConfirmed: false },
+    };
+    expect(renderToStaticMarkup(<FounderGeneralRelease initialStatus={newApplicant} />)).toContain(
+      "Check public availability",
+    );
+    const held = {
+      ...baseline,
+      release: {
+        ...baseline.release,
+        qualified: false,
+        decisionState: "held" as const,
+        capabilities: baseline.release.capabilities.map((capability) =>
+          capability.id === "gmail_sending"
+            ? { ...capability, state: "paused" as const }
+            : capability,
+        ),
+      },
+    };
+    const heldHtml = renderToStaticMarkup(<FounderGeneralRelease initialStatus={held} />);
+    expect(heldHtml).toContain("Gmail sending: Paused");
+    expect(heldHtml).toContain("Operator creation requirements");
+    expect(heldHtml).toContain("Published Bruno.Ai price");
+    expect(heldHtml).toContain("$30/month");
+    expect(heldHtml).toContain("paid directly to those providers");
+    const creationHtml = renderToStaticMarkup(
+      <FounderGeneralRelease
+        initialStatus={{
+          ...baseline,
+          state: "setup",
+          setup: { ...baseline.setup, canCreate: true },
+        }}
+      />,
+    );
+    expect(creationHtml).toContain("Bruno confirms your private environment has been created");
+    expect(creationHtml).not.toMatch(/Droplet|DigitalOcean|firewall/i);
+    expect(creationHtml).not.toContain("when that environment is ready");
+
+    const resumed = {
+      ...baseline,
+      release: { ...baseline.release, qualified: false, decisionState: "denied" as const },
+      setup: { ...baseline.setup, requiresReleaseReconfirmation: true },
+    };
+    const resumedHtml = renderToStaticMarkup(<FounderGeneralRelease initialStatus={resumed} />);
+    expect(resumedHtml).toContain("Reconfirm current release");
+    expect(resumedHtml).toContain("fresh release decision resumed setup");
+  });
+
   it("keeps the return surface in plain-language confirming payment state", () => {
     const html = renderToStaticMarkup(
       <FounderPaymentStatus
@@ -169,6 +222,24 @@ function generalReleaseStatus(offerAvailable: boolean) {
       capacity: "available" as const,
       reason: "Public capacity is available.",
     },
+    release: {
+      qualified: true,
+      decisionState: "approved" as const,
+      capabilities: [
+        { id: "openai" as const, label: "OpenAI", state: "available" as const },
+        { id: "anthropic" as const, label: "Anthropic", state: "available" as const },
+        {
+          id: "calendar_reading" as const,
+          label: "Calendar reading",
+          state: "available" as const,
+        },
+        { id: "gmail_reading" as const, label: "Gmail reading", state: "available" as const },
+        { id: "gmail_sending" as const, label: "Gmail sending", state: "available" as const },
+      ],
+      providerChoice: "OpenAI, Anthropic, or both" as const,
+      sending: "Off" as const,
+      supportBoundary: "Ordinary product support" as const,
+    },
     setup: {
       authenticated: true as const,
       serviceBusinessConfirmed: true,
@@ -176,6 +247,7 @@ function generalReleaseStatus(offerAvailable: boolean) {
       selectedCompanyConnections: true,
       processingConsent: true,
       explicitCreateConfirmed: true,
+      requiresReleaseReconfirmation: false,
       canCreate: false,
     },
     activation: {

@@ -26,6 +26,74 @@ on:
         description: Safari version used for the attended VoiceOver journey
         required: false
         type: string
+      voiceover_observed_at:
+        description: Exact ISO-8601 time of the attended VoiceOver journey
+        required: false
+        type: string
+      voiceover_runtime_revision:
+        description: Exact protected runtime exercised by the attended VoiceOver journey
+        required: false
+        type: string
+      voiceover_attempts:
+        description: Separately reviewed VoiceOver attempt count; release requires exactly 1
+        required: false
+        type: string
+      voiceover_failures:
+        description: Separately reviewed VoiceOver failure count; release requires 0
+        required: false
+        type: string
+      voiceover_flakes:
+        description: Separately reviewed VoiceOver flaky retry count; release requires 0
+        required: false
+        type: string
+      voiceover_skips:
+        description: Separately reviewed VoiceOver skip count; release requires 0
+        required: false
+        type: string
+      voiceover_independent_human_reviewers:
+        description: Independent attended human VoiceOver reviewers; release requires exactly 1
+        required: false
+        type: string
+      voiceover_automated_runs:
+        description: Automated VoiceOver sources; release requires 0
+        required: false
+        type: string
+      voiceover_owner_participants:
+        description: Owner VoiceOver participants; release requires 0
+        required: false
+        type: string
+      voiceover_self_tests:
+        description: Self-tested VoiceOver journeys; release requires 0
+        required: false
+        type: string
+      voiceover_friend_or_family_participants:
+        description: Friend or family VoiceOver participants; release requires 0
+        required: false
+        type: string
+      voiceover_support_interventions:
+        description: Support-assisted VoiceOver interventions; release requires 0
+        required: false
+        type: string
+      voiceover_external_beta_participants:
+        description: Ordinary External Beta VoiceOver participants; release requires 0
+        required: false
+        type: string
+      voiceover_coached_participants:
+        description: Coached VoiceOver participants; release requires 0
+        required: false
+        type: string
+      voiceover_facilitator_rescues:
+        description: VoiceOver facilitator rescues; release requires 0
+        required: false
+        type: string
+      voiceover_trusted_preview_participants:
+        description: Trusted Preview VoiceOver participants; release requires 0
+        required: false
+        type: string
+      voiceover_build_team_participants:
+        description: Build-team VoiceOver participants; release requires 0
+        required: false
+        type: string
       talkback_evidence_digest:
         description: Sanitized sha256 digest from attended TalkBack on Chrome evidence
         required: false
@@ -38,16 +106,88 @@ on:
         description: Chrome version used for the attended TalkBack journey
         required: false
         type: string
+      talkback_observed_at:
+        description: Exact ISO-8601 time of the attended TalkBack journey
+        required: false
+        type: string
+      talkback_runtime_revision:
+        description: Exact protected runtime exercised by the attended TalkBack journey
+        required: false
+        type: string
+      talkback_attempts:
+        description: Separately reviewed TalkBack attempt count; release requires exactly 1
+        required: false
+        type: string
+      talkback_failures:
+        description: Separately reviewed TalkBack failure count; release requires 0
+        required: false
+        type: string
+      talkback_flakes:
+        description: Separately reviewed TalkBack flaky retry count; release requires 0
+        required: false
+        type: string
+      talkback_skips:
+        description: Separately reviewed TalkBack skip count; release requires 0
+        required: false
+        type: string
+      talkback_independent_human_reviewers:
+        description: Independent attended human TalkBack reviewers; release requires exactly 1
+        required: false
+        type: string
+      talkback_automated_runs:
+        description: Automated TalkBack sources; release requires 0
+        required: false
+        type: string
+      talkback_owner_participants:
+        description: Owner TalkBack participants; release requires 0
+        required: false
+        type: string
+      talkback_self_tests:
+        description: Self-tested TalkBack journeys; release requires 0
+        required: false
+        type: string
+      talkback_friend_or_family_participants:
+        description: Friend or family TalkBack participants; release requires 0
+        required: false
+        type: string
+      talkback_support_interventions:
+        description: Support-assisted TalkBack interventions; release requires 0
+        required: false
+        type: string
+      talkback_external_beta_participants:
+        description: Ordinary External Beta TalkBack participants; release requires 0
+        required: false
+        type: string
+      talkback_coached_participants:
+        description: Coached TalkBack participants; release requires 0
+        required: false
+        type: string
+      talkback_facilitator_rescues:
+        description: TalkBack facilitator rescues; release requires 0
+        required: false
+        type: string
+      talkback_trusted_preview_participants:
+        description: Trusted Preview TalkBack participants; release requires 0
+        required: false
+        type: string
+      talkback_build_team_participants:
+        description: Build-team TalkBack participants; release requires 0
+        required: false
+        type: string
       moderated_founder_summary_json:
         description: Allowlisted moderated-study counts and evidence digest; no identities or recordings
         required: false
         type: string
       provider_decision_summary_json:
-        description: Exact-revision provider outcomes and evidence digests
+        description: Exact-revision provider outcomes, clean-attempt metadata, and evidence digests
         required: false
         type: string
       production_provider_qualification_summary_json:
-        description: Allowlisted attended Clerk and Lemon test/live qualification summary; no source payloads
+        description: Allowlisted attended Clerk and Lemon clean-attempt qualification summary; no source payloads
+        required: false
+        type: string
+      general_release_operational_summary_json:
+        description: Allowlisted exact-candidate clean-attempt operational, privacy, billing, recovery, and retirement evidence
         required: false
         type: string
 
@@ -98,12 +238,47 @@ jobs:
       BRUNO_FOUNDER_CONTRACT_VOICEOVER_DIGEST: ${{ inputs.voiceover_evidence_digest }}
       BRUNO_FOUNDER_CONTRACT_VOICEOVER_OS_VERSION: ${{ inputs.voiceover_os_version }}
       BRUNO_FOUNDER_CONTRACT_VOICEOVER_BROWSER_VERSION: ${{ inputs.voiceover_browser_version }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_OBSERVED_AT: ${{ inputs.voiceover_observed_at }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_RUNTIME_REVISION: ${{ inputs.voiceover_runtime_revision }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_ATTEMPTS: ${{ inputs.voiceover_attempts }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_FAILURES: ${{ inputs.voiceover_failures }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_FLAKES: ${{ inputs.voiceover_flakes }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_SKIPS: ${{ inputs.voiceover_skips }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_INDEPENDENT_HUMAN_REVIEWERS: ${{ inputs.voiceover_independent_human_reviewers }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_AUTOMATED_RUNS: ${{ inputs.voiceover_automated_runs }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_OWNER_PARTICIPANTS: ${{ inputs.voiceover_owner_participants }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_SELF_TESTS: ${{ inputs.voiceover_self_tests }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_FRIEND_OR_FAMILY_PARTICIPANTS: ${{ inputs.voiceover_friend_or_family_participants }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_SUPPORT_INTERVENTIONS: ${{ inputs.voiceover_support_interventions }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_EXTERNAL_BETA_PARTICIPANTS: ${{ inputs.voiceover_external_beta_participants }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_COACHED_PARTICIPANTS: ${{ inputs.voiceover_coached_participants }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_FACILITATOR_RESCUES: ${{ inputs.voiceover_facilitator_rescues }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_TRUSTED_PREVIEW_PARTICIPANTS: ${{ inputs.voiceover_trusted_preview_participants }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_BUILD_TEAM_PARTICIPANTS: ${{ inputs.voiceover_build_team_participants }}
       BRUNO_FOUNDER_CONTRACT_TALKBACK_DIGEST: ${{ inputs.talkback_evidence_digest }}
       BRUNO_FOUNDER_CONTRACT_TALKBACK_OS_VERSION: ${{ inputs.talkback_os_version }}
       BRUNO_FOUNDER_CONTRACT_TALKBACK_BROWSER_VERSION: ${{ inputs.talkback_browser_version }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_OBSERVED_AT: ${{ inputs.talkback_observed_at }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_RUNTIME_REVISION: ${{ inputs.talkback_runtime_revision }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_ATTEMPTS: ${{ inputs.talkback_attempts }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_FAILURES: ${{ inputs.talkback_failures }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_FLAKES: ${{ inputs.talkback_flakes }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_SKIPS: ${{ inputs.talkback_skips }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_INDEPENDENT_HUMAN_REVIEWERS: ${{ inputs.talkback_independent_human_reviewers }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_AUTOMATED_RUNS: ${{ inputs.talkback_automated_runs }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_OWNER_PARTICIPANTS: ${{ inputs.talkback_owner_participants }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_SELF_TESTS: ${{ inputs.talkback_self_tests }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_FRIEND_OR_FAMILY_PARTICIPANTS: ${{ inputs.talkback_friend_or_family_participants }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_SUPPORT_INTERVENTIONS: ${{ inputs.talkback_support_interventions }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_EXTERNAL_BETA_PARTICIPANTS: ${{ inputs.talkback_external_beta_participants }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_COACHED_PARTICIPANTS: ${{ inputs.talkback_coached_participants }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_FACILITATOR_RESCUES: ${{ inputs.talkback_facilitator_rescues }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_TRUSTED_PREVIEW_PARTICIPANTS: ${{ inputs.talkback_trusted_preview_participants }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_BUILD_TEAM_PARTICIPANTS: ${{ inputs.talkback_build_team_participants }}
       BRUNO_FOUNDER_MODERATED_SUMMARY_JSON: ${{ inputs.moderated_founder_summary_json }}
       BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON: ${{ inputs.provider_decision_summary_json }}
       BRUNO_FOUNDER_PRODUCTION_PROVIDER_QUALIFICATION_SUMMARY_JSON: ${{ inputs.production_provider_qualification_summary_json }}
+      BRUNO_FOUNDER_GENERAL_RELEASE_OPERATIONAL_SUMMARY_JSON: ${{ inputs.general_release_operational_summary_json }}
       BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST: ${{ vars.BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST }}
       BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST: ${{ vars.BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST }}
       BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH: founder-contract-artifacts/scenario-ledger.json
@@ -192,4 +367,6 @@ jobs:
           BRUNO_FOUNDER_CANDIDATE_CHECK_RUN_ID: ${{ steps.release_candidate_control.outputs.check_run_id }}
           BRUNO_FOUNDER_CONTRACT_GITHUB_TOKEN: ${{ github.token }}
           BRUNO_FOUNDER_PRIOR_JOB_STATUS: ${{ job.status }}
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
+          BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION: ${{ env.BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION }}
         run: bun scripts/founder-product-contract-candidate-control.ts finalize
