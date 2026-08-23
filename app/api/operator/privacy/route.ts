@@ -11,6 +11,8 @@ import {
   retryFounderDeletionRevocationsForUser,
   type FounderDeletionKind,
 } from "@/src/server/operators/founder-deletion";
+import { cancelDeterministicFounderContractSubscription } from "@/src/server/founder-product-contract/deterministic-providers";
+import { resolveFounderContractIdentity } from "@/src/server/founder-product-contract/deterministic-identity";
 import { getFounderPrivacyCenterForUser } from "@/src/server/operators/founder-privacy-center";
 import type { deleteFounderRetainedDataForUser } from "@/src/server/operators/founder-privacy-center";
 import { requireRecentFounderAuthentication } from "@/src/server/operators/founder-recent-authentication";
@@ -63,12 +65,31 @@ export async function POST(
     return validationResponse("Choose a privacy control.");
   }
 
-  const requestDeletion = dependencies.requestDeletion ?? requestFounderDeletionForUser;
+  let requestDeletion = dependencies.requestDeletion ?? requestFounderDeletionForUser;
   if (payload.action === "request_deletion" || payload.action === "close_account") {
     const recentAuth = await requireRecentAuth(request, dependencies);
     if (!recentAuth) return recentAuthenticationResponse();
     const kind: FounderDeletionKind =
       payload.action === "close_account" ? "account_closure" : "retained_data";
+    const contractIdentity = resolveFounderContractIdentity(request.headers);
+    if (
+      kind === "account_closure" &&
+      !dependencies.requestDeletion &&
+      contractIdentity.present &&
+      contractIdentity.valid
+    ) {
+      const runId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID?.trim();
+      if (!runId) return authenticationResponse(503);
+      requestDeletion = (userId, deletionKind, scope) =>
+        requestFounderDeletionForUser(userId, deletionKind, scope, {
+          cancelCommerce: (subscriptionId) =>
+            cancelDeterministicFounderContractSubscription({
+              runId,
+              userId,
+              subscriptionId,
+            }),
+        });
+    }
     if (kind === "account_closure" && payload.confirmation !== "CLOSE_ACCOUNT") {
       return validationResponse("Type CLOSE_ACCOUNT to confirm account closure.");
     }

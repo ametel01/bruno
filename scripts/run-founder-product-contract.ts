@@ -48,6 +48,10 @@ const deterministicProviderEnvironment = {
   BRUNO_FOUNDER_CONTRACT_COMMERCE_WEBHOOK_SECRET: "founder-contract-lemon-test-secret-v1",
   BRUNO_FOUNDER_CONTRACT_IDENTITY_RECOVERY_SIGNING_SECRET:
     "founder-contract-identity-recovery-signing-secret-v1",
+  BRUNO_IDENTITY_RECOVERY_SIGNING_SECRET: "founder-contract-identity-recovery-signing-secret-v1",
+  CLERK_WEBHOOK_SIGNING_SECRET: `whsec_${createHash("sha256")
+    .update("founder-contract-clerk-webhook-signing-secret-v1")
+    .digest("base64")}`,
   BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
     "calendar_reading",
     new Date(),

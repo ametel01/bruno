@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { expect } from "@playwright/test";
+import { expect, type APIRequestContext } from "@playwright/test";
 import postgres from "postgres";
 import type { FounderProductContractClock } from "@/src/testing/founder-product-contract";
 
@@ -168,31 +168,73 @@ export async function prepareFounderExternalBetaBrowserFixture(
   return { accessExpiresAt, retirementDueAt };
 }
 
-export async function prepareFounderIdentityRecoveryBrowserFixture(
+export function founderContractIdentityHeaders(subject: string): Record<string, string> {
+  const runId = requiredContractEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID");
+  const sourceRevision = requiredContractEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION");
+  const signingSecret = requiredContractEnvironment(
+    "BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET",
+  );
+  const issuedAt = new Date();
+  const expiresAt = new Date(issuedAt.valueOf() + 5 * 60 * 1_000);
+  const payload = `${runId}\n${sourceRevision}\n${subject}\n${issuedAt.toISOString()}\n${expiresAt.toISOString()}`;
+  return {
+    "x-bruno-founder-contract-clerk-subject": subject,
+    "x-bruno-founder-contract-issued-at": issuedAt.toISOString(),
+    "x-bruno-founder-contract-expires-at": expiresAt.toISOString(),
+    "x-bruno-founder-contract-clerk-signature": createHmac("sha256", signingSecret)
+      .update(payload)
+      .digest("hex"),
+  };
+}
+
+export async function sendFounderIdentityLossWebhook(
+  request: APIRequestContext,
+  input: { subject: string; eventId: string },
+): Promise<void> {
+  const signingSecret = requiredContractEnvironment("CLERK_WEBHOOK_SIGNING_SECRET");
+  if (!signingSecret.startsWith("whsec_")) throw new Error("Clerk webhook secret is invalid.");
+  const key = Buffer.from(signingSecret.slice("whsec_".length), "base64");
+  const body = JSON.stringify({ type: "user.deleted", data: { id: input.subject } });
+  const timestamp = Math.floor(Date.now() / 1_000).toString();
+  const signature = `v1,${createHmac("sha256", key)
+    .update(`${input.eventId}.${timestamp}.${body}`)
+    .digest("base64")}`;
+  const response = await request.post("/api/webhooks/clerk", {
+    data: body,
+    headers: {
+      "content-type": "application/json",
+      "svix-id": input.eventId,
+      "svix-timestamp": timestamp,
+      "svix-signature": signature,
+    },
+  });
+  expect(response.status()).toBe(202);
+}
+
+export async function prepareFounderIdentityRecoveryBrowserPreconditions(
   fixture: FounderProductContractFixture,
   input: { runId: string; now: Date },
 ): Promise<void> {
-  const recoveryId = randomUUID();
-  const deletionRequestId = randomUUID();
   const occurredAt = input.now.toISOString();
-  const activePurgeDueAt = new Date(input.now.valueOf() + 7 * 24 * 60 * 60 * 1_000).toISOString();
-  const backupExpiryDueAt = new Date(input.now.valueOf() + 30 * 24 * 60 * 60 * 1_000).toISOString();
   const digest = (value: string) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 
   await withFounderProductContractDatabase(async (sql) => {
-    await sql`insert into founder_identity_recoveries (id, user_id, status, reason, prior_clerk_subject_digest, replacement_clerk_subject_digest, provider_event_id, provider_event_digest, loss_observed_at, recovered_at, created_at, updated_at) values (${recoveryId}, ${fixture.userId}, 'recovered', 'clerk_user_deleted', ${digest(`prior:${input.runId}`)}, ${digest(`replacement:${input.runId}`)}, ${`browser:${input.runId}:identity-loss`}, ${digest(`provider-event:${input.runId}`)}, ${occurredAt}, ${occurredAt}, ${occurredAt}, ${occurredAt})`;
-    for (const [index, kind] of [
-      "identity_loss_recorded",
-      "recovery_denied",
-      "identity_rebound",
-    ].entries()) {
-      const receiptAt = new Date(input.now.valueOf() + index).toISOString();
-      await sql`insert into founder_identity_recovery_receipts (recovery_id, user_id, kind, subject_digest, evidence_digest, details, occurred_at, created_at) values (${recoveryId}, ${fixture.userId}, ${kind}, ${digest(`subject:${input.runId}:${index}`)}, ${digest(`receipt:${input.runId}:${index}`)}, ${sql.json({ boundary: "identity_recovery_only" })}, ${receiptAt}, ${receiptAt})`;
-    }
-    await sql`insert into operator_deletion_requests (id, operator_id, kind, status, requested_at, active_purge_due_at, backup_expiry_due_at, access_stopped_at, created_at, updated_at) values (${deletionRequestId}, ${fixture.operatorId}, 'account_closure', 'access_stopped', ${occurredAt}, ${activePurgeDueAt}, ${backupExpiryDueAt}, ${occurredAt}, ${occurredAt}, ${occurredAt})`;
-    await sql`insert into operator_deletion_receipts (request_id, operator_id, stage, occurred_at, details, created_at) values (${deletionRequestId}, ${fixture.operatorId}, 'requested', ${occurredAt}, ${sql.json({ kind: "account_closure" })}, ${occurredAt}), (${deletionRequestId}, ${fixture.operatorId}, 'access_stopped', ${occurredAt}, ${sql.json({ outcome: "external_actions_paused" })}, ${occurredAt}), (${deletionRequestId}, ${fixture.operatorId}, 'commerce_cancellation', ${occurredAt}, ${sql.json({ outcome: "subscription_cancellation_requested", refundStarted: false })}, ${occurredAt})`;
-    await sql`insert into operator_deletion_commerce_cancellations (request_id, operator_id, provider, provider_subscription_id, status, attempt_count, last_attempt_at, confirmed_at, created_at, updated_at) values (${deletionRequestId}, ${fixture.operatorId}, 'lemon_squeezy', ${`${input.runId}:subscription`}, 'succeeded', 1, ${occurredAt}, ${occurredAt}, ${occurredAt}, ${occurredAt})`;
+    const [correlation] = await sql<
+      { id: string }[]
+    >`select id from founder_checkout_correlations where user_id = ${fixture.userId} order by created_at desc limit 1`;
+    if (!correlation) throw new Error("Browser commerce correlation is unavailable.");
+    const [event] = await sql<
+      { id: string }[]
+    >`insert into founder_commerce_events (provider_event_id, user_id, checkout_correlation_id, provider_subscription_id, provider_order_id, event_type, payload_digest, signature_verified, occurred_at, recorded_at, application_status, last_attempt_at, applied_at) values (${`browser:${input.runId}:subscription-active`}, ${fixture.userId}, ${correlation.id}, ${`${input.runId}:subscription`}, ${`order:${input.runId}`}, 'subscription_active', ${digest(`browser-commerce:${input.runId}`)}, true, ${occurredAt}, ${occurredAt}, 'applied', ${occurredAt}, ${occurredAt}) returning id`;
+    if (!event) throw new Error("Browser commerce event was not persisted.");
+    await sql`insert into founder_product_entitlements (user_id, source_event_id, provider_subscription_id, status, reconciled_provider_status, provider_state_updated_at, reconciled_at, updated_at) values (${fixture.userId}, ${event.id}, ${`${input.runId}:subscription`}, 'verified', 'active', ${occurredAt}, ${occurredAt}, ${occurredAt})`;
   });
+}
+
+function requiredContractEnvironment(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required for Founder Product Contract browser proof.`);
+  return value;
 }
 
 export async function deleteFounderProductContractFixture(

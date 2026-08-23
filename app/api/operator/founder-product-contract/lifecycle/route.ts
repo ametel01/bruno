@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import { users } from "@/src/server/db/schema";
@@ -5,6 +6,7 @@ import {
   deterministicFounderLifecycleProviders,
   type FounderLifecycleFailureOperation,
 } from "@/src/server/founder-product-contract/deterministic-providers";
+import { createFounderContractIdentityHeaders } from "@/src/server/founder-product-contract/deterministic-identity";
 import {
   claimFounderProductContractScenarioExecution,
   completeFounderProductContractScenarioExecution,
@@ -20,13 +22,7 @@ import {
   type FounderProductContractLifecycleAction,
   readFounderIdentitySeparationSnapshot,
 } from "@/src/server/founder-product-contract/lifecycle";
-import { requestFounderDeletionForUser } from "@/src/server/operators/founder-deletion";
-import { requireApplicationUser } from "@/src/server/users/application-user";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
-import {
-  getFounderIdentityRecoveryStatusForClerkSubject,
-  recoverFounderIdentityWithCredential,
-} from "@/src/server/users/founder-identity-recovery";
 
 export const dynamic = "force-dynamic";
 
@@ -178,7 +174,7 @@ export async function POST(request: Request): Promise<Response> {
             input: scenario,
             connection,
             providers,
-            identityRecoverySigningSecret,
+            baseUrl: localContractBaseUrl(request),
           }),
       },
     );
@@ -208,7 +204,7 @@ async function executeIdentityRecoveryThroughPublicSeams(input: {
   input: FounderLifecycleInput;
   connection: DatabaseConnection;
   providers: ReturnType<typeof deterministicFounderLifecycleProviders>;
-  identityRecoverySigningSecret: string;
+  baseUrl: string;
 }): Promise<FounderLifecycleOutcome> {
   const { connection, providers } = input;
   const identity = await providers.authenticateIdentity({ userId: input.input.userId });
@@ -221,10 +217,10 @@ async function executeIdentityRecoveryThroughPublicSeams(input: {
     throw new Error("The public identity journey did not start from the current internal Owner.");
   }
 
-  const credentialResponse = await issueIdentityRecoveryCredentialPOST(
-    new Request("http://localhost/api/operator/identity-recovery", { method: "POST" }),
-    undefined,
-    { now: () => input.input.now },
+  const currentIdentityHeaders = createFounderContractIdentityHeaders(owner.clerkUserId);
+  const credentialResponse = await fetch(
+    new URL("/api/operator/identity-recovery", input.baseUrl),
+    { method: "POST", headers: currentIdentityHeaders },
   );
   if (credentialResponse.status !== 200) {
     throw new Error("The recently reauthenticated recovery-code journey was unavailable.");
@@ -242,101 +238,59 @@ async function executeIdentityRecoveryThroughPublicSeams(input: {
   });
   const webhookId = `founder-contract:${input.input.runId}:clerk-user-deleted`;
   const webhookTimestamp = Math.floor(Date.now() / 1_000).toString();
-  const webhookKey = createHash("sha256")
-    .update(`founder-contract-clerk-webhook:${input.input.runId}`)
-    .digest();
-  const webhookSigningSecret = `whsec_${webhookKey.toString("base64")}`;
+  const webhookSigningSecret = process.env.CLERK_WEBHOOK_SIGNING_SECRET?.trim() ?? "";
+  if (!webhookSigningSecret.startsWith("whsec_")) {
+    throw new Error("The deterministic Clerk webhook authority was unavailable.");
+  }
+  const webhookKey = Buffer.from(webhookSigningSecret.slice("whsec_".length), "base64");
+  if (webhookKey.length < 32) {
+    throw new Error("The deterministic Clerk webhook authority was invalid.");
+  }
   const webhookSignature = `v1,${createHmac("sha256", webhookKey)
     .update(`${webhookId}.${webhookTimestamp}.${webhookBody}`)
     .digest("base64")}`;
-  const webhookResponse = await clerkWebhookPOST(
-    new NextRequest("http://localhost/api/webhooks/clerk", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "svix-id": webhookId,
-        "svix-timestamp": webhookTimestamp,
-        "svix-signature": webhookSignature,
-      },
-      body: webhookBody,
-    }),
-    undefined,
-    {
-      verify: (request) => verifyWebhook(request, { signingSecret: webhookSigningSecret }),
-      now: () => input.input.now,
+  const webhookResponse = await fetch(new URL("/api/webhooks/clerk", input.baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "svix-id": webhookId,
+      "svix-timestamp": webhookTimestamp,
+      "svix-signature": webhookSignature,
     },
-  );
+    body: webhookBody,
+  });
   if (webhookResponse.status !== 202) {
     throw new Error("The signature-verified Clerk webhook did not record identity loss.");
   }
 
-  const lostAccessResponse = await privacyGET(
-    new Request("http://localhost/api/operator/privacy"),
-    undefined,
-    {
-      requireApplicationUser: () =>
-        requireApplicationUser("clerk", {
-          getClerkUserId: async () => owner.clerkUserId,
-          createConnection: () => connection,
-        }),
-    },
-  );
+  const lostAccessResponse = await fetch(new URL("/api/operator/privacy", input.baseUrl), {
+    headers: currentIdentityHeaders,
+  });
   if (lostAccessResponse.status !== 401) {
     throw new Error("The public Operator API did not deny the lost identity.");
   }
 
   const attackerClerkUserId = `clerk:attacker:${input.input.userId}`;
   const wrongRecoveryCode = `${recoveryCode.slice(0, -1)}${recoveryCode.endsWith("x") ? "y" : "x"}`;
-  const takeoverResponse = await identityRecoveryPOST(
-    new Request("http://localhost/api/identity-recovery", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ recoveryCode: wrongRecoveryCode }),
-    }),
-    undefined,
-    {
-      getClerkUserId: async () => attackerClerkUserId,
-      readSigningSecret: () => input.identityRecoverySigningSecret,
-      recover: (recovery) =>
-        recoverFounderIdentityWithCredential({
-          ...recovery,
-          createConnection: () => connection,
-        }),
-      getStatus: (subject) =>
-        getFounderIdentityRecoveryStatusForClerkSubject(subject, {
-          createConnection: () => connection,
-        }),
-      now: () => new Date(input.input.now.valueOf() + 1),
+  const takeoverResponse = await fetch(new URL("/api/identity-recovery", input.baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...createFounderContractIdentityHeaders(attackerClerkUserId),
     },
-  );
+    body: JSON.stringify({ recoveryCode: wrongRecoveryCode }),
+  });
   if (takeoverResponse.status !== 403) {
     throw new Error("The public Identity Recovery API did not deny the attempted takeover.");
   }
 
   const replacementClerkUserId = `clerk:recovered:${input.input.userId}`;
-  const recoveryAt = new Date(input.input.now.valueOf() + 2);
-  const recoveredResponse = await identityRecoveryPOST(
-    new Request("http://localhost/api/identity-recovery", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ recoveryCode }),
-    }),
-    undefined,
-    {
-      getClerkUserId: async () => replacementClerkUserId,
-      readSigningSecret: () => input.identityRecoverySigningSecret,
-      recover: (recovery) =>
-        recoverFounderIdentityWithCredential({
-          ...recovery,
-          createConnection: () => connection,
-        }),
-      getStatus: (subject) =>
-        getFounderIdentityRecoveryStatusForClerkSubject(subject, {
-          createConnection: () => connection,
-        }),
-      now: () => recoveryAt,
-    },
-  );
+  const recoveredIdentityHeaders = createFounderContractIdentityHeaders(replacementClerkUserId);
+  const recoveredResponse = await fetch(new URL("/api/identity-recovery", input.baseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...recoveredIdentityHeaders },
+    body: JSON.stringify({ recoveryCode }),
+  });
   if (recoveredResponse.status !== 200) {
     throw new Error("The public Identity Recovery API did not restore the verified Owner.");
   }
@@ -353,32 +307,16 @@ async function executeIdentityRecoveryThroughPublicSeams(input: {
   ) {
     throw new Error("The public Identity Recovery receipt view was incomplete.");
   }
-  const recoveredStatusResponse = await identityRecoveryGET(
-    new Request("http://localhost/api/identity-recovery"),
-    undefined,
-    {
-      getClerkUserId: async () => replacementClerkUserId,
-      getStatus: (subject) =>
-        getFounderIdentityRecoveryStatusForClerkSubject(subject, {
-          createConnection: () => connection,
-        }),
-    },
-  );
+  const recoveredStatusResponse = await fetch(new URL("/api/identity-recovery", input.baseUrl), {
+    headers: recoveredIdentityHeaders,
+  });
   if (recoveredStatusResponse.status !== 200) {
     throw new Error("The recovered identity was not visible through the public status API.");
   }
 
-  const restoredAccessResponse = await privacyGET(
-    new Request("http://localhost/api/operator/privacy"),
-    undefined,
-    {
-      requireApplicationUser: () =>
-        requireApplicationUser("clerk", {
-          getClerkUserId: async () => replacementClerkUserId,
-          createConnection: () => connection,
-        }),
-    },
-  );
+  const restoredAccessResponse = await fetch(new URL("/api/operator/privacy", input.baseUrl), {
+    headers: recoveredIdentityHeaders,
+  });
   if (restoredAccessResponse.status !== 200) {
     throw new Error("The public Operator API did not restore the same Owner.");
   }
@@ -397,30 +335,11 @@ async function executeIdentityRecoveryThroughPublicSeams(input: {
   if (closureCommerce.status !== "active") {
     throw new Error("Account Closure could not observe the active provider subscription state.");
   }
-  if (!providers.cancelSubscription) {
-    throw new Error("Account Closure cancellation provider seam was unavailable.");
-  }
-  const closureResponse = await privacyPOST(
-    new Request("http://localhost/api/operator/privacy", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "close_account", confirmation: "CLOSE_ACCOUNT" }),
-    }),
-    undefined,
-    {
-      requestDeletion: (userId, kind, scope) =>
-        requestFounderDeletionForUser(userId, kind, scope, {
-          createConnection: () => connection,
-          now: () => closureAt,
-          cancelCommerce: (providerSubscriptionId) =>
-            providers.cancelSubscription?.({ subscriptionId: providerSubscriptionId }) ??
-            Promise.reject(
-              new Error("Account Closure cancellation provider seam was unavailable."),
-            ),
-          revokeConnections: async () => [],
-        }),
-    },
-  );
+  const closureResponse = await fetch(new URL("/api/operator/privacy", input.baseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...recoveredIdentityHeaders },
+    body: JSON.stringify({ action: "close_account", confirmation: "CLOSE_ACCOUNT" }),
+  });
   const closureBody = (await closureResponse.json()) as {
     deletion?: {
       request?: { kind?: string };
@@ -494,6 +413,19 @@ function deterministicBoundaryAvailable(): boolean {
     process.env.BRUNO_AUTH_MODE === "development" &&
     process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE === "deterministic"
   );
+}
+
+function localContractBaseUrl(request: Request): string {
+  const requestUrl = new URL(request.url);
+  const configuredUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? "invalid:");
+  if (!isLoopbackHostname(requestUrl.hostname) || !isLoopbackHostname(configuredUrl.hostname)) {
+    throw new Error("Founder Product Contract public HTTP boundary must remain on loopback.");
+  }
+  return requestUrl.origin;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
 function contractIdentity(): {
@@ -631,14 +563,3 @@ function isCommerceEvent(value: unknown): value is FounderCommerceEvent {
     typeof value.signature === "string"
   );
 }
-
-import { createHash, createHmac } from "node:crypto";
-import { verifyWebhook } from "@clerk/nextjs/webhooks";
-import { NextRequest } from "next/server";
-import {
-  GET as identityRecoveryGET,
-  POST as identityRecoveryPOST,
-} from "@/app/api/identity-recovery/route";
-import { POST as issueIdentityRecoveryCredentialPOST } from "@/app/api/operator/identity-recovery/route";
-import { GET as privacyGET, POST as privacyPOST } from "@/app/api/operator/privacy/route";
-import { POST as clerkWebhookPOST } from "@/app/api/webhooks/clerk/route";

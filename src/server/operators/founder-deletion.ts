@@ -313,17 +313,26 @@ export async function processFounderDeletionRequests(
     let failed = 0;
     for (const request of requests) {
       try {
-        await connection.db.transaction((tx) => processRequest(tx, request, now()));
         if (request.kind === "account_closure") {
           const [owner] = await connection.db
             .select({ userId: operators.userId })
             .from(operators)
             .where(eq(operators.id, request.operatorId))
             .limit(1);
-          if (owner) {
-            await coordinateFounderAccountClosureEffects(owner.userId, request.id, dependencies);
-            await synchronizeAccountClosureCompletionState(request.id, dependencies);
+          if (!owner) throw new Error("account_closure_owner_unavailable");
+          await coordinateFounderAccountClosureEffects(owner.userId, request.id, dependencies);
+          const effectsResolved = await synchronizeAccountClosureCompletionState(
+            request.id,
+            dependencies,
+          );
+          if (!effectsResolved) {
+            processed += 1;
+            continue;
           }
+        }
+        await connection.db.transaction((tx) => processRequest(tx, request, now()));
+        if (request.kind === "account_closure") {
+          await synchronizeAccountClosureCompletionState(request.id, dependencies);
         }
         processed += 1;
       } catch {
@@ -680,14 +689,16 @@ async function coordinateFounderAccountClosureEffects(
 async function synchronizeAccountClosureCompletionState(
   requestId: string,
   dependencies: FounderDeletionDependencies,
-): Promise<void> {
+): Promise<boolean> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
   try {
-    await connection.db.transaction(async (tx) => {
+    return await connection.db.transaction(async (tx) => {
       const [request] = await tx
         .select({
+          status: operatorDeletionRequests.status,
+          activePurgeCompletedAt: operatorDeletionRequests.activePurgeCompletedAt,
           backupExpiredAt: operatorDeletionRequests.backupExpiredAt,
           completedAt: operatorDeletionRequests.completedAt,
         })
@@ -695,7 +706,7 @@ async function synchronizeAccountClosureCompletionState(
         .where(eq(operatorDeletionRequests.id, requestId))
         .limit(1)
         .for("update");
-      if (!request?.backupExpiredAt) return;
+      if (!request) return false;
       const [unresolvedCommerce, unresolvedRevocation] = await Promise.all([
         tx
           .select({ id: operatorDeletionCommerceCancellations.id })
@@ -729,14 +740,24 @@ async function synchronizeAccountClosureCompletionState(
                 completedAt: null,
                 updatedAt: now(),
               }
-            : {
-                status: "completed",
-                failureCode: null,
-                completedAt: request.completedAt ?? request.backupExpiredAt,
-                updatedAt: now(),
-              },
+            : !request.backupExpiredAt
+              ? {
+                  status: request.activePurgeCompletedAt
+                    ? "backup_expiry_pending"
+                    : "access_stopped",
+                  failureCode: null,
+                  completedAt: null,
+                  updatedAt: now(),
+                }
+              : {
+                  status: "completed",
+                  failureCode: null,
+                  completedAt: request.completedAt ?? request.backupExpiredAt,
+                  updatedAt: now(),
+                },
         )
         .where(eq(operatorDeletionRequests.id, requestId));
+      return !unresolved;
     });
   } finally {
     if (ownsConnection) await connection.close();
@@ -805,14 +826,6 @@ async function attemptFounderDeletionRevocations(
           authorizationState: "revocation_unconfirmed",
           authorizationSessionHash: null,
           authorizationExpiresAt: null,
-          accessTokenCiphertext: null,
-          accessTokenIv: null,
-          accessTokenAuthTag: null,
-          refreshTokenCiphertext: null,
-          refreshTokenIv: null,
-          refreshTokenAuthTag: null,
-          secretKeyVersion: null,
-          tokenExpiresAt: null,
           failureCode: "provider_revocation_unconfirmed",
           recoveryMessage: localRevocationMessage,
           disconnectedAt: sql`coalesce(${operatorCalendarConnections.disconnectedAt}, now())`,
@@ -831,14 +844,6 @@ async function attemptFounderDeletionRevocations(
           authorizationState: "revocation_unconfirmed",
           authorizationSessionHash: null,
           authorizationExpiresAt: null,
-          accessTokenCiphertext: null,
-          accessTokenIv: null,
-          accessTokenAuthTag: null,
-          refreshTokenCiphertext: null,
-          refreshTokenIv: null,
-          refreshTokenAuthTag: null,
-          secretKeyVersion: null,
-          tokenExpiresAt: null,
           failureCode: "provider_revocation_unconfirmed",
           recoveryMessage: localRevocationMessage,
           disconnectedAt: sql`coalesce(${operatorMailConnections.disconnectedAt}, now())`,
@@ -857,14 +862,6 @@ async function attemptFounderDeletionRevocations(
           authorizationState: "revocation_unconfirmed",
           authorizationSessionHash: null,
           authorizationExpiresAt: null,
-          accessTokenCiphertext: null,
-          accessTokenIv: null,
-          accessTokenAuthTag: null,
-          refreshTokenCiphertext: null,
-          refreshTokenIv: null,
-          refreshTokenAuthTag: null,
-          secretKeyVersion: null,
-          tokenExpiresAt: null,
           failureCode: "provider_revocation_unconfirmed",
           recoveryMessage: localRevocationMessage,
           disconnectedAt: sql`coalesce(${operatorMailSendingConnections.disconnectedAt}, now())`,
@@ -1208,9 +1205,27 @@ async function defaultRevokeConnections(
   > = [
     ["ai:openai", () => disconnectFounderOpenAiForUser(userId)],
     ["ai:anthropic", () => disconnectFounderAnthropicForUser(userId)],
-    ["calendar", () => disconnectFounderGoogleCalendarForUser(userId)],
-    ["mail", () => disconnectFounderGoogleMailForUser(userId)],
-    ["mail_sending", () => disconnectFounderGoogleMailSendingForUser(userId)],
+    [
+      "calendar",
+      () =>
+        disconnectFounderGoogleCalendarForUser(userId, {
+          preserveCredentialsOnUnconfirmedRevocation: true,
+        }),
+    ],
+    [
+      "mail",
+      () =>
+        disconnectFounderGoogleMailForUser(userId, {
+          preserveCredentialsOnUnconfirmedRevocation: true,
+        }),
+    ],
+    [
+      "mail_sending",
+      () =>
+        disconnectFounderGoogleMailSendingForUser(userId, {
+          preserveCredentialsOnUnconfirmedRevocation: true,
+        }),
+    ],
   ];
   const results: FounderDeletionRevocationResult[] = [];
   for (const [connectionKind, call] of calls) {

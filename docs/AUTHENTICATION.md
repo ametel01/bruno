@@ -130,6 +130,14 @@ cancellation, connection revocation, Bruno Data Deletion, and its own receipts. 
 separate commerce-policy decision. Do not issue a recovery proof from browser-visible state or
 after weak email-only verification.
 
+The deterministic Founder Product Contract exercises these same public HTTP routes without a live
+Clerk mutation. Its local Identity Provider double signs an opaque subject, exact run and source
+revision, and five-minute validity window with the scenario-ledger secret. Bruno accepts that
+envelope only in deterministic development mode on loopback, with no Vercel environment; invalid,
+expired, tampered, preview, production, or Clerk-mode envelopes fail closed. The contract still
+passes the deletion event through Clerk's real webhook verifier. This automated seam is not hosted
+Clerk qualification or attended production evidence.
+
 ## Protected preview opt-in
 
 The safe default for previews is Clerk mode. A registration-free Vercel preview is allowed only

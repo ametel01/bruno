@@ -184,6 +184,7 @@ export type FounderMailConnectionDependencies = {
   keyring?: OperatorSecretKeyring;
   env?: Record<string, string | undefined>;
   randomBytes?: (size: number) => Buffer;
+  preserveCredentialsOnUnconfirmedRevocation?: boolean;
 };
 
 export type FounderMailOfferDisposition = "enabled" | "dismissed";
@@ -974,14 +975,18 @@ export async function disconnectFounderGoogleMailForUser(
           authorizationState: providerRevoked ? "revoked" : "revocation_unconfirmed",
           authorizationSessionHash: null,
           authorizationExpiresAt: null,
-          accessTokenCiphertext: null,
-          accessTokenIv: null,
-          accessTokenAuthTag: null,
-          refreshTokenCiphertext: null,
-          refreshTokenIv: null,
-          refreshTokenAuthTag: null,
-          secretKeyVersion: null,
-          tokenExpiresAt: null,
+          ...(providerRevoked || !dependencies.preserveCredentialsOnUnconfirmedRevocation
+            ? {
+                accessTokenCiphertext: null,
+                accessTokenIv: null,
+                accessTokenAuthTag: null,
+                refreshTokenCiphertext: null,
+                refreshTokenIv: null,
+                refreshTokenAuthTag: null,
+                secretKeyVersion: null,
+                tokenExpiresAt: null,
+              }
+            : {}),
           evidenceState: "unknown",
           lastEvidenceAt: null,
           failureCode: providerRevoked ? null : "provider_revocation_unconfirmed",

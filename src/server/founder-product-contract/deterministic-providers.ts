@@ -42,6 +42,7 @@ type ProviderState = {
   archiveStorage: FakeBackupObjectStorage;
   seededResourceIds: Set<string>;
   subscriptionStatus: FounderCommerceStatus;
+  calls: string[];
 };
 
 const globalProviders = globalThis as typeof globalThis & {
@@ -65,10 +66,12 @@ export function deterministicFounderLifecycleProviders(input: {
     archiveStorage: new FakeBackupObjectStorage("founder-product-contract-recovery"),
     seededResourceIds: new Set(),
     subscriptionStatus: input.subscriptionStatus,
+    calls: [],
   };
   state.subscriptionStatus = input.subscriptionStatus;
+  state.calls = [];
   registry.set(key, state);
-  const calls: string[] = [];
+  const calls = state.calls;
   const failures = new Set(input.failures);
   const archiveProvider = new EncryptedFounderRecoveryArchiveProvider({
     storage: failures.has("archive.corrupt")
@@ -150,6 +153,31 @@ export function deterministicFounderLifecycleProviders(input: {
     digitalOcean: ownedSetProvider(state, calls, failures, input.now),
     calls: () => [...calls],
   };
+}
+
+export async function cancelDeterministicFounderContractSubscription(input: {
+  runId: string;
+  userId: string;
+  subscriptionId: string;
+}): Promise<void> {
+  if (!input.subscriptionId) {
+    throw new Error("Deterministic Founder commerce authority is unavailable.");
+  }
+  if (!globalProviders.__brunoFounderLifecycleProviders) {
+    globalProviders.__brunoFounderLifecycleProviders = new Map();
+  }
+  const registry = globalProviders.__brunoFounderLifecycleProviders;
+  const key = `${input.runId}:${input.userId}`;
+  const state = registry.get(key) ?? {
+    digitalOcean: new FakeDigitalOceanProvider(),
+    archiveStorage: new FakeBackupObjectStorage("founder-product-contract-recovery"),
+    seededResourceIds: new Set<string>(),
+    subscriptionStatus: "active" as const,
+    calls: [],
+  };
+  registry.set(key, state);
+  state.calls.push("lemonSqueezy.cancel_subscription");
+  state.subscriptionStatus = "cancelled";
 }
 
 function corruptingRecoveryArchiveStorage(

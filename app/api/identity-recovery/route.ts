@@ -1,4 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
+import { resolveAuthMode } from "@/src/auth/server-auth-mode";
+import { resolveFounderContractIdentity } from "@/src/server/founder-product-contract/deterministic-identity";
 import {
   FounderIdentityRecoveryError,
   getFounderIdentityRecoveryStatusForClerkSubject,
@@ -17,11 +19,11 @@ type RouteDependencies = {
 };
 
 export async function GET(
-  _request: Request,
+  request: Request,
   _context?: unknown,
   dependencies: RouteDependencies = {},
 ): Promise<Response> {
-  const clerkUserId = await getClerkUserId(dependencies);
+  const clerkUserId = await getClerkUserId(request, dependencies);
   if (!clerkUserId) return authenticationResponse();
   const recovery = await (
     dependencies.getStatus ?? getFounderIdentityRecoveryStatusForClerkSubject
@@ -34,7 +36,7 @@ export async function POST(
   _context?: unknown,
   dependencies: RouteDependencies = {},
 ): Promise<Response> {
-  const clerkUserId = await getClerkUserId(dependencies);
+  const clerkUserId = await getClerkUserId(request, dependencies);
   if (!clerkUserId) return authenticationResponse();
   let value: unknown;
   try {
@@ -114,8 +116,16 @@ export async function POST(
   }
 }
 
-async function getClerkUserId(dependencies: RouteDependencies): Promise<string | null> {
+async function getClerkUserId(
+  request: Request,
+  dependencies: RouteDependencies,
+): Promise<string | null> {
   if (dependencies.getClerkUserId) return dependencies.getClerkUserId();
+  const contractIdentity = resolveFounderContractIdentity(request.headers);
+  if (contractIdentity.present) {
+    return contractIdentity.valid ? contractIdentity.subject : null;
+  }
+  if (resolveAuthMode(process.env).mode !== "clerk") return null;
   const { userId } = await auth();
   return userId;
 }

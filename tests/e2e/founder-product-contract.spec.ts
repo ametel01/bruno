@@ -4,8 +4,10 @@ import { createFounderProductContractClock } from "@/src/testing/founder-product
 import {
   createFounderProductContractFixture,
   deleteFounderProductContractFixture,
+  founderContractIdentityHeaders,
   prepareFounderExternalBetaBrowserFixture,
-  prepareFounderIdentityRecoveryBrowserFixture,
+  prepareFounderIdentityRecoveryBrowserPreconditions,
+  sendFounderIdentityLossWebhook,
   withPinnedFounderDevelopmentUser,
 } from "./founder-product-contract-fixture";
 
@@ -93,24 +95,87 @@ test("Operator UI remains usable across the required browser matrix", async ({ p
       expect(externalBetaAccessibility.violations).toEqual([]);
 
       const runId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID ?? "browser";
-      await prepareFounderIdentityRecoveryBrowserFixture(fixture, {
-        runId: `${runId}:${test.info().project.name}`,
+      const browserRunId = `${runId}:${test.info().project.name}`;
+      await prepareFounderIdentityRecoveryBrowserPreconditions(fixture, {
+        runId: browserRunId,
         now: clock.now(),
       });
-      const identityRecoveryResponse = await request.get("/api/operator/identity-recovery");
-      expect(identityRecoveryResponse.status()).toBe(200);
-      await expect(identityRecoveryResponse.json()).resolves.toMatchObject({
-        recovery: {
-          state: "recovered",
-          receipts: [
-            { kind: "identity_loss_recorded" },
-            { kind: "recovery_denied" },
-            { kind: "identity_rebound" },
-          ],
-        },
+      const currentSubject = `clerk:${fixture.userId}`;
+      const currentIdentityHeaders = founderContractIdentityHeaders(currentSubject);
+      await page.setExtraHTTPHeaders(currentIdentityHeaders);
+      await page.goto("/operator/privacy");
+      const credentialResponse = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/operator/identity-recovery") &&
+          response.request().method() === "POST",
+      );
+      await page.getByRole("button", { name: "Create Identity Recovery code" }).click();
+      expect((await credentialResponse).status()).toBe(200);
+      const recoveryCode = (await page.locator("code").textContent())?.trim() ?? "";
+      expect(recoveryCode.length).toBeGreaterThan(20);
+
+      await sendFounderIdentityLossWebhook(request, {
+        subject: currentSubject,
+        eventId: `browser:${browserRunId}:clerk-user-deleted`,
       });
+      expect((await request.get("/api/operator/privacy")).status()).toBe(401);
+      expect(
+        (await request.get("/api/operator/privacy", { headers: currentIdentityHeaders })).status(),
+      ).toBe(401);
+      expect(
+        (
+          await request.get("/api/operator/privacy", {
+            headers: {
+              ...currentIdentityHeaders,
+              "x-bruno-founder-contract-clerk-signature": "0".repeat(64),
+            },
+          })
+        ).status(),
+      ).toBe(401);
+
+      const attackerSubject = `clerk:attacker:${fixture.userId}`;
+      await page.setExtraHTTPHeaders(founderContractIdentityHeaders(attackerSubject));
+      await page.goto("/identity-recovery");
+      const wrongCode = `${recoveryCode.slice(0, -1)}${recoveryCode.endsWith("x") ? "y" : "x"}`;
+      await page.getByLabel("Identity Recovery code").fill(wrongCode);
+      const deniedResponse = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/identity-recovery") &&
+          response.request().method() === "POST",
+      );
+      await page.getByRole("button", { name: "Recover my Founder workspace" }).click();
+      expect((await deniedResponse).status()).toBe(403);
+      await expect(page.getByRole("alert")).toContainText("Recovery was denied");
+
+      const replacementSubject = `clerk:recovered:${fixture.userId}`;
+      const replacementIdentityHeaders = founderContractIdentityHeaders(replacementSubject);
+      await page.setExtraHTTPHeaders(replacementIdentityHeaders);
+      await page.getByLabel("Identity Recovery code").fill(recoveryCode);
+      const recoveredResponse = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/identity-recovery") &&
+          response.request().method() === "POST",
+      );
+      await page.getByRole("button", { name: "Recover my Founder workspace" }).click();
+      expect((await recoveredResponse).status()).toBe(200);
+      await expect(page.getByText("Identity recovered.", { exact: false })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Identity Recovery receipts" })).toBeVisible();
+      await expect(page.getByText("Identity loss recorded", { exact: false })).toBeVisible();
+      await expect(page.getByText("Recovery attempt denied", { exact: false })).toBeVisible();
+      await expect(
+        page.getByText("Identity rebound to the same Owner", { exact: false }),
+      ).toBeVisible();
 
       await page.goto("/operator/privacy");
+      await expect(page.getByText("Identity Recovery receipts")).toBeVisible();
+      page.once("dialog", (dialog) => dialog.accept());
+      const closureResponse = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/operator/privacy") &&
+          response.request().method() === "POST",
+      );
+      await page.getByRole("button", { name: "Request Account Closure" }).click();
+      expect((await closureResponse).status()).toBe(200);
       await expect(page.getByRole("heading", { name: /Account Closure Receipt/ })).toBeVisible();
       await expect(page.getByText("Commerce cancellation")).toBeVisible();
       await expect(page.getByText(/Lemon Squeezy subscription: succeeded/)).toBeVisible();

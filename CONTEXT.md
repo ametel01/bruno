@@ -610,7 +610,10 @@ The recently reauthenticated Founder-only action that applies External Action Pa
 subscription cancellation and every connection revocation, cancels unstarted actions, begins Bruno
 Data Deletion, and tracks each outcome through distinct commerce and Deletion Receipts. It does not
 start or imply a refund. In Clerk mode, the server requires Clerk strict reverification rather than
-inferring recent authentication from session-token issuance.
+inferring recent authentication from session-token issuance. Destructive purge and Operator archive
+wait until commerce cancellation and provider revocations are confirmed; an unconfirmed Google
+revocation retains only the encrypted authority required for the bounded retry and clears it after
+confirmation.
 _Avoid_: Sign out, delete agent
 
 ### Managed intelligence

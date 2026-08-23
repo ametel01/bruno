@@ -253,7 +253,8 @@ describe("Founder deletion lifecycle", () => {
     });
     expect(unresolved?.request).toMatchObject({
       status: "failed",
-      backupExpiredAt: afterExpiry.toISOString(),
+      activePurgeCompletedAt: null,
+      backupExpiredAt: null,
       completedAt: null,
       failureCode: "account_closure_external_effects_unresolved",
     });
@@ -268,14 +269,32 @@ describe("Founder deletion lifecycle", () => {
     });
     expect(cancellationRestored).toHaveBeenCalledOnce();
     expect(completed?.request).toMatchObject({
-      status: "completed",
-      completedAt: afterExpiry.toISOString(),
+      status: "access_stopped",
+      activePurgeCompletedAt: null,
+      backupExpiredAt: null,
+      completedAt: null,
       failureCode: null,
     });
     expect(completed?.commerceCancellation).toMatchObject({ status: "succeeded", attemptCount: 3 });
+    const closureCompletedAt = new Date(afterExpiry.valueOf() + FOUNDER_REVOCATION_RETRY_MS * 2);
+    await processFounderDeletionRequests({
+      createConnection: () => connection,
+      now: () => closureCompletedAt,
+      cancelCommerce: cancellationRestored,
+      revokeConnections: async () => [],
+    });
+    const finalized = await getFounderDeletionReceiptForUser(OWNER_ID, {
+      createConnection: () => connection,
+    });
+    expect(finalized?.request).toMatchObject({
+      status: "completed",
+      backupExpiredAt: closureCompletedAt.toISOString(),
+      completedAt: closureCompletedAt.toISOString(),
+      failureCode: null,
+    });
   });
 
-  it("keeps revocation failures visible and retryable after local credential removal", async () => {
+  it("keeps revocation failures visible without purging before a confirmed retry", async () => {
     await connection.db.insert(operatorMailConnections).values({
       id: "00000000-0000-4000-8000-000000003707",
       operatorId: OPERATOR_ID,
@@ -316,16 +335,16 @@ describe("Founder deletion lifecycle", () => {
         errorCode: "provider_503",
       }),
     ]);
-    const [locallyRemoved] = await connection.db
+    const [locallyPaused] = await connection.db
       .select()
       .from(operatorMailConnections)
       .where(eq(operatorMailConnections.id, "00000000-0000-4000-8000-000000003707"));
-    expect(locallyRemoved).toEqual(
+    expect(locallyPaused).toEqual(
       expect.objectContaining({
         status: "disconnected",
         authorizationState: "revocation_unconfirmed",
-        accessTokenCiphertext: null,
-        refreshTokenCiphertext: null,
+        accessTokenCiphertext: "access",
+        refreshTokenCiphertext: "refresh",
       }),
     );
 
