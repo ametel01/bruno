@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   founderIdentityRecoveries,
+  founderIdentityRecoveryCredentials,
   founderIdentityRecoveryReceipts,
   users,
 } from "@/src/server/db/schema";
@@ -9,9 +10,12 @@ import { founderProductContractDigest } from "@/src/server/founder-product-contr
 import { requireApplicationUser } from "@/src/server/users/application-user";
 import {
   type FounderIdentityRecoveryError,
+  getFounderIdentityRecoveryCredentialStatusForUser,
   getFounderIdentityRecoveryStatusForClerkSubject,
+  issueFounderIdentityRecoveryCredentialForUser,
   recordFounderIdentityLoss,
   recoverFounderIdentity,
+  recoverFounderIdentityWithCredential,
   signFounderIdentityRecoveryAssertion,
 } from "@/src/server/users/founder-identity-recovery";
 
@@ -158,6 +162,56 @@ describe("Founder identity recovery", () => {
     expect(await connection.db.select().from(users)).toEqual([
       expect.objectContaining({ id: OWNER_ID, clerkUserId: REPLACEMENT_SUBJECT }),
     ]);
+  });
+
+  it("uses a recently issued one-time credential for the production replacement journey", async () => {
+    const issued = await issueFounderIdentityRecoveryCredentialForUser({
+      userId: OWNER_ID,
+      now: NOW,
+      randomBytes: () => Buffer.alloc(32, 0x38),
+      createConnection: () => connection,
+    });
+    expect(issued.recoveryCode).toMatch(/^bruno_recovery_[a-f0-9-]{36}_[A-Za-z0-9_-]{43}$/);
+    expect(
+      JSON.stringify(await connection.db.select().from(founderIdentityRecoveryCredentials)),
+    ).not.toContain(issued.recoveryCode);
+    await recordFounderIdentityLoss({
+      clerkUserId: PRIOR_SUBJECT,
+      providerEventId: "clerk-event-credential-384",
+      reason: "clerk_identity_lost",
+      observedAt: NOW,
+      createConnection: () => connection,
+    });
+
+    const wrongCode = `${issued.recoveryCode.slice(0, -1)}x`;
+    await expect(
+      recoverFounderIdentityWithCredential({
+        replacementClerkUserId: ATTACKER_SUBJECT,
+        recoveryCode: wrongCode,
+        signingSecret: SIGNING_SECRET,
+        now: NOW,
+        createConnection: () => connection,
+      }),
+    ).rejects.toMatchObject({ code: "recovery_credential_invalid" });
+
+    await expect(
+      recoverFounderIdentityWithCredential({
+        replacementClerkUserId: REPLACEMENT_SUBJECT,
+        recoveryCode: issued.recoveryCode,
+        signingSecret: SIGNING_SECRET,
+        now: NOW,
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ ownerId: OWNER_ID, recoveredAt: NOW.toISOString() });
+    await expect(
+      getFounderIdentityRecoveryCredentialStatusForUser(OWNER_ID, {
+        now: () => NOW,
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ state: "used", usedAt: NOW.toISOString() });
+    expect(
+      (await connection.db.select().from(founderIdentityRecoveryReceipts)).map((r) => r.kind),
+    ).toEqual(["identity_loss_recorded", "recovery_denied", "identity_rebound"]);
   });
 
   it("rejects expired proof without changing identity authority", async () => {

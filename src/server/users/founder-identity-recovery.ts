@@ -1,10 +1,11 @@
 import "server-only";
 
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   founderIdentityRecoveries,
+  founderIdentityRecoveryCredentials,
   founderIdentityRecoveryReceipts,
   users,
 } from "@/src/server/db/schema";
@@ -12,8 +13,10 @@ import { founderProductContractDigest } from "@/src/server/founder-product-contr
 import { assertClerkUserId, lockClerkUserId } from "@/src/server/users/application-user";
 
 export const FOUNDER_IDENTITY_RECOVERY_ASSERTION_LIFETIME_MS = 15 * 60 * 1_000;
+export const FOUNDER_IDENTITY_RECOVERY_CREDENTIAL_LIFETIME_MS = 365 * 24 * 60 * 60 * 1_000;
 const CLOCK_SKEW_MS = 60 * 1_000;
 const ASSERTION_SCHEMA = "bruno.founder-identity-recovery.v1";
+const RECOVERY_CODE_PATTERN = /^bruno_recovery_([a-f0-9-]{36})_([A-Za-z0-9_-]{43})$/;
 
 export type FounderIdentityRecoveryStatusDto =
   | { state: "proof_required" }
@@ -41,6 +44,30 @@ export type FounderIdentityRecoveryAssertionPayload = {
 
 export type FounderIdentityLossReason = "clerk_user_deleted" | "clerk_identity_lost";
 
+export type FounderIdentityRecoveryCredentialStatusDto =
+  | { state: "not_created" }
+  | { state: "ready"; expiresAt: string }
+  | { state: "expired"; expiredAt: string }
+  | { state: "used"; usedAt: string };
+
+type IdentityOnlyReceiptBoundary = {
+  commerceChanged: false;
+  productEntitlementChanged: false;
+  accountClosureStarted: false;
+  refundStarted: false;
+  infrastructureRetirementStarted: false;
+  brunoDataDeletionStarted: false;
+};
+
+const IDENTITY_ONLY_RECEIPT_BOUNDARY = {
+  commerceChanged: false,
+  productEntitlementChanged: false,
+  accountClosureStarted: false,
+  refundStarted: false,
+  infrastructureRetirementStarted: false,
+  brunoDataDeletionStarted: false,
+} satisfies IdentityOnlyReceiptBoundary;
+
 export class FounderIdentityRecoveryError extends Error {
   constructor(
     readonly code:
@@ -50,10 +77,180 @@ export class FounderIdentityRecoveryError extends Error {
       | "recovery_owner_mismatch"
       | "recovery_subject_mismatch"
       | "replacement_identity_already_bound"
-      | "replacement_identity_required",
+      | "replacement_identity_required"
+      | "recovery_credential_invalid"
+      | "recovery_credential_expired",
   ) {
     super(code);
     this.name = "FounderIdentityRecoveryError";
+  }
+}
+
+export async function issueFounderIdentityRecoveryCredentialForUser(input: {
+  userId: string;
+  now: Date;
+  randomBytes?: (size: number) => Buffer;
+  createConnection?: () => DatabaseConnection;
+}): Promise<{ recoveryCode: string; expiresAt: string }> {
+  if (!isUuid(input.userId)) throw new Error("Identity Recovery Owner is invalid.");
+  assertInstant(input.now);
+  const connection = input.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !input.createConnection;
+  const secret = (input.randomBytes ?? randomBytes)(32).toString("base64url");
+  if (secret.length !== 43) throw new Error("Identity Recovery credential entropy is invalid.");
+  const expiresAt = new Date(
+    input.now.valueOf() + FOUNDER_IDENTITY_RECOVERY_CREDENTIAL_LIFETIME_MS,
+  );
+  try {
+    return await connection.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:identity-recovery-credential:${input.userId}`}, 0))`,
+      );
+      const [credential] = await tx
+        .insert(founderIdentityRecoveryCredentials)
+        .values({
+          userId: input.userId,
+          credentialDigest: founderProductContractDigest(
+            `identity-recovery-credential:${input.userId}:${secret}`,
+          ),
+          issuedAt: input.now,
+          expiresAt,
+          usedAt: null,
+          revokedAt: null,
+          createdAt: input.now,
+          updatedAt: input.now,
+        })
+        .onConflictDoUpdate({
+          target: founderIdentityRecoveryCredentials.userId,
+          set: {
+            credentialDigest: founderProductContractDigest(
+              `identity-recovery-credential:${input.userId}:${secret}`,
+            ),
+            issuedAt: input.now,
+            expiresAt,
+            usedAt: null,
+            revokedAt: null,
+            updatedAt: input.now,
+          },
+        })
+        .returning({ id: founderIdentityRecoveryCredentials.id });
+      if (!credential) throw new Error("Identity Recovery credential was not persisted.");
+      return {
+        recoveryCode: `bruno_recovery_${credential.id}_${secret}`,
+        expiresAt: expiresAt.toISOString(),
+      };
+    });
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
+export async function getFounderIdentityRecoveryCredentialStatusForUser(
+  userId: string,
+  dependencies: { now?: () => Date; createConnection?: () => DatabaseConnection } = {},
+): Promise<FounderIdentityRecoveryCredentialStatusDto> {
+  if (!isUuid(userId)) throw new Error("Identity Recovery Owner is invalid.");
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
+  try {
+    const [credential] = await connection.db
+      .select({
+        expiresAt: founderIdentityRecoveryCredentials.expiresAt,
+        usedAt: founderIdentityRecoveryCredentials.usedAt,
+        revokedAt: founderIdentityRecoveryCredentials.revokedAt,
+      })
+      .from(founderIdentityRecoveryCredentials)
+      .where(eq(founderIdentityRecoveryCredentials.userId, userId))
+      .limit(1);
+    if (!credential || credential.revokedAt) return { state: "not_created" };
+    if (credential.usedAt) return { state: "used", usedAt: credential.usedAt.toISOString() };
+    if (credential.expiresAt <= now) {
+      return { state: "expired", expiredAt: credential.expiresAt.toISOString() };
+    }
+    return { state: "ready", expiresAt: credential.expiresAt.toISOString() };
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
+}
+
+export async function recoverFounderIdentityWithCredential(input: {
+  replacementClerkUserId: string;
+  recoveryCode: string;
+  signingSecret: string;
+  now: Date;
+  createConnection?: () => DatabaseConnection;
+}): Promise<{ ownerId: string; recoveredAt: string }> {
+  assertClerkUserId(input.replacementClerkUserId);
+  assertInstant(input.now);
+  const parsed = parseRecoveryCode(input.recoveryCode);
+  if (!parsed) throw new FounderIdentityRecoveryError("recovery_credential_invalid");
+  const connection = input.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !input.createConnection;
+  const replacementDigest = founderProductContractDigest(`clerk:${input.replacementClerkUserId}`);
+  try {
+    const [credential] = await connection.db
+      .select()
+      .from(founderIdentityRecoveryCredentials)
+      .where(eq(founderIdentityRecoveryCredentials.id, parsed.credentialId))
+      .limit(1);
+    if (!credential) throw new FounderIdentityRecoveryError("recovery_credential_invalid");
+    const [recovery] = await connection.db
+      .select()
+      .from(founderIdentityRecoveries)
+      .where(
+        and(
+          eq(founderIdentityRecoveries.userId, credential.userId),
+          eq(founderIdentityRecoveries.status, "pending"),
+        ),
+      )
+      .limit(1);
+    if (!recovery) throw new FounderIdentityRecoveryError("recovery_not_pending");
+    const attemptedDigest = founderProductContractDigest(
+      `identity-recovery-credential:${credential.userId}:${parsed.secret}`,
+    );
+    if (
+      credential.credentialDigest !== attemptedDigest ||
+      credential.usedAt ||
+      credential.revokedAt ||
+      credential.expiresAt <= input.now
+    ) {
+      await connection.db.transaction((tx) =>
+        recordDeniedRecovery(tx, recovery, replacementDigest, attemptedDigest, input.now),
+      );
+      throw new FounderIdentityRecoveryError(
+        credential.expiresAt <= input.now
+          ? "recovery_credential_expired"
+          : "recovery_credential_invalid",
+      );
+    }
+    const issuedAt = input.now;
+    const assertion = signFounderIdentityRecoveryAssertion(
+      {
+        schema: ASSERTION_SCHEMA,
+        recoveryId: recovery.id,
+        ownerId: recovery.userId,
+        priorClerkSubjectDigest: recovery.priorClerkSubjectDigest as `sha256:${string}`,
+        replacementClerkSubjectDigest: replacementDigest,
+        evidenceDigest: credential.credentialDigest as `sha256:${string}`,
+        issuedAt: issuedAt.toISOString(),
+        expiresAt: new Date(
+          issuedAt.valueOf() + FOUNDER_IDENTITY_RECOVERY_ASSERTION_LIFETIME_MS,
+        ).toISOString(),
+      },
+      input.signingSecret,
+    );
+    return await recoverFounderIdentity({
+      replacementClerkUserId: input.replacementClerkUserId,
+      assertion,
+      signingSecret: input.signingSecret,
+      now: input.now,
+      credentialId: credential.id,
+      credentialDigest: credential.credentialDigest as `sha256:${string}`,
+      createConnection: () => connection,
+    });
+  } finally {
+    if (ownsConnection) await connection.close();
   }
 }
 
@@ -158,12 +355,7 @@ export async function recordFounderIdentityLoss(input: {
           identityProvider: "clerk",
           reason: input.reason,
           operatorAccess: "denied_until_recovered",
-          commerceChanged: false,
-          productEntitlementChanged: false,
-          accountClosureStarted: false,
-          refundStarted: false,
-          infrastructureRetirementStarted: false,
-          brunoDataDeletionStarted: false,
+          ...IDENTITY_ONLY_RECEIPT_BOUNDARY,
         },
         occurredAt: input.observedAt,
         createdAt: input.observedAt,
@@ -180,6 +372,8 @@ export async function recoverFounderIdentity(input: {
   assertion: string;
   signingSecret: string;
   now: Date;
+  credentialId?: string;
+  credentialDigest?: `sha256:${string}`;
   createConnection?: () => DatabaseConnection;
 }): Promise<{ ownerId: string; recoveredAt: string }> {
   assertClerkUserId(input.replacementClerkUserId);
@@ -232,6 +426,28 @@ export async function recoverFounderIdentity(input: {
           input.now,
         );
         return { ok: false as const, code: "recovery_owner_mismatch" as const };
+      }
+      if (input.credentialId || input.credentialDigest) {
+        if (!input.credentialId || !input.credentialDigest) {
+          return { ok: false as const, code: "recovery_credential_invalid" as const };
+        }
+        const [credential] = await tx
+          .select()
+          .from(founderIdentityRecoveryCredentials)
+          .where(eq(founderIdentityRecoveryCredentials.id, input.credentialId))
+          .limit(1)
+          .for("update");
+        if (
+          !credential ||
+          credential.userId !== recovery.userId ||
+          credential.credentialDigest !== input.credentialDigest ||
+          payload.evidenceDigest !== input.credentialDigest ||
+          credential.usedAt ||
+          credential.revokedAt ||
+          credential.expiresAt <= input.now
+        ) {
+          return { ok: false as const, code: "recovery_credential_invalid" as const };
+        }
       }
       if (payload.replacementClerkSubjectDigest !== replacementDigest) {
         await recordDeniedRecovery(
@@ -299,6 +515,12 @@ export async function recoverFounderIdentity(input: {
           updatedAt: input.now,
         })
         .where(eq(founderIdentityRecoveries.id, recovery.id));
+      if (input.credentialId) {
+        await tx
+          .update(founderIdentityRecoveryCredentials)
+          .set({ usedAt: input.now, updatedAt: input.now })
+          .where(eq(founderIdentityRecoveryCredentials.id, input.credentialId));
+      }
       await tx.insert(founderIdentityRecoveryReceipts).values({
         recoveryId: recovery.id,
         userId: recovery.userId,
@@ -311,12 +533,7 @@ export async function recoverFounderIdentity(input: {
           identityProvider: "clerk",
           sameInternalOwnerVerified: true,
           operatorAccess: "restored",
-          commerceChanged: false,
-          productEntitlementChanged: false,
-          accountClosureStarted: false,
-          refundStarted: false,
-          infrastructureRetirementStarted: false,
-          brunoDataDeletionStarted: false,
+          ...IDENTITY_ONLY_RECEIPT_BOUNDARY,
         },
         occurredAt: input.now,
         createdAt: input.now,
@@ -474,12 +691,7 @@ async function recordDeniedRecovery(
         identityProvider: "clerk",
         reason: "strong_same_owner_proof_mismatch",
         operatorAccess: "denied",
-        commerceChanged: false,
-        productEntitlementChanged: false,
-        accountClosureStarted: false,
-        refundStarted: false,
-        infrastructureRetirementStarted: false,
-        brunoDataDeletionStarted: false,
+        ...IDENTITY_ONLY_RECEIPT_BOUNDARY,
       },
       occurredAt: now,
       createdAt: now,
@@ -509,6 +721,12 @@ function isDigest(value: unknown): value is `sha256:${string}` {
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function parseRecoveryCode(value: string): { credentialId: string; secret: string } | null {
+  const match = RECOVERY_CODE_PATTERN.exec(value);
+  if (!match?.[1] || !match[2] || !isUuid(match[1])) return null;
+  return { credentialId: match[1], secret: match[2] };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -736,6 +736,13 @@
       "when": 1787442972104,
       "tag": "0104_futuristic_echo",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1787445796709,
+      "tag": "0105_fearless_blur",
+      "breakpoints": true
     }
   ]
 }

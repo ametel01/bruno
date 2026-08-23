@@ -134,6 +134,14 @@ Clerk, which proves Founder identity and session state without granting Release 
 product entitlement, business authority, or data ownership.
 _Avoid_: Owner registry, entitlement source, access policy
 
+**Identity Recovery**:
+The fail-closed journey that denies Operator access after verified Identity Provider loss and restores
+the exact same internal Owner only after strong, short-lived proof binds a replacement identity.
+It records distinct loss, denial, and rebound receipts without changing commerce, Product
+Entitlement, Infrastructure Retirement, Recovery Archive deletion, refunds, Bruno Data Deletion, or
+Account Closure.
+_Avoid_: Email match, new Clerk identity, session takeover, checkout correlation, Account Closure
+
 **Commerce Provider**:
 Lemon Squeezy, which acts as Merchant of Record for checkout, payments, refunds, and subscription
 state without deciding who may use Bruno.Ai.
@@ -596,8 +604,10 @@ whose execution has already begun.
 _Avoid_: Stop Bruno.Ai, revoke access
 
 **Account Closure**:
-The Founder-only action that applies External Action Pause, revokes every connection, cancels
-unstarted actions, begins Bruno Data Deletion, and tracks completion through a Deletion Receipt.
+The recently reauthenticated Founder-only action that applies External Action Pause, coordinates
+subscription cancellation and every connection revocation, cancels unstarted actions, begins Bruno
+Data Deletion, and tracks each outcome through distinct commerce and Deletion Receipts. It does not
+start or imply a refund.
 _Avoid_: Sign out, delete agent
 
 ### Managed intelligence

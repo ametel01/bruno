@@ -105,17 +105,22 @@ BRUNO_IDENTITY_RECOVERY_SIGNING_SECRET=replace-with-generated-secret-at-least-32
 ```
 
 Bruno verifies the webhook signature before recording a pending Identity Recovery against the
-existing internal Owner. While that recovery is pending, the old Clerk subject is denied at the
-application-user boundary. The webhook records identity loss only: it does not cancel Lemon
-Squeezy, change Product Entitlement, start a refund, retire infrastructure, delete Recovery
-Archives, begin Bruno Data Deletion, or close the account.
+existing internal Owner. A verified `user.deleted` event records deletion; a verified
+`user.updated` event whose Clerk user is banned records provider-confirmed identity loss. While that
+recovery is pending, the old Clerk subject is denied at the application-user boundary. The webhook
+records identity loss only: it does not cancel Lemon Squeezy, change Product Entitlement, start a
+refund, begin Infrastructure Retirement, delete Recovery Archives, begin Bruno Data Deletion, or
+request Account Closure.
 
-The `/identity-recovery` surface accepts only a short-lived server-signed proof bound to the pending
-recovery, the same internal Owner, the prior Clerk-subject digest, the exact replacement
-Clerk-subject digest, and a strong verification-evidence digest. A checkout email, a new Clerk ID,
-or possession of a browser session cannot claim an existing workspace. Bruno stores only digests
-and the distinct `identity_loss_recorded`, `recovery_denied`, and `identity_rebound` receipts; it
-does not retain the raw proof, email, Clerk profile, or session material.
+Before identity loss, the recently reauthenticated Founder creates a one-time, high-entropy
+Identity Recovery code from the Privacy Center. Bruno shows the code once, stores only its digest,
+and replaces any earlier code. The `/identity-recovery` surface accepts that code only while it is
+unused, unrevoked, unexpired, and bound to the pending recovery for the same internal Owner. The
+server then issues a short-lived assertion bound to that recovery, the prior and exact replacement
+Clerk-subject digests, and the credential evidence digest. A checkout email, a new Clerk ID, or
+possession of a browser session cannot claim an existing workspace. Bruno stores only digests and
+the distinct `identity_loss_recorded`, `recovery_denied`, and `identity_rebound` receipts; it does
+not retain the raw code, assertion, email, Clerk profile, or session material.
 
 Identity Recovery only restores the Owner mapping. The existing recently reauthenticated Account
 Closure control remains the sole coordinator of external-action pause, Lemon Squeezy subscription

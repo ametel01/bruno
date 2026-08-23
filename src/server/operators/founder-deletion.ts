@@ -3,18 +3,21 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type * as schema from "@/src/server/db/schema";
-import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   LemonSqueezyApiProvider,
   readLemonSqueezyConfig,
 } from "@/src/server/commerce/lemon-squeezy-provider";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import {
   founderProductEntitlements,
   operatorActionPreviewRevisions,
   operatorActionPreviews,
   operatorAiConnections,
   operatorCalendarConnections,
+  operatorConversationMessages,
+  operatorConversations,
+  operatorConversationWorks,
   operatorDeletionBackupExpiries,
   operatorDeletionCommerceCancellations,
   operatorDeletionReceipts,
@@ -23,19 +26,16 @@ import {
   operatorDeletionTombstones,
   operatorFounderActivations,
   operatorFounderDataExports,
-  operatorMorningBriefItems,
-  operatorMorningBriefs,
   operatorMailConnections,
   operatorMailSendingConnections,
-  operatorProposedActions,
+  operatorMorningBriefItems,
+  operatorMorningBriefs,
   operatorProcessingConsents,
+  operatorProposedActions,
   operatorRelationshipCandidates,
   operatorRelationshipCorrections,
   operatorRelationshipEvidence,
   operatorRelationshipRecords,
-  operatorConversationMessages,
-  operatorConversationWorks,
-  operatorConversations,
   operators,
 } from "@/src/server/db/schema";
 import {
@@ -276,8 +276,7 @@ export async function requestFounderDeletionForUser(
     });
     if (!request) return null;
     if (request.kind === "account_closure") {
-      await attemptFounderCommerceCancellation(request.id, dependencies);
-      await attemptFounderDeletionRevocations(userId, request.id, dependencies);
+      await coordinateFounderAccountClosureEffects(userId, request.id, dependencies);
     }
     return getFounderDeletionReceiptForUser(userId, {
       ...dependencies,
@@ -310,9 +309,9 @@ export async function processFounderDeletionRequests(
             .from(operators)
             .where(eq(operators.id, request.operatorId))
             .limit(1);
-          if (owner) await attemptFounderCommerceCancellation(request.id, dependencies);
-          if (owner)
-            await attemptFounderDeletionRevocations(owner.userId, request.id, dependencies);
+          if (owner) {
+            await coordinateFounderAccountClosureEffects(owner.userId, request.id, dependencies);
+          }
         }
         processed += 1;
       } catch {
@@ -350,8 +349,7 @@ export async function retryFounderDeletionRevocationsForUser(
       .orderBy(desc(operatorDeletionRequests.createdAt))
       .limit(1);
     if (!request) return null;
-    await attemptFounderCommerceCancellation(request.request.id, dependencies);
-    await attemptFounderDeletionRevocations(userId, request.request.id, dependencies);
+    await coordinateFounderAccountClosureEffects(userId, request.request.id, dependencies);
     return getFounderDeletionReceiptForUser(userId, {
       ...dependencies,
       createConnection: () => connection,
@@ -494,6 +492,42 @@ async function stageAccountClosure(
         updatedAt: requestedAt,
       })
       .onConflictDoNothing({ target: operatorDeletionCommerceCancellations.requestId });
+  } else if (commerce && ["cancelled", "expired", "refunded"].includes(commerce.status)) {
+    await tx
+      .insert(operatorDeletionCommerceCancellations)
+      .values({
+        id: makeId(),
+        requestId,
+        operatorId,
+        provider: "lemon_squeezy",
+        providerSubscriptionId: commerce.providerSubscriptionId,
+        status: "succeeded",
+        attemptCount: 0,
+        confirmedAt: requestedAt,
+        createdAt: requestedAt,
+        updatedAt: requestedAt,
+      })
+      .onConflictDoNothing({ target: operatorDeletionCommerceCancellations.requestId });
+    await tx
+      .insert(operatorDeletionReceipts)
+      .values({
+        id: makeId(),
+        requestId,
+        operatorId,
+        stage: "commerce_cancellation",
+        occurredAt: requestedAt,
+        details: {
+          provider: "lemon_squeezy",
+          outcome: "subscription_already_terminal",
+          providerStatus: commerce.status,
+          productEntitlementChanged: false,
+          refundStarted: false,
+        },
+        createdAt: requestedAt,
+      })
+      .onConflictDoNothing({
+        target: [operatorDeletionReceipts.requestId, operatorDeletionReceipts.stage],
+      });
   }
   const [aiConnections, calendarConnections, mailConnections, sendingConnections] =
     await Promise.all([
@@ -623,6 +657,15 @@ async function attemptFounderCommerceCancellation(
   } finally {
     if (ownsConnection) await connection.close();
   }
+}
+
+async function coordinateFounderAccountClosureEffects(
+  userId: string,
+  requestId: string,
+  dependencies: FounderDeletionDependencies,
+): Promise<void> {
+  await attemptFounderCommerceCancellation(requestId, dependencies);
+  await attemptFounderDeletionRevocations(userId, requestId, dependencies);
 }
 
 async function defaultCancelFounderCommerce(providerSubscriptionId: string): Promise<void> {

@@ -27,7 +27,13 @@ export async function POST(
     return errorResponse(401, "identity_webhook_signature_invalid");
   }
 
-  if (event.type !== "user.deleted") {
+  const reason =
+    event.type === "user.deleted"
+      ? "clerk_user_deleted"
+      : event.type === "user.updated" && event.data.banned
+        ? "clerk_identity_lost"
+        : null;
+  if (!reason) {
     return acceptedResponse();
   }
   const clerkUserId = event.data.id;
@@ -40,7 +46,7 @@ export async function POST(
     await (dependencies.recordLoss ?? recordFounderIdentityLoss)({
       clerkUserId,
       providerEventId,
-      reason: "clerk_user_deleted",
+      reason,
       observedAt: dependencies.now?.() ?? new Date(),
     });
     return acceptedResponse();

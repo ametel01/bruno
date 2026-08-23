@@ -747,6 +747,35 @@ export const founderIdentityRecoveries = pgTable(
   ],
 );
 
+export const founderIdentityRecoveryCredentials = pgTable(
+  "founder_identity_recovery_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    credentialDigest: text("credential_digest").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("founder_identity_recovery_credentials_user_idx").on(table.userId),
+    uniqueIndex("founder_identity_recovery_credentials_digest_idx").on(table.credentialDigest),
+    check(
+      "founder_identity_recovery_credentials_digest_check",
+      sql`${table.credentialDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "founder_identity_recovery_credentials_window_check",
+      sql`${table.expiresAt} > ${table.issuedAt}`,
+    ),
+  ],
+);
+
 export const founderIdentityRecoveryReceipts = pgTable(
   "founder_identity_recovery_receipts",
   {

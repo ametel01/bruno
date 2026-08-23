@@ -187,6 +187,7 @@ export async function deleteFounderProductContractFixture(
     }
     await sql`delete from founder_identity_recovery_receipts where user_id = ${fixture.userId}`;
     await sql`delete from founder_identity_recoveries where user_id = ${fixture.userId}`;
+    await sql`delete from founder_identity_recovery_credentials where user_id = ${fixture.userId}`;
     await sql`delete from operator_deletion_receipts where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
     await sql`delete from operator_deletion_commerce_cancellations where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
     await sql`delete from operator_deletion_tombstones where request_id in (select id from operator_deletion_requests where operator_id = ${fixture.operatorId})`;
@@ -239,6 +240,7 @@ export async function assertPersistedFounderLifecycleAuthority(
         paused: boolean;
         recovered_identities: number;
         identity_receipts: number;
+        used_identity_credentials: number;
         account_closures: number;
         account_closure_receipts: number;
       }[]
@@ -262,6 +264,7 @@ export async function assertPersistedFounderLifecycleAuthority(
       (select external_action_pause from operators where id = ${fixture.operatorId}) as paused,
       (select count(*)::int from founder_identity_recoveries where user_id = ${fixture.userId} and status = 'recovered' and recovered_at is not null) as recovered_identities,
       (select count(*)::int from founder_identity_recovery_receipts where user_id = ${fixture.userId}) as identity_receipts,
+      (select count(*)::int from founder_identity_recovery_credentials where user_id = ${fixture.userId} and used_at is not null) as used_identity_credentials,
       (select count(*)::int from operator_deletion_requests where operator_id = ${fixture.operatorId} and kind = 'account_closure') as account_closures,
       (select count(*)::int from operator_deletion_receipts where operator_id = ${fixture.operatorId} and stage in ('requested', 'access_stopped')) as account_closure_receipts`;
     expect(authority).toMatchObject({
@@ -284,6 +287,7 @@ export async function assertPersistedFounderLifecycleAuthority(
       paused: true,
       recovered_identities: 1,
       identity_receipts: 3,
+      used_identity_credentials: 1,
       account_closures: 1,
       account_closure_receipts: 2,
     });

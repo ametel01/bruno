@@ -1,3 +1,6 @@
+import { eq } from "drizzle-orm";
+import type { DatabaseConnection } from "@/src/server/db/client";
+import { users } from "@/src/server/db/schema";
 import {
   deterministicFounderLifecycleProviders,
   type FounderLifecycleFailureOperation,
@@ -12,9 +15,20 @@ import {
   executeFounderProductContractLifecycleAction,
   type FounderCommerceEvent,
   type FounderCommerceStatus,
+  type FounderLifecycleInput,
+  type FounderLifecycleOutcome,
   type FounderProductContractLifecycleAction,
+  readFounderIdentitySeparationSnapshot,
 } from "@/src/server/founder-product-contract/lifecycle";
+import { requestFounderDeletionForUser } from "@/src/server/operators/founder-deletion";
+import { requireApplicationUser } from "@/src/server/users/application-user";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
+import {
+  getFounderIdentityRecoveryStatusForClerkSubject,
+  issueFounderIdentityRecoveryCredentialForUser,
+  recordFounderIdentityLoss,
+  recoverFounderIdentityWithCredential,
+} from "@/src/server/users/founder-identity-recovery";
 
 export const dynamic = "force-dynamic";
 
@@ -161,6 +175,13 @@ export async function POST(request: Request): Promise<Response> {
         commerceWebhookSecret,
         identityRecoverySigningSecret,
         applicationRevision: identity.sourceRevision,
+        identityRecoveryPublicSeam: (scenario, connection) =>
+          executeIdentityRecoveryThroughPublicSeams({
+            input: scenario,
+            connection,
+            providers,
+            identityRecoverySigningSecret,
+          }),
       },
     );
     await completeFounderProductContractScenarioExecution({ identity: evidenceIdentity, outcome });
@@ -183,6 +204,274 @@ export async function POST(request: Request): Promise<Response> {
       { status: 409, headers: { "cache-control": "no-store" } },
     );
   }
+}
+
+async function executeIdentityRecoveryThroughPublicSeams(input: {
+  input: FounderLifecycleInput;
+  connection: DatabaseConnection;
+  providers: ReturnType<typeof deterministicFounderLifecycleProviders>;
+  identityRecoverySigningSecret: string;
+}): Promise<FounderLifecycleOutcome> {
+  const { connection, providers } = input;
+  const identity = await providers.authenticateIdentity({ userId: input.input.userId });
+  const [owner] = await connection.db
+    .select({ clerkUserId: users.clerkUserId })
+    .from(users)
+    .where(eq(users.id, input.input.userId))
+    .limit(1);
+  if (!owner?.clerkUserId || owner.clerkUserId !== identity.subject) {
+    throw new Error("The public identity journey did not start from the current internal Owner.");
+  }
+
+  const credentialResponse = await issueIdentityRecoveryCredentialPOST(
+    new Request("http://localhost/api/operator/identity-recovery", { method: "POST" }),
+    undefined,
+    {
+      requireApplicationUser: async () => ({ ok: true, userId: input.input.userId }),
+      requireRecentAuth: async () => true,
+      issueCredential: (credentialInput) =>
+        issueFounderIdentityRecoveryCredentialForUser({
+          ...credentialInput,
+          randomBytes: () =>
+            createHash("sha256")
+              .update(`founder-contract-recovery:${input.input.runId}:${input.input.userId}`)
+              .digest(),
+          createConnection: () => connection,
+        }),
+      now: () => input.input.now,
+    },
+  );
+  if (credentialResponse.status !== 200) {
+    throw new Error("The recently reauthenticated recovery-code journey was unavailable.");
+  }
+  const credentialBody = (await credentialResponse.json()) as {
+    credential?: { recoveryCode?: string };
+  };
+  const recoveryCode = credentialBody.credential?.recoveryCode;
+  if (!recoveryCode) throw new Error("The public recovery-code journey returned no one-time code.");
+
+  const beforeLoss = await readFounderIdentitySeparationSnapshot(connection, input.input.userId);
+  const webhookResponse = await clerkWebhookPOST(
+    new NextRequest("http://localhost/api/webhooks/clerk", {
+      method: "POST",
+      headers: { "svix-id": `founder-contract:${input.input.runId}:clerk-user-deleted` },
+      body: "{}",
+    }),
+    undefined,
+    {
+      verify: async () => ({ type: "user.deleted", data: { id: owner.clerkUserId } }) as never,
+      recordLoss: (loss) =>
+        recordFounderIdentityLoss({ ...loss, createConnection: () => connection }),
+      now: () => input.input.now,
+    },
+  );
+  if (webhookResponse.status !== 202) {
+    throw new Error("The signature-verified Clerk webhook did not record identity loss.");
+  }
+
+  const lostAccessResponse = await privacyGET(
+    new Request("http://localhost/api/operator/privacy"),
+    undefined,
+    {
+      requireApplicationUser: () =>
+        requireApplicationUser("clerk", {
+          getClerkUserId: async () => owner.clerkUserId,
+          createConnection: () => connection,
+        }),
+    },
+  );
+  if (lostAccessResponse.status !== 401) {
+    throw new Error("The public Operator API did not deny the lost identity.");
+  }
+
+  const attackerClerkUserId = `clerk:attacker:${input.input.userId}`;
+  const wrongRecoveryCode = `${recoveryCode.slice(0, -1)}${recoveryCode.endsWith("x") ? "y" : "x"}`;
+  const takeoverResponse = await identityRecoveryPOST(
+    new Request("http://localhost/api/identity-recovery", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ recoveryCode: wrongRecoveryCode }),
+    }),
+    undefined,
+    {
+      getClerkUserId: async () => attackerClerkUserId,
+      readSigningSecret: () => input.identityRecoverySigningSecret,
+      recover: (recovery) =>
+        recoverFounderIdentityWithCredential({
+          ...recovery,
+          createConnection: () => connection,
+        }),
+      getStatus: (subject) =>
+        getFounderIdentityRecoveryStatusForClerkSubject(subject, {
+          createConnection: () => connection,
+        }),
+      now: () => new Date(input.input.now.valueOf() + 1),
+    },
+  );
+  if (takeoverResponse.status !== 403) {
+    throw new Error("The public Identity Recovery API did not deny the attempted takeover.");
+  }
+
+  const replacementClerkUserId = `clerk:recovered:${input.input.userId}`;
+  const recoveryAt = new Date(input.input.now.valueOf() + 2);
+  const recoveredResponse = await identityRecoveryPOST(
+    new Request("http://localhost/api/identity-recovery", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ recoveryCode }),
+    }),
+    undefined,
+    {
+      getClerkUserId: async () => replacementClerkUserId,
+      readSigningSecret: () => input.identityRecoverySigningSecret,
+      recover: (recovery) =>
+        recoverFounderIdentityWithCredential({
+          ...recovery,
+          createConnection: () => connection,
+        }),
+      getStatus: (subject) =>
+        getFounderIdentityRecoveryStatusForClerkSubject(subject, {
+          createConnection: () => connection,
+        }),
+      now: () => recoveryAt,
+    },
+  );
+  if (recoveredResponse.status !== 200) {
+    throw new Error("The public Identity Recovery API did not restore the verified Owner.");
+  }
+  const recoveredBody = (await recoveredResponse.json()) as {
+    recovery?: {
+      state?: string;
+      receipts?: Array<{ kind?: string }>;
+    };
+  };
+  const receiptKinds = recoveredBody.recovery?.receipts?.map((receipt) => receipt.kind) ?? [];
+  if (
+    recoveredBody.recovery?.state !== "recovered" ||
+    receiptKinds.join(",") !== "identity_loss_recorded,recovery_denied,identity_rebound"
+  ) {
+    throw new Error("The public Identity Recovery receipt view was incomplete.");
+  }
+  const recoveredStatusResponse = await identityRecoveryGET(
+    new Request("http://localhost/api/identity-recovery"),
+    undefined,
+    {
+      getClerkUserId: async () => replacementClerkUserId,
+      getStatus: (subject) =>
+        getFounderIdentityRecoveryStatusForClerkSubject(subject, {
+          createConnection: () => connection,
+        }),
+    },
+  );
+  if (recoveredStatusResponse.status !== 200) {
+    throw new Error("The recovered identity was not visible through the public status API.");
+  }
+
+  const restoredAccessResponse = await privacyGET(
+    new Request("http://localhost/api/operator/privacy"),
+    undefined,
+    {
+      requireApplicationUser: () =>
+        requireApplicationUser("clerk", {
+          getClerkUserId: async () => replacementClerkUserId,
+          createConnection: () => connection,
+        }),
+    },
+  );
+  if (restoredAccessResponse.status !== 200) {
+    throw new Error("The public Operator API did not restore the same Owner.");
+  }
+
+  const afterRecovery = await readFounderIdentitySeparationSnapshot(connection, input.input.userId);
+  if (JSON.stringify(beforeLoss) !== JSON.stringify(afterRecovery)) {
+    throw new Error(
+      "Identity Recovery changed commerce, entitlement, retirement, deletion, or archive authority.",
+    );
+  }
+
+  const closureAt = new Date(input.input.now.valueOf() + 3);
+  const closureProviderCalls: string[] = [];
+  const closureCommerce = await providers.readSubscription({
+    subscriptionId: `${input.input.runId}:subscription`,
+  });
+  if (closureCommerce.status !== "cancelled") {
+    throw new Error("Account Closure could not observe the already-cancelled subscription state.");
+  }
+  const closureResponse = await privacyPOST(
+    new Request("http://localhost/api/operator/privacy", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "close_account", confirmation: "CLOSE_ACCOUNT" }),
+    }),
+    undefined,
+    {
+      requireApplicationUser: async () => ({ ok: true, userId: input.input.userId }),
+      requireRecentAuth: async () => true,
+      requestDeletion: (userId, kind, scope) =>
+        requestFounderDeletionForUser(userId, kind, scope, {
+          createConnection: () => connection,
+          now: () => closureAt,
+          cancelCommerce: async () => {
+            closureProviderCalls.push("lemonSqueezy.cancel_subscription");
+          },
+          revokeConnections: async () => [],
+        }),
+    },
+  );
+  const closureBody = (await closureResponse.json()) as {
+    deletion?: {
+      request?: { kind?: string };
+      stages?: Array<{ stage?: string }>;
+      commerceCancellation?: { status?: string; refundStarted?: boolean };
+    };
+  };
+  if (
+    closureResponse.status !== 200 ||
+    closureBody.deletion?.request?.kind !== "account_closure" ||
+    !closureBody.deletion.stages?.some((stage) => stage.stage === "requested") ||
+    closureBody.deletion.commerceCancellation?.status !== "succeeded" ||
+    closureBody.deletion.commerceCancellation.refundStarted !== false
+  ) {
+    throw new Error("Recently reauthenticated Account Closure did not coordinate destruction.");
+  }
+  const afterClosure = await readFounderIdentitySeparationSnapshot(connection, input.input.userId);
+  if (
+    afterClosure.accountClosureRequests !== beforeLoss.accountClosureRequests + 1 ||
+    afterClosure.deletionRequests !== beforeLoss.deletionRequests + 1
+  ) {
+    throw new Error("Account Closure did not create its distinct deletion authority.");
+  }
+
+  return {
+    action: input.input.action,
+    status: "passed",
+    observedAt: input.input.now.toISOString(),
+    providerCalls: [...providers.calls(), ...closureProviderCalls],
+    cleanup: {
+      resourcesBefore: 0,
+      resourcesAfter: 0,
+      verified: true,
+      observedAt: closureAt.toISOString(),
+    },
+    identityRecovery: {
+      lostIdentityDenied: true,
+      takeoverDenied: true,
+      recoveredSameOwner: true,
+      accountClosureCoordinated: true,
+      commerceChangedByIdentityLoss: false,
+      productEntitlementChangedByIdentityLoss: false,
+      refundStartedByIdentityLoss: false,
+      retirementStartedByIdentityLoss: false,
+      archiveDeletionStartedByIdentityLoss: false,
+      accountClosureStartedByIdentityLoss: false,
+      receiptKinds: [
+        "identity_loss_recorded",
+        "recovery_denied",
+        "identity_rebound",
+        "account_closure_requested",
+      ],
+    },
+  };
 }
 
 function lifecycleErrorMessage(error: unknown): string {
@@ -333,3 +622,13 @@ function isCommerceEvent(value: unknown): value is FounderCommerceEvent {
     typeof value.signature === "string"
   );
 }
+
+import { createHash } from "node:crypto";
+import { NextRequest } from "next/server";
+import {
+  GET as identityRecoveryGET,
+  POST as identityRecoveryPOST,
+} from "@/app/api/identity-recovery/route";
+import { POST as issueIdentityRecoveryCredentialPOST } from "@/app/api/operator/identity-recovery/route";
+import { GET as privacyGET, POST as privacyPOST } from "@/app/api/operator/privacy/route";
+import { POST as clerkWebhookPOST } from "@/app/api/webhooks/clerk/route";

@@ -100,6 +100,9 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                       providerFailure: "archive.create",
                     }
                   : {}),
+                ...(id === "identity_recovery_lifecycle"
+                  ? { providerSubscriptionStatus: "cancelled" }
+                  : {}),
                 ...(id === "external_beta_cohort_lifecycle"
                   ? {
                       externalBetaContract: {
@@ -293,6 +296,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
             }
             if (id === "identity_recovery_lifecycle") {
               expect(body.outcome.providerCalls).toContain("clerk.authenticate");
+              expect(body.outcome.providerCalls).toContain("lemonSqueezy.read_subscription");
               expect(body.outcome.identityRecovery).toEqual({
                 lostIdentityDenied: true,
                 takeoverDenied: true,

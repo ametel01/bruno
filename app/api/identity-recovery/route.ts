@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import {
   FounderIdentityRecoveryError,
   getFounderIdentityRecoveryStatusForClerkSubject,
-  recoverFounderIdentity,
+  recoverFounderIdentityWithCredential,
 } from "@/src/server/users/founder-identity-recovery";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export const fetchCache = "force-no-store";
 type RouteDependencies = {
   getClerkUserId?: () => Promise<string | null>;
   getStatus?: typeof getFounderIdentityRecoveryStatusForClerkSubject;
-  recover?: typeof recoverFounderIdentity;
+  recover?: typeof recoverFounderIdentityWithCredential;
   readSigningSecret?: () => string | null;
   now?: () => Date;
 };
@@ -45,10 +45,11 @@ export async function POST(
   if (
     typeof value !== "object" ||
     value === null ||
-    !("assertion" in value) ||
-    typeof value.assertion !== "string" ||
-    value.assertion.length === 0 ||
-    value.assertion.length > 4_096
+    Object.keys(value).length !== 1 ||
+    !("recoveryCode" in value) ||
+    typeof value.recoveryCode !== "string" ||
+    value.recoveryCode.length === 0 ||
+    value.recoveryCode.length > 256
   ) {
     return validationResponse();
   }
@@ -64,23 +65,14 @@ export async function POST(
       { status: 503, headers: noStoreHeaders() },
     );
   }
+  let recovered: { ownerId: string; recoveredAt: string };
   try {
-    const recovery = await (dependencies.recover ?? recoverFounderIdentity)({
+    recovered = await (dependencies.recover ?? recoverFounderIdentityWithCredential)({
       replacementClerkUserId: clerkUserId,
-      assertion: value.assertion,
+      recoveryCode: value.recoveryCode,
       signingSecret,
       now: dependencies.now?.() ?? new Date(),
     });
-    return Response.json(
-      {
-        recovery: {
-          state: "recovered",
-          recoveredAt: recovery.recoveredAt,
-          destination: "/operator",
-        },
-      },
-      { headers: noStoreHeaders() },
-    );
   } catch (error) {
     const code =
       error instanceof FounderIdentityRecoveryError ? error.code : "identity_recovery_failed";
@@ -93,6 +85,31 @@ export async function POST(
         },
       },
       { status: 403, headers: noStoreHeaders() },
+    );
+  }
+  try {
+    const recovery = await (
+      dependencies.getStatus ?? getFounderIdentityRecoveryStatusForClerkSubject
+    )(clerkUserId);
+    if (recovery.state !== "recovered" || recovery.recoveredAt !== recovered.recoveredAt) {
+      throw new Error("Recovered identity state was not observable.");
+    }
+    return Response.json(
+      {
+        recovery: { ...recovery, destination: "/operator" },
+      },
+      { headers: noStoreHeaders() },
+    );
+  } catch {
+    return Response.json(
+      {
+        error: {
+          code: "identity_recovery_receipts_unavailable",
+          message:
+            "Identity was recovered, but its receipts are temporarily unavailable. Reload this page before retrying recovery.",
+        },
+      },
+      { status: 503, headers: noStoreHeaders() },
     );
   }
 }
@@ -120,7 +137,7 @@ function validationResponse(): Response {
     {
       error: {
         code: "identity_recovery_proof_required",
-        message: "A bounded identity recovery proof is required.",
+        message: "A one-time Identity Recovery code is required.",
       },
     },
     { status: 400, headers: noStoreHeaders() },

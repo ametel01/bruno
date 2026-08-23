@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { FounderDeletionReceipt } from "@/src/server/operators/founder-deletion";
 import type {
   FounderPrivacyCenterDto,
   FounderPrivacyConnection,
 } from "@/src/server/operators/founder-privacy-center";
-import type { FounderDeletionReceipt } from "@/src/server/operators/founder-deletion";
 import styles from "./founder-privacy-center.module.css";
 
 export function FounderPrivacyCenter({
@@ -24,6 +24,30 @@ export function FounderPrivacyCenter({
     html: string;
     expiresAt: string;
   } | null>(null);
+  const [recoveryCredential, setRecoveryCredential] = useState<{
+    recoveryCode?: string;
+    state?: "not_created" | "ready" | "expired" | "used";
+    expiresAt?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/operator/identity-recovery", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const body = (await response.json()) as {
+          credential?: { state: "not_created" | "ready" | "expired" | "used"; expiresAt?: string };
+        };
+        return body.credential ?? null;
+      })
+      .then((credential) => {
+        if (active && credential) setRecoveryCredential(credential);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function disconnect(connection: FounderPrivacyConnection) {
     if (
@@ -147,6 +171,31 @@ export function FounderPrivacyCenter({
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Founder Data Export could not be created.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function createIdentityRecoveryCode() {
+    setBusy("identity-recovery");
+    setMessage(null);
+    try {
+      const response = await fetch("/api/operator/identity-recovery", { method: "POST" });
+      const body = (await response.json()) as {
+        credential?: { recoveryCode?: string; expiresAt?: string };
+        error?: { message?: string };
+      };
+      if (!response.ok || !body.credential?.recoveryCode) {
+        throw new Error(body.error?.message ?? "Identity Recovery code could not be created.");
+      }
+      setRecoveryCredential(body.credential);
+      setMessage(
+        "Identity Recovery code created. Store it privately; Bruno will not show it again.",
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Identity Recovery code could not be created.",
       );
     } finally {
       setBusy(null);
@@ -296,6 +345,38 @@ export function FounderPrivacyCenter({
         </div>
         <div className={styles.dataControls}>
           <div>
+            <h3>Prepare Identity Recovery</h3>
+            <p>
+              After recent reauthentication, create a one-time code that can prove the same internal
+              Owner if the Clerk identity is later lost or replaced. It grants no commerce or
+              deletion authority.
+            </p>
+            <button
+              className={styles.secondary}
+              disabled={busy !== null}
+              onClick={() => void createIdentityRecoveryCode()}
+              type="button"
+            >
+              {busy === "identity-recovery"
+                ? "Creating…"
+                : recoveryCredential?.state === "ready"
+                  ? "Replace Identity Recovery code"
+                  : "Create Identity Recovery code"}
+            </button>
+            {recoveryCredential?.recoveryCode ? (
+              <div className={styles.exportLinks} aria-live="polite">
+                <strong>Shown once</strong>
+                <code>{recoveryCredential.recoveryCode}</code>
+                <small>Expires {formatDate(recoveryCredential.expiresAt ?? null)}</small>
+              </div>
+            ) : recoveryCredential?.state === "ready" ? (
+              <small>
+                A code is ready until {formatDate(recoveryCredential.expiresAt ?? null)}. Replace it
+                if the stored copy is unavailable.
+              </small>
+            ) : null}
+          </div>
+          <div>
             <h3>Disconnect access</h3>
             <p>
               Stops Bruno using that provider grant. It does not erase Bruno-local retained data or
@@ -315,7 +396,7 @@ export function FounderPrivacyCenter({
             </button>
           </div>
           <div>
-            <h3>Close account</h3>
+            <h3>Account Closure</h3>
             <p>
               The only control that coordinates external-action pause, subscription cancellation,
               connected-account revocation, and staged Bruno Data Deletion. It does not imply a
@@ -327,7 +408,7 @@ export function FounderPrivacyCenter({
               onClick={() => void requestDeletion("close_account")}
               type="button"
             >
-              {busy === "close" ? "Closing…" : "Close account"}
+              {busy === "close" ? "Requesting…" : "Request Account Closure"}
             </button>
           </div>
         </div>

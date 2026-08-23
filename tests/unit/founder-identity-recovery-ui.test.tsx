@@ -7,10 +7,13 @@ describe("Founder identity recovery surface", () => {
     const html = renderToStaticMarkup(<IdentityRecoverySurface />);
     expect(html).toContain("Reconnect to the same Founder workspace");
     expect(html).toContain("does not cancel payment");
-    expect(html).toContain("retire infrastructure");
-    expect(html).toContain("close your account");
+    expect(html).toContain("begin Infrastructure Retirement");
+    expect(html).toContain("request Account");
+    expect(html).toContain("Closure");
     expect(html).toContain("Refunds remain a separate commerce decision");
     expect(html).toContain("Email, checkout details, a new Clerk ID");
+    expect(html).toContain("Identity Recovery code");
+    expect(html).toContain("Identity Recovery receipts");
     expect(html).toContain("Account Closure stays separate");
   });
 });
