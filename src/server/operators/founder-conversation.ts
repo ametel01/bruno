@@ -11,11 +11,11 @@ import {
   operatorConversations,
   operatorConversationWorks,
 } from "@/src/server/db/schema";
-import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
   founderGeneralReleaseAuthorizesNewWorkInTransaction,
-  founderGeneralReleaseUsesPublicAiRoutingInTransaction,
+  founderGeneralReleaseAvailableAiProvidersInTransaction,
 } from "@/src/server/founder-product-contract/initial-general-release";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import type {
   requireFounderOwnerPreviewAccessForUser,
   requireFounderOwnerPreviewAccessInTransaction,
@@ -315,13 +315,16 @@ export async function sendFounderConversationMessageForUser(
     }
 
     const routed = await connection.db.transaction(async (tx) => {
-      const publicGeneralRelease = await founderGeneralReleaseUsesPublicAiRoutingInTransaction(
+      const routingAt = now();
+      const generalReleaseProviders = await founderGeneralReleaseAvailableAiProvidersInTransaction(
         tx,
         userId,
+        dependencies.env ?? process.env,
+        routingAt,
       );
       const decision = await routeFounderAiProvider(tx, operator.id, {
-        now: now(),
-        allowedProviders: publicGeneralRelease ? ["openai", "anthropic"] : ["openai"],
+        now: routingAt,
+        allowedProviders: generalReleaseProviders ?? ["openai"],
         ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
       });
       if (!decision) return null;
@@ -501,13 +504,16 @@ export async function resumeFounderConversationWorkForUser(
           };
         }
 
-        const publicGeneralRelease = await founderGeneralReleaseUsesPublicAiRoutingInTransaction(
-          tx,
-          userId,
-        );
+        const generalReleaseProviders =
+          await founderGeneralReleaseAvailableAiProvidersInTransaction(
+            tx,
+            userId,
+            dependencies.env ?? process.env,
+            checkedAt,
+          );
         const decision = await routeFounderAiProvider(tx, operator.id, {
           now: checkedAt,
-          allowedProviders: publicGeneralRelease ? ["openai", "anthropic"] : ["openai"],
+          allowedProviders: generalReleaseProviders ?? ["openai"],
           ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
         });
         if (!decision) return { kind: "unchanged" as const, conversation };

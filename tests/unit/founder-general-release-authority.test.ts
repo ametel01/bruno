@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { asc, eq } from "drizzle-orm";
+import { describe, expect, it } from "vitest";
 import { buildTestAnthropicAcceptanceRelease } from "@/scripts/founder-anthropic-test-release";
 import { buildTestGoogleMailSendingAcceptanceRelease } from "@/scripts/founder-google-mail-sending-test-release";
 import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
@@ -19,7 +19,9 @@ import {
 } from "@/src/server/founder-product-contract/general-release-authority";
 import {
   confirmFounderGeneralReleaseEligibility,
+  createFounderGeneralReleaseOperator,
   founderGeneralReleaseSetupAuthorizesInTransaction,
+  hasFounderGeneralReleaseSetupAccessForUser,
 } from "@/src/server/founder-product-contract/initial-general-release";
 import { buildDeterministicFounderGeneralReleaseAuthorityFixture } from "@/src/testing/founder-general-release-authority";
 
@@ -132,6 +134,28 @@ describe("Initial General Release global authority", () => {
       expect(await connection.db.select().from(founderGeneralReleaseActivations)).toEqual([
         expect.objectContaining({ userId: APPLICANT_ID, releaseDecisionId: enterId }),
       ]);
+      await expect(
+        hasFounderGeneralReleaseSetupAccessForUser(
+          APPLICANT_ID,
+          {
+            createConnection: () => connection,
+            env: releasedEnvironment(NOW),
+            now: () => NOW,
+          },
+          ["openai"],
+        ),
+      ).resolves.toBe(true);
+      await expect(
+        hasFounderGeneralReleaseSetupAccessForUser(
+          APPLICANT_ID,
+          {
+            createConnection: () => connection,
+            env: releasedEnvironment(NOW),
+            now: () => new Date(NOW.valueOf() + 9 * 24 * 60 * 60 * 1_000),
+          },
+          ["openai"],
+        ),
+      ).resolves.toBe(false);
 
       const heldEnvironment = {
         ...releasedEnvironment(NOW),
@@ -200,6 +224,18 @@ describe("Initial General Release global authority", () => {
         .from(founderReleaseDecisions)
         .orderBy(asc(founderReleaseDecisions.decidedAt));
       expect(beforeResume.map((decision) => decision.outcome)).toEqual(["enter", "hold"]);
+      await expect(
+        persistProtectedFounderGeneralReleaseDecisionForOwner(OWNER_ID, decisionArtifact(NOW), {
+          createConnection: () => connection,
+          env: releasedEnvironment(later),
+          now: later,
+        }),
+      ).rejects.toThrow("A Hold requires a fresh complete Initial General Release Decision");
+      expect(
+        (await connection.db.select().from(founderReleaseDecisions)).map(
+          (decision) => decision.outcome,
+        ),
+      ).toEqual(["enter", "hold"]);
       await persistProtectedFounderGeneralReleaseDecisionForOwner(
         OWNER_ID,
         decisionArtifact(later),
@@ -258,6 +294,26 @@ describe("Initial General Release global authority", () => {
           ),
         ),
       ).resolves.toBe(false);
+      await expect(
+        hasFounderGeneralReleaseSetupAccessForUser(
+          APPLICANT_ID,
+          {
+            createConnection: () => connection,
+            env: releasedEnvironment(NOW),
+            now: () => NOW,
+          },
+          ["openai"],
+        ),
+      ).resolves.toBe(false);
+      await expect(
+        createFounderGeneralReleaseOperator(
+          { userId: APPLICANT_ID, now: NOW },
+          { createConnection: () => connection, env: releasedEnvironment(NOW) },
+        ),
+      ).rejects.toMatchObject({ code: "general_release_decision_required" });
+      expect(await connection.db.select().from(founderGeneralReleaseActivations)).toEqual([
+        expect.objectContaining({ userId: APPLICANT_ID, releaseDecisionId: null }),
+      ]);
     } finally {
       await reset(connection);
     }

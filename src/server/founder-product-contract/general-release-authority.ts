@@ -6,6 +6,15 @@ import {
   FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST,
   FOUNDER_GENERAL_RELEASE_DECISION_SCHEMA,
 } from "@/scripts/create-founder-general-release-decision";
+import {
+  isEvidenceDigest,
+  isEvidenceRecord,
+  isExactInstant,
+  isGitRevision,
+  isRuntimeRevision,
+} from "@/scripts/founder-release-evidence-validation";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import { founderReleaseDecisions } from "@/src/server/db/schema";
 import { isFounderAnthropicReleased } from "@/src/server/operators/founder-anthropic-release";
 import { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
 import {
@@ -13,8 +22,6 @@ import {
   isFounderGoogleMailReadingReleased,
 } from "@/src/server/operators/founder-google-reading-release";
 import { isFounderOpenAiReleased } from "@/src/server/operators/founder-openai-release";
-import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { founderReleaseDecisions } from "@/src/server/db/schema";
 import { founderProductContractDigest } from "./digest";
 import type { FounderProductContractTransaction } from "./operator-authority";
 import { requireFounderOwnerPreviewOwnerMappingInTransaction } from "./owner-preview-release-decision";
@@ -53,6 +60,7 @@ export type FounderGeneralReleaseAuthority = {
   decisionDigest: `sha256:${string}` | null;
   decisionId: string | null;
   decisionOutcome: "enter" | "deny" | "hold" | "resume" | null;
+  decisionDecidedAt: string | null;
   authorityExpiresAt: string | null;
   evidenceDigests: `sha256:${string}`[];
   capabilities: Record<FounderGeneralReleaseCapability, "available" | "paused">;
@@ -72,20 +80,20 @@ export function readFounderGeneralReleaseAuthority(
   } catch {
     return deniedAuthority("decision_invalid", capabilities);
   }
-  if (!isRecord(value)) return deniedAuthority("decision_invalid", capabilities);
+  if (!isEvidenceRecord(value)) return deniedAuthority("decision_invalid", capabilities);
   if (
     value.schemaVersion !== FOUNDER_GENERAL_RELEASE_DECISION_SCHEMA ||
     value.stage !== "initial_general_release" ||
     !Array.isArray(value.capabilityManifest) ||
     !sameCapabilityManifest(value.capabilityManifest) ||
-    !isRecord(value.releaseIdentity) ||
+    !isEvidenceRecord(value.releaseIdentity) ||
     !isGitRevision(value.releaseIdentity.sourceRevision) ||
     !isRuntimeRevision(value.releaseIdentity.runtimeRevision) ||
     !isExactInstant(value.releaseIdentity.decidedAt) ||
     !isExactInstant(value.authorityExpiresAt) ||
     !isEvidenceDigest(value.summaryDigest) ||
     !Array.isArray(value.reasons) ||
-    !isRecord(value.evidence) ||
+    !isEvidenceRecord(value.evidence) ||
     !requiredEvidenceDigestsPresent(value.evidence)
   ) {
     return deniedAuthority("decision_invalid", capabilities);
@@ -132,6 +140,7 @@ export function readFounderGeneralReleaseAuthority(
     decisionDigest: summaryDigest,
     decisionId: null,
     decisionOutcome: "enter",
+    decisionDecidedAt: value.releaseIdentity.decidedAt,
     authorityExpiresAt: value.authorityExpiresAt,
     evidenceDigests,
     capabilities,
@@ -166,6 +175,7 @@ function deniedAuthority(
     decisionDigest: null,
     decisionId: null,
     decisionOutcome: null,
+    decisionDecidedAt: null,
     authorityExpiresAt: null,
     evidenceDigests: [],
     capabilities,
@@ -261,6 +271,7 @@ export async function readPersistedFounderGeneralReleaseAuthorityInTransaction(
     decisionDigest,
     decisionId,
     decisionOutcome,
+    decisionDecidedAt: decision.decidedAt.toISOString(),
     authorityExpiresAt: decision.authorityExpiresAt.toISOString(),
     evidenceDigests: decision.evidenceDigests as `sha256:${string}`[],
     capabilities: Object.fromEntries(
@@ -300,6 +311,10 @@ export async function persistProtectedFounderGeneralReleaseDecisionForOwner(
   const sourceRevision = parsed.sourceRevision;
   const runtimeRevision = parsed.runtimeRevision;
   const authorityExpiresAt = parsed.authorityExpiresAt;
+  const decisionDecidedAt = parsed.decisionDecidedAt;
+  if (!decisionDecidedAt) {
+    throw new Error("The protected Initial General Release Decision has no decision time.");
+  }
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
@@ -331,10 +346,20 @@ export async function persistProtectedFounderGeneralReleaseDecisionForOwner(
       ) {
         return latest.id;
       }
-      const decidedAt =
-        latest && dependencies.now <= latest.decidedAt
-          ? new Date(latest.decidedAt.valueOf() + 1)
-          : dependencies.now;
+      const artifactDecidedAt = new Date(decisionDecidedAt);
+      if (latest && artifactDecidedAt <= latest.decidedAt) {
+        throw new Error(
+          latest.outcome === "hold"
+            ? "A Hold requires a fresh complete Initial General Release Decision."
+            : "The protected Initial General Release Decision is not newer than current authority.",
+        );
+      }
+      if (
+        latest?.outcome === "hold" &&
+        latest.evidenceDigests.includes(parsed.decisionDigest as `sha256:${string}`)
+      ) {
+        throw new Error("A Hold requires a fresh complete Initial General Release Decision.");
+      }
       const [persisted] = await tx
         .insert(founderReleaseDecisions)
         .values({
@@ -345,7 +370,7 @@ export async function persistProtectedFounderGeneralReleaseDecisionForOwner(
           capabilityManifest: [...FOUNDER_GENERAL_RELEASE_CAPABILITY_MANIFEST],
           evidenceDigests: [parsed.decisionDigest as `sha256:${string}`, ...parsed.evidenceDigests],
           authorityExpiresAt: new Date(authorityExpiresAt),
-          decidedAt,
+          decidedAt: artifactDecidedAt,
         })
         .returning({ id: founderReleaseDecisions.id });
       if (!persisted) throw new Error("Initial General Release Decision could not be persisted.");
@@ -376,26 +401,4 @@ function requiredEvidenceDigestsPresent(value: Record<string, unknown>): boolean
     Object.keys(value).length === REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS.length &&
     REQUIRED_GENERAL_RELEASE_EVIDENCE_KEYS.every((key) => isEvidenceDigest(value[key]))
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isGitRevision(value: unknown): value is string {
-  return typeof value === "string" && /^[a-f0-9]{40}$/.test(value);
-}
-
-function isRuntimeRevision(value: unknown): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$/.test(value);
-}
-
-function isExactInstant(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  const date = new Date(value);
-  return !Number.isNaN(date.valueOf()) && date.toISOString() === value;
-}
-
-function isEvidenceDigest(value: unknown): value is `sha256:${string}` {
-  return typeof value === "string" && /^sha256:[a-f0-9]{64}$/.test(value);
 }

@@ -180,6 +180,15 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                   founderAcceptanceEligible: boolean;
                 };
                 initialGeneralRelease?: {
+                  missingDecisionAdmittedNobody: boolean;
+                  deniedDecisionAdmittedNobody: boolean;
+                  staleDecisionAdmittedNobody: boolean;
+                  unboundSetupDenied: boolean;
+                  holdBlockedAdmission: boolean;
+                  heldCapabilityPaused: boolean;
+                  unaffectedCapabilityAvailable: boolean;
+                  configurationRecoveryDidNotResume: boolean;
+                  explicitResumeRestoredCapability: boolean;
                   activationBoundToExactReleaseDecision: boolean;
                   abandonedSetupCreatedNoDroplet: boolean;
                   explicitCreateRequired: boolean;
@@ -229,6 +238,15 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
             expect(body.outcome.providerCalls.length).toBeGreaterThan(0);
             if (id === "initial_general_release_activation") {
               expect(body.outcome.initialGeneralRelease).toEqual({
+                missingDecisionAdmittedNobody: true,
+                deniedDecisionAdmittedNobody: true,
+                staleDecisionAdmittedNobody: true,
+                unboundSetupDenied: true,
+                holdBlockedAdmission: true,
+                heldCapabilityPaused: true,
+                unaffectedCapabilityAvailable: true,
+                configurationRecoveryDidNotResume: true,
+                explicitResumeRestoredCapability: true,
                 activationBoundToExactReleaseDecision: true,
                 abandonedSetupCreatedNoDroplet: true,
                 explicitCreateRequired: true,

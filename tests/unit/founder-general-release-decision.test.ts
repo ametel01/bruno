@@ -136,6 +136,12 @@ describe("Founder Initial General Release decision", () => {
       parseFounderGeneralReleaseOperationalSummary(JSON.stringify(beforeResolution)),
     ).toBeNull();
 
+    const resolvedAtFreeze = operationalSummary();
+    resolvedAtFreeze.candidate.findingsResolvedAt = resolvedAtFreeze.candidate.frozenAt;
+    expect(
+      parseFounderGeneralReleaseOperationalSummary(JSON.stringify(resolvedAtFreeze)),
+    ).toBeNull();
+
     const failedPrivacy = operationalSummary();
     failedPrivacy.evidence.privacy.result = "failed";
     const decision = buildFounderInitialGeneralReleaseDecision({

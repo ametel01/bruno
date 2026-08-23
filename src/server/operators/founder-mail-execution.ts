@@ -329,8 +329,7 @@ export async function executeFounderApprovedGmailActionForUser(
       expectedVersion,
       started,
       now,
-      dependencies.env,
-      dependencies.requireReleaseStageAccess,
+      dependencies,
     );
 
     let result: Awaited<ReturnType<NonNullable<FounderGoogleMailSendingAdapter["sendMessage"]>>>;
@@ -698,17 +697,11 @@ async function assertFounderMailSubmissionStillReady(
     sending: typeof operatorMailSendingConnections.$inferSelect;
   },
   now: () => Date,
-  environment: Record<string, string | undefined> | undefined,
-  requireReleaseStageAccess: typeof requireFounderOwnerPreviewAccessInTransaction | undefined,
+  dependencies: FounderMailExecutionDependencies,
 ): Promise<void> {
   await connection.db.transaction(async (tx) => {
     const checkedAt = now();
-    await (requireReleaseStageAccess ?? requireFounderOwnerPreviewAccessInTransaction)(tx, {
-      userId,
-      now: checkedAt,
-      applicationRevision: readFounderApplicationRevision({ env: environment }) ?? "",
-      requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
-    });
+    await requireFounderMailExecutionAuthorityInTransaction(tx, userId, checkedAt, dependencies);
     const [action] = await tx
       .select()
       .from(operatorProposedActions)

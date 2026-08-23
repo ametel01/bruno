@@ -253,7 +253,7 @@ export function parseFounderGeneralReleaseOperationalSummary(
     candidate.unresolvedCriticalFindings !== 0 ||
     !isExactInstant(candidate.findingsResolvedAt) ||
     !isExactInstant(candidate.frozenAt) ||
-    new Date(candidate.findingsResolvedAt as string) > new Date(candidate.frozenAt as string) ||
+    new Date(candidate.findingsResolvedAt as string) >= new Date(candidate.frozenAt as string) ||
     new Date(candidate.frozenAt as string) > new Date(value.observedAt as string)
   ) {
     return null;

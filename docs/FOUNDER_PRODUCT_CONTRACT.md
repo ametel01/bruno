@@ -99,6 +99,10 @@ when public availability is configured `open`. Post-release qualification loss a
 capability-scoped Hold; only a fresh complete protected import appends Resume. Deterministic unit and
 lifecycle fixtures exercise this boundary but never become attended, moderated, production-provider,
 payment, refund, cleanup, or release-readiness evidence.
+The signed `initial_general_release_activation` lifecycle scenario proves zero admission for missing,
+denied, or stale authority; denial of a legacy unbound setup; capability-scoped Hold with unaffected
+work preserved; no configuration-only resume; and an explicit fresh Resume before activation can
+continue.
 
 The workflow runs in automated mode for every push to `main`. With no external provider summary, CI
 still validates the parser and decision logic and emits an explicit denied decision; deterministic

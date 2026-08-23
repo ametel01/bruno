@@ -33,7 +33,18 @@ export async function requireFounderOperatorWorkspaceAccess(
     if (response && dependencies.allowGeneralReleaseSetup) {
       const hasSetupAccess =
         dependencies.hasGeneralReleaseSetupAccess ?? hasFounderGeneralReleaseSetupAccessForUser;
-      if (await hasSetupAccess(userId)) return null;
+      const generalReleaseRequirement =
+        requirement === "workspace" || requirement === "workspace_with_mail"
+          ? "core_operation"
+          : requirement;
+      if (
+        await hasSetupAccess(
+          userId,
+          dependencies.now ? { now: dependencies.now } : {},
+          generalReleaseRequirement,
+        )
+      )
+        return null;
     }
     if (response) {
       return response;

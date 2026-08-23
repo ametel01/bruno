@@ -1,6 +1,5 @@
 import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
 import { hasFounderGeneralReleaseSetupAccessForUser } from "@/src/server/founder-product-contract/initial-general-release";
-import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import {
   disconnectFounderAnthropicForUser,
   disconnectFounderOpenAiForUser,
@@ -50,13 +49,13 @@ export async function GET(
   if (!provider) return validationResponse("Choose a supported AI provider.");
   const generalReleaseSetup = await (
     dependencies.hasGeneralReleaseSetupAccess ?? hasFounderGeneralReleaseSetupAccessForUser
-  )(applicationUser.userId);
+  )(applicationUser.userId, {}, provider === "openai" ? ["openai"] : ["anthropic"]);
   if (provider === "anthropic" && !generalReleaseSetup) {
     return ownerPreviewUnavailableResponse("Anthropic");
   }
   const accessError = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
-    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+    provider === "openai" ? ["openai"] : ["anthropic"],
     {
       allowGeneralReleaseSetup: true,
       ...(dependencies.hasGeneralReleaseSetupAccess
@@ -114,14 +113,14 @@ export async function POST(
   try {
     const generalReleaseSetup = await (
       dependencies.hasGeneralReleaseSetupAccess ?? hasFounderGeneralReleaseSetupAccessForUser
-    )(applicationUser.userId);
+    )(applicationUser.userId, {}, provider === "openai" ? ["openai"] : ["anthropic"]);
     if (provider === "anthropic" && action !== "disconnect" && !generalReleaseSetup) {
       return ownerPreviewUnavailableResponse("Anthropic");
     }
     if (action !== "disconnect") {
       const accessError = await requireFounderOperatorWorkspaceAccess(
         applicationUser.userId,
-        FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+        provider === "openai" ? ["openai"] : ["anthropic"],
         {
           allowGeneralReleaseSetup: true,
           ...(dependencies.hasGeneralReleaseSetupAccess

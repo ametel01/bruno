@@ -27,12 +27,12 @@ import {
   type FounderGeneralReleaseAuthority,
   readPersistedFounderGeneralReleaseAuthorityInTransaction,
 } from "./general-release-authority";
-import type { FounderOwnerPreviewCapabilityRequirement } from "./preview-qualification";
 import {
   type FounderProductContractTransaction,
   lockFounderProductContractLifecycleInTransaction,
   requireActiveFounderOperatorAuthorityInTransaction,
 } from "./operator-authority";
+import type { FounderOwnerPreviewCapabilityRequirement } from "./preview-qualification";
 
 export const FOUNDER_GENERAL_RELEASE_ACTIVATION_WINDOW_MS = 24 * 60 * 60 * 1_000;
 export const FOUNDER_GENERAL_RELEASE_PURCHASE_WINDOW_MS = 24 * 60 * 60 * 1_000;
@@ -161,37 +161,21 @@ export async function getFounderGeneralReleaseActivationForUser(
 
 export async function hasFounderGeneralReleaseSetupAccessForUser(
   userId: string,
-  dependencies: Pick<Dependencies, "createConnection" | "now"> = {},
+  dependencies: Pick<Dependencies, "createConnection" | "env" | "now"> = {},
+  requiredCapabilities: FounderOwnerPreviewCapabilityRequirement = "core_operation",
 ): Promise<boolean> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
-    await reconcileFounderGeneralReleaseDeadlineForUser(
-      userId,
-      dependencies.now?.() ?? new Date(),
-      {
-        createConnection: () => connection,
-      },
+    return await connection.db.transaction((tx) =>
+      founderGeneralReleaseSetupAuthorizesInTransaction(
+        tx,
+        userId,
+        dependencies.now?.() ?? new Date(),
+        requiredCapabilities,
+        dependencies.env ?? process.env,
+      ),
     );
-    const [activation] = await connection.db
-      .select({
-        status: founderGeneralReleaseActivations.status,
-        admissionState: founderGeneralReleaseActivations.admissionState,
-      })
-      .from(founderGeneralReleaseActivations)
-      .where(eq(founderGeneralReleaseActivations.userId, userId))
-      .limit(1);
-    if (!activation || activation.admissionState === "unavailable") return false;
-    if (["setup", "waitlisted", "provisioning", "activation_pending"].includes(activation.status)) {
-      return true;
-    }
-    if (activation.status !== "activated") return false;
-    const [entitlement] = await connection.db
-      .select({ status: founderProductEntitlements.status })
-      .from(founderProductEntitlements)
-      .where(eq(founderProductEntitlements.userId, userId))
-      .limit(1);
-    return entitlement?.status === "verified";
   } finally {
     if (ownsConnection) await connection.close();
   }
@@ -199,26 +183,20 @@ export async function hasFounderGeneralReleaseSetupAccessForUser(
 
 export async function hasFounderGeneralReleaseBriefAccessForUser(
   userId: string,
-  dependencies: Pick<Dependencies, "createConnection" | "now"> = {},
+  dependencies: Pick<Dependencies, "createConnection" | "env" | "now"> = {},
 ): Promise<boolean> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
-    await reconcileFounderGeneralReleaseDeadlineForUser(
-      userId,
-      dependencies.now?.() ?? new Date(),
-      {
-        createConnection: () => connection,
-      },
+    const activation = await connection.db.transaction((tx) =>
+      readBoundGeneralReleaseActivation(
+        tx,
+        userId,
+        dependencies.env ?? process.env,
+        dependencies.now?.() ?? new Date(),
+        "core_operation",
+      ),
     );
-    const [activation] = await connection.db
-      .select({
-        status: founderGeneralReleaseActivations.status,
-        firstBriefId: founderGeneralReleaseActivations.firstBriefId,
-      })
-      .from(founderGeneralReleaseActivations)
-      .where(eq(founderGeneralReleaseActivations.userId, userId))
-      .limit(1);
     return activation?.status === "activated" && Boolean(activation.firstBriefId);
   } finally {
     if (ownsConnection) await connection.close();
@@ -393,6 +371,12 @@ export async function createFounderGeneralReleaseOperator(
         throw new FounderGeneralReleaseError(
           "eligibility_required",
           "Confirm public Initial General Release eligibility before creating your Operator.",
+        );
+      }
+      if (!activation.releaseDecisionId) {
+        throw new FounderGeneralReleaseError(
+          "general_release_decision_required",
+          "This setup is not bound to an approved exact-candidate Initial General Release Decision.",
         );
       }
       const currentAvailability = readFounderGeneralReleaseAvailability(
@@ -742,11 +726,14 @@ async function readBoundGeneralReleaseActivation(
 ): Promise<{
   status: string;
   admissionState: string;
+  firstBriefId: string | null;
+  authority: FounderGeneralReleaseAuthority;
 } | null> {
   const [activation] = await tx
     .select({
       status: founderGeneralReleaseActivations.status,
       admissionState: founderGeneralReleaseActivations.admissionState,
+      firstBriefId: founderGeneralReleaseActivations.firstBriefId,
       releaseDecisionId: founderGeneralReleaseActivations.releaseDecisionId,
     })
     .from(founderGeneralReleaseActivations)
@@ -785,7 +772,7 @@ async function readBoundGeneralReleaseActivation(
   ) {
     return null;
   }
-  return activation;
+  return { ...activation, authority };
 }
 
 function generalReleaseRequirementsAvailable(
@@ -813,22 +800,21 @@ function generalReleaseRequirementsAvailable(
   );
 }
 
-export async function founderGeneralReleaseUsesPublicAiRoutingInTransaction(
+export async function founderGeneralReleaseAvailableAiProvidersInTransaction(
   tx: FounderProductContractTransaction,
   userId: string,
-): Promise<boolean> {
-  const [activation] = await tx
-    .select({
-      status: founderGeneralReleaseActivations.status,
-      admissionState: founderGeneralReleaseActivations.admissionState,
-    })
-    .from(founderGeneralReleaseActivations)
-    .where(eq(founderGeneralReleaseActivations.userId, userId))
-    .limit(1);
-  return Boolean(
-    activation &&
-      activation.admissionState === "eligible" &&
-      !["retirement_due", "retired"].includes(activation.status),
+  env: Record<string, string | undefined> = process.env,
+  now = new Date(),
+): Promise<readonly ("openai" | "anthropic")[] | null> {
+  const activation = await readBoundGeneralReleaseActivation(tx, userId, env, now, "ai_provider");
+  if (
+    activation?.admissionState !== "eligible" ||
+    ["retirement_due", "retired"].includes(activation.status)
+  ) {
+    return null;
+  }
+  return (["openai", "anthropic"] as const).filter(
+    (provider) => activation.authority.capabilities[provider] === "available",
   );
 }
 
