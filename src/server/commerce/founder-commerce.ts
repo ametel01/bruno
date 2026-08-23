@@ -18,6 +18,10 @@ import {
   founderEntitlementPolicy,
 } from "@/src/server/founder-product-contract/entitlement";
 import {
+  FounderGeneralReleaseError,
+  requireFounderGeneralReleasePurchaseDecisionInTransaction,
+} from "@/src/server/founder-product-contract/initial-general-release";
+import {
   lockFounderProductContractLifecycleInTransaction,
   requireActiveFounderOperatorAuthorityInTransaction,
 } from "@/src/server/founder-product-contract/operator-authority";
@@ -94,6 +98,7 @@ export async function createFounderCheckout(input: {
     const correlationId = await connection.db.transaction(async (tx) => {
       await lockFounderProductContractLifecycleInTransaction(tx, input.userId);
       await requireActiveFounderOperatorAuthorityInTransaction(tx, input.userId);
+      await requireFounderGeneralReleasePurchaseDecisionInTransaction(tx, input.userId, input.now);
       const [latest] = await tx
         .select({ generation: founderCheckoutCorrelations.generation })
         .from(founderCheckoutCorrelations)
@@ -463,6 +468,28 @@ export async function reconcileFounderCommerceReceipt(input: {
       if (correlation.status === "closed" || correlation.status === "refund_pending") {
         await markReceipt(tx, lockedReceipt.id, "ignored", input.now);
         return "ignored";
+      }
+      if (providerStatus === "active") {
+        try {
+          await requireFounderGeneralReleasePurchaseDecisionInTransaction(
+            tx,
+            receipt.userId,
+            input.now,
+            { allowExistingEntitlement: true },
+          );
+        } catch (error) {
+          if (
+            !(error instanceof FounderGeneralReleaseError) ||
+            error.code !== "purchase_decision_unavailable"
+          ) {
+            throw error;
+          }
+          await tx
+            .update(founderCommerceEvents)
+            .set({ lastAttemptAt: input.now, lastErrorCode: "purchase_window_expired" })
+            .where(eq(founderCommerceEvents.id, lockedReceipt.id));
+          return "confirming_payment";
+        }
       }
       const [current] = await tx
         .select()

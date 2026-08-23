@@ -41,6 +41,10 @@ export function FounderOperatorPreparation({
   trustedPreviewInvitationToken,
   timezoneOptions = DEFAULT_FOUNDER_TIMEZONE_OPTIONS,
   openAiReleased = false,
+  anthropicReleased = false,
+  generalReleaseSetupAvailable = false,
+  generalReleaseBriefInspectable = false,
+  generalReleaseWorkspaceAvailable = false,
   calendarReadingReleased = false,
   mailReadingReleased = false,
   mailSendingReleased = false,
@@ -57,6 +61,10 @@ export function FounderOperatorPreparation({
   trustedPreviewInvitationToken?: string;
   timezoneOptions?: ReadonlyArray<FounderTimezoneOption>;
   openAiReleased?: boolean;
+  anthropicReleased?: boolean;
+  generalReleaseSetupAvailable?: boolean;
+  generalReleaseBriefInspectable?: boolean;
+  generalReleaseWorkspaceAvailable?: boolean;
   calendarReadingReleased?: boolean;
   mailReadingReleased?: boolean;
   mailSendingReleased?: boolean;
@@ -405,7 +413,8 @@ export function FounderOperatorPreparation({
   const runtimeReady = runtime?.status === "ready";
   const runtimeNeedsAttention = runtime?.status === "needs_attention";
   const activated = onboarding?.activated === true;
-  const workspaceAvailable = admitted;
+  const workspaceAvailable = admitted || generalReleaseWorkspaceAvailable;
+  const setupWorkspaceAvailable = workspaceAvailable || generalReleaseSetupAvailable;
 
   return (
     <div className={styles.content}>
@@ -578,8 +587,16 @@ export function FounderOperatorPreparation({
           </div>
           <div className={styles.workspaceNeeds}>
             <FounderActionInbox
-              mailSendingReleased={previewLearningExperience ? false : mailSendingReleased}
+              mailSendingReleased={ownerPreviewExperience ? false : mailSendingReleased}
             />
+          </div>
+        </section>
+      ) : null}
+
+      {activated && generalReleaseBriefInspectable && !workspaceAvailable ? (
+        <section className={styles.workspace} aria-label="General Release first brief">
+          <div className={styles.workspaceBrief}>
+            <FounderCoreOperation readOnly />
           </div>
         </section>
       ) : null}
@@ -630,37 +647,44 @@ export function FounderOperatorPreparation({
 
       {!activated && workspaceAvailable ? (
         <FounderActionInbox
-          mailSendingReleased={previewLearningExperience ? false : mailSendingReleased}
+          mailSendingReleased={ownerPreviewExperience ? false : mailSendingReleased}
         />
       ) : null}
 
-      {!previewLearningExperience && workspaceAvailable && mailSendingReleased ? (
+      {!ownerPreviewExperience && workspaceAvailable && mailSendingReleased ? (
         <FounderMailSendingConnection />
       ) : null}
 
-      {workspaceAvailable &&
+      {setupWorkspaceAvailable &&
       openAiReleased &&
-      (!previewLearningExperience || previewStatus.availableCapabilities.includes("OpenAI")) ? (
-        <FounderAiConnection />
+      (generalReleaseSetupAvailable ||
+        !ownerPreviewExperience ||
+        previewStatus.availableCapabilities.includes("OpenAI")) ? (
+        <FounderAiConnection provider="openai" />
       ) : null}
 
-      {workspaceAvailable &&
+      {setupWorkspaceAvailable && generalReleaseSetupAvailable && anthropicReleased ? (
+        <FounderAiConnection provider="anthropic" />
+      ) : null}
+
+      {setupWorkspaceAvailable &&
       calendarReadingReleased &&
-      (!previewLearningExperience ||
+      (generalReleaseSetupAvailable ||
+        !ownerPreviewExperience ||
         previewStatus.availableCapabilities.includes("Calendar reading")) ? (
         <FounderCalendarConnection />
       ) : null}
 
-      {!previewLearningExperience &&
-      workspaceAvailable &&
+      {(generalReleaseSetupAvailable || !ownerPreviewExperience) &&
+      setupWorkspaceAvailable &&
       mailReadingReleased &&
       mailReleaseControls ? (
         <FounderMailConnection releaseControls={mailReleaseControls} />
       ) : null}
 
       {!activated &&
-      workspaceAvailable &&
-      !previewLearningExperience &&
+      setupWorkspaceAvailable &&
+      (generalReleaseSetupAvailable || !ownerPreviewExperience) &&
       onboarding?.operation === "core" ? (
         <FounderCoreOperation />
       ) : null}

@@ -14,12 +14,18 @@ import {
   type FounderCommerceStatus,
   type FounderProductContractLifecycleAction,
 } from "@/src/server/founder-product-contract/lifecycle";
+import {
+  type FounderGeneralReleaseActivationDto,
+  getFounderGeneralReleaseActivationForUser,
+} from "@/src/server/founder-product-contract/initial-general-release";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
+import { POST as generalReleasePOST } from "../../general-release/route";
 
 export const dynamic = "force-dynamic";
 
 const ACTIONS = new Set<FounderProductContractLifecycleAction>([
   "release_stage_admission",
+  "initial_general_release_activation",
   "external_beta_cohort_lifecycle",
   "product_entitlement_lifecycle",
   "subscription_lifecycle",
@@ -157,7 +163,13 @@ export async function POST(request: Request): Promise<Response> {
         ...(body.externalBetaContract ? { externalBetaContract: body.externalBetaContract } : {}),
         ...(body.restorationContract ? { restorationContract: body.restorationContract } : {}),
       },
-      { providers, commerceWebhookSecret, applicationRevision: identity.sourceRevision },
+      {
+        providers,
+        commerceWebhookSecret,
+        applicationRevision: identity.sourceRevision,
+        generalReleaseApplication: (payload, observedAt) =>
+          callGeneralReleaseApplication(applicationUser.userId, payload, observedAt),
+      },
     );
     await completeFounderProductContractScenarioExecution({ identity: evidenceIdentity, outcome });
     return Response.json({ outcome }, { headers: { "cache-control": "no-store" } });
@@ -179,6 +191,49 @@ export async function POST(request: Request): Promise<Response> {
       { status: 409, headers: { "cache-control": "no-store" } },
     );
   }
+}
+
+async function callGeneralReleaseApplication(
+  userId: string,
+  payload:
+    | {
+        action: "confirm_eligibility";
+        serviceBusinessConfirmed: true;
+        geographyCode: "PH";
+      }
+    | { action: "create_operator" }
+    | { action: "decline_offer" },
+  now: Date,
+): Promise<{
+  status: number;
+  generalRelease?: FounderGeneralReleaseActivationDto;
+  error?: { code?: string; message?: string };
+}> {
+  const response = await generalReleasePOST(
+    new Request("http://localhost/api/operator/general-release", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+    undefined,
+    {
+      requireUser: async () => ({ ok: true, userId }),
+      now: () => now,
+      getStatus: (requestedUserId) => getGeneralReleaseStatusAt(requestedUserId, now),
+    },
+  );
+  const body = (await response.json()) as {
+    generalRelease?: FounderGeneralReleaseActivationDto;
+    error?: { code?: string; message?: string };
+  };
+  return { status: response.status, ...body };
+}
+
+async function getGeneralReleaseStatusAt(
+  userId: string,
+  now: Date,
+): Promise<FounderGeneralReleaseActivationDto> {
+  return getFounderGeneralReleaseActivationForUser(userId, { now: () => now });
 }
 
 function lifecycleErrorMessage(error: unknown): string {

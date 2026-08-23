@@ -12,11 +12,13 @@ import {
   operatorConversationWorks,
 } from "@/src/server/db/schema";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
-import { readFounderApplicationRevision } from "@/src/server/founder-product-contract/application-revision";
 import {
-  getFounderOwnerPreviewAccessInTransaction,
-  type requireFounderOwnerPreviewAccessForUser,
-  type requireFounderOwnerPreviewAccessInTransaction,
+  founderGeneralReleaseAuthorizesNewWorkInTransaction,
+  founderGeneralReleaseUsesPublicAiRoutingInTransaction,
+} from "@/src/server/founder-product-contract/initial-general-release";
+import type {
+  requireFounderOwnerPreviewAccessForUser,
+  requireFounderOwnerPreviewAccessInTransaction,
 } from "@/src/server/founder-product-contract/release-stage-access";
 import { withFounderOwnerPreviewWorkAuthority } from "@/src/server/founder-product-contract/work-authority";
 import {
@@ -141,6 +143,7 @@ export class FounderConversationError extends Error {
   readonly code:
     | "invalid_message"
     | "operator_not_ready"
+    | "product_entitlement_required"
     | "conversation_unavailable"
     | "conversation_ai_unavailable";
   readonly status: 400 | 403 | 409 | 503;
@@ -217,6 +220,12 @@ export async function sendFounderConversationMessageForUser(
       conversationWorkAuthorityDependencies(connection, dependencies),
       async (tx, checkedAt) => {
         await lockOperator(tx, operator.id);
+        if (!(await founderGeneralReleaseAuthorizesNewWorkInTransaction(tx, userId, checkedAt))) {
+          throw new FounderConversationError(
+            "product_entitlement_required",
+            "New Operator work is paused after Founder Activation until Product Entitlement is verified.",
+          );
+        }
         const conversation = await ensureConversation(tx, operator.id, checkedAt);
         const [existing] = await tx
           .select()
@@ -305,10 +314,13 @@ export async function sendFounderConversationMessageForUser(
     }
 
     const routed = await connection.db.transaction(async (tx) => {
-      const checkedAt = now();
+      const publicGeneralRelease = await founderGeneralReleaseUsesPublicAiRoutingInTransaction(
+        tx,
+        userId,
+      );
       const decision = await routeFounderAiProvider(tx, operator.id, {
-        now: checkedAt,
-        allowedProviders: await allowedConversationProviders(tx, userId, checkedAt, dependencies),
+        now: now(),
+        allowedProviders: publicGeneralRelease ? ["openai", "anthropic"] : ["openai"],
         ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
       });
       if (!decision) return null;
@@ -346,7 +358,7 @@ export async function sendFounderConversationMessageForUser(
       );
     }
     const provider = routed?.provider ?? readyConnection.provider;
-    if (provider !== "openai") {
+    if (provider !== "openai" && !routed) {
       return finalizePausedConversation(
         connection,
         started,
@@ -488,9 +500,13 @@ export async function resumeFounderConversationWorkForUser(
           };
         }
 
+        const publicGeneralRelease = await founderGeneralReleaseUsesPublicAiRoutingInTransaction(
+          tx,
+          userId,
+        );
         const decision = await routeFounderAiProvider(tx, operator.id, {
           now: checkedAt,
-          allowedProviders: await allowedConversationProviders(tx, userId, checkedAt, dependencies),
+          allowedProviders: publicGeneralRelease ? ["openai", "anthropic"] : ["openai"],
           ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
         });
         if (!decision) return { kind: "unchanged" as const, conversation };
@@ -609,6 +625,7 @@ function conversationWorkAuthorityDependencies(
 ): Parameters<typeof withFounderOwnerPreviewWorkAuthority>[1] {
   return {
     createConnection: () => connection,
+    generalReleaseAuthority: "work",
     ...(dependencies.applicationRevision
       ? { applicationRevision: dependencies.applicationRevision }
       : {}),
@@ -941,26 +958,6 @@ async function lockConversation(
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:conversation:${conversationId}`}, 0))`,
   );
-}
-
-async function allowedConversationProviders(
-  tx: FounderConversationTransaction,
-  userId: string,
-  now: Date,
-  dependencies: FounderConversationDependencies,
-): Promise<readonly FounderAiProvider[]> {
-  if (dependencies.requireOwnerPreviewAccess) return ["openai"];
-  const applicationRevision =
-    dependencies.applicationRevision ?? readFounderApplicationRevision() ?? "";
-  const access = await getFounderOwnerPreviewAccessInTransaction(tx, {
-    userId,
-    now,
-    applicationRevision,
-  });
-  return [
-    ...(access.availableCapabilities.includes("openai") ? (["openai"] as const) : []),
-    ...(access.availableCapabilities.includes("anthropic") ? (["anthropic"] as const) : []),
-  ];
 }
 
 export function createHermesConversationAdapter(

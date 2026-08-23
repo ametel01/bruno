@@ -2,7 +2,9 @@ import {
   founderOperatorAccessErrorResponse,
   requireFounderOperatorWorkspaceAccess,
 } from "@/app/api/operator/_shared/owner-preview-access";
+import { hasFounderGeneralReleaseBriefAccessForUser } from "@/src/server/founder-product-contract/initial-general-release";
 import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import { getActiveFounderAiCompatibilityPolicy } from "@/src/server/operators/founder-ai-routing";
 import {
   confirmFounderCoreProcessingConsentForUser,
   FounderCoreOperationError,
@@ -33,6 +35,10 @@ export async function GET(
   const accessFailure = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
     "workspace",
+    {
+      allowGeneralReleaseSetup: true,
+      hasGeneralReleaseSetupAccess: hasFounderGeneralReleaseBriefAccessForUser,
+    },
   );
   if (accessFailure) return accessFailure;
   const operation = await (dependencies.getOperation ?? getFounderCoreOperationForUser)(
@@ -53,6 +59,7 @@ export async function POST(
   const accessFailure = await requireFounderOperatorWorkspaceAccess(
     applicationUser.userId,
     FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden,
+    { allowGeneralReleaseSetup: true },
   );
   if (accessFailure) return accessFailure;
   let payload: unknown;
@@ -64,15 +71,21 @@ export async function POST(
   const action = isRecord(payload) && payload.action;
   try {
     if (action === "confirm_consent") {
-      const operation = await (
-        dependencies.confirmConsent ?? confirmFounderCoreProcessingConsentForUser
-      )(applicationUser.userId);
+      const operation = dependencies.confirmConsent
+        ? await dependencies.confirmConsent(applicationUser.userId)
+        : await confirmFounderCoreProcessingConsentForUser(
+            applicationUser.userId,
+            deterministicCoreDependencies(),
+          );
       return Response.json({ operation }, { headers: noStoreHeaders() });
     }
     if (action === "open_brief") {
-      const operation = await (dependencies.openBrief ?? openFounderCoreBriefForUser)(
-        applicationUser.userId,
-      );
+      const operation = dependencies.openBrief
+        ? await dependencies.openBrief(applicationUser.userId)
+        : await openFounderCoreBriefForUser(
+            applicationUser.userId,
+            deterministicCoreDependencies(),
+          );
       return Response.json({ operation }, { headers: noStoreHeaders() });
     }
   } catch (error) {
@@ -87,6 +100,24 @@ export async function POST(
     throw error;
   }
   return validationResponse("Choose a supported Core Operation action.");
+}
+
+function deterministicCoreDependencies() {
+  if (
+    process.env.BRUNO_AUTH_MODE !== "development" ||
+    process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE !== "deterministic"
+  ) {
+    return {};
+  }
+  const observedAt = new Date(process.env.BRUNO_FOUNDER_CONTRACT_OBSERVED_AT ?? "");
+  const applicationRevision = process.env.BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION;
+  return {
+    ...(Number.isNaN(observedAt.valueOf())
+      ? {}
+      : { now: () => new Date(observedAt.valueOf() + 1_000) }),
+    ...(applicationRevision ? { applicationRevision } : {}),
+    routingPolicy: getActiveFounderAiCompatibilityPolicy(true, true),
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

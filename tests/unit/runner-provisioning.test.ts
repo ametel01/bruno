@@ -87,7 +87,12 @@ describe.sequential("runner provisioning service", () => {
           region: "nyc3",
           sizeSlug: "s-2vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["bruno", "bruno-runner", "cloud-runner"],
+          tags: [
+            "bruno",
+            expect.stringMatching(/^bruno-deploy-[a-f0-9]{32}$/),
+            "bruno-runner",
+            "cloud-runner",
+          ],
           firewallName: "bruno-runners",
           sshKeyIds: ["52830696"],
           userData: expect.stringContaining("BRUNO_RUNNER_REGISTRATION_TOKEN="),
@@ -97,7 +102,12 @@ describe.sequential("runner provisioning service", () => {
         step: "tag",
         input: {
           providerResourceId: "droplet-1",
-          tags: ["bruno", "bruno-runner", "cloud-runner"],
+          tags: [
+            "bruno",
+            expect.stringMatching(/^bruno-deploy-[a-f0-9]{32}$/),
+            "bruno-runner",
+            "cloud-runner",
+          ],
         },
       },
       {

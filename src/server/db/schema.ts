@@ -67,6 +67,7 @@ export const founderRecoveryArchiveStatusEnum = pgEnum("founder_recovery_archive
 ]);
 export const founderProductContractScenarioEnum = pgEnum("founder_product_contract_scenario", [
   "release_stage_admission",
+  "initial_general_release_activation",
   "external_beta_cohort_lifecycle",
   "product_entitlement_lifecycle",
   "subscription_lifecycle",
@@ -2794,6 +2795,82 @@ export const operatorFounderActivations = pgTable(
     ),
     uniqueIndex("operator_founder_activations_operator_idx").on(table.operatorId),
     uniqueIndex("operator_founder_activations_brief_idx").on(table.firstBriefId),
+  ],
+);
+
+export const founderGeneralReleaseActivations = pgTable(
+  "founder_general_release_activations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    operatorId: uuid("operator_id")
+      .notNull()
+      .references(() => operators.id),
+    runnerId: uuid("runner_id").references(() => runners.id),
+    status: text("status").notNull().default("setup"),
+    serviceBusinessConfirmedAt: timestamp("service_business_confirmed_at", {
+      withTimezone: true,
+    }).notNull(),
+    geographyCode: text("geography_code").notNull(),
+    admissionState: text("admission_state").notNull(),
+    admissionReason: text("admission_reason").notNull(),
+    publishedPriceLabel: text("published_price_label"),
+    capacityObservedAt: timestamp("capacity_observed_at", { withTimezone: true }).notNull(),
+    createConfirmedAt: timestamp("create_confirmed_at", { withTimezone: true }),
+    setupEvidenceDigest: text("setup_evidence_digest"),
+    dropletCreatedAt: timestamp("droplet_created_at", { withTimezone: true }),
+    activationDueAt: timestamp("activation_due_at", { withTimezone: true }),
+    firstBriefId: uuid("first_brief_id").references(() => operatorMorningBriefs.id),
+    activationEvidenceDigest: text("activation_evidence_digest"),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    entitlementDueAt: timestamp("entitlement_due_at", { withTimezone: true }),
+    workStoppedAt: timestamp("work_stopped_at", { withTimezone: true }),
+    retirementDueAt: timestamp("retirement_due_at", { withTimezone: true }),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("founder_general_release_activations_user_idx").on(table.userId),
+    uniqueIndex("founder_general_release_activations_operator_idx").on(table.operatorId),
+    uniqueIndex("founder_general_release_activations_runner_idx")
+      .on(table.runnerId)
+      .where(sql`${table.runnerId} IS NOT NULL`),
+    uniqueIndex("founder_general_release_activations_brief_idx")
+      .on(table.firstBriefId)
+      .where(sql`${table.firstBriefId} IS NOT NULL`),
+    check(
+      "founder_general_release_activations_status_check",
+      sql`(${table.status} IN ('setup', 'waitlisted') AND ${table.runnerId} IS NULL AND ${table.createConfirmedAt} IS NULL AND ${table.setupEvidenceDigest} IS NULL AND ${table.dropletCreatedAt} IS NULL AND ${table.activatedAt} IS NULL AND ${table.retirementDueAt} IS NULL AND ${table.retiredAt} IS NULL) OR (${table.status} = 'provisioning' AND ${table.runnerId} IS NULL AND ${table.createConfirmedAt} IS NOT NULL AND ${table.setupEvidenceDigest} ~ '^sha256:[a-f0-9]{64}$' AND ${table.dropletCreatedAt} IS NULL AND ${table.activatedAt} IS NULL AND ${table.retirementDueAt} IS NULL AND ${table.retiredAt} IS NULL) OR (${table.status} = 'activation_pending' AND ${table.runnerId} IS NOT NULL AND ${table.createConfirmedAt} IS NOT NULL AND ${table.setupEvidenceDigest} ~ '^sha256:[a-f0-9]{64}$' AND ${table.dropletCreatedAt} IS NOT NULL AND ${table.activatedAt} IS NULL AND ${table.retirementDueAt} IS NULL AND ${table.retiredAt} IS NULL) OR (${table.status} = 'activated' AND ${table.runnerId} IS NOT NULL AND ${table.activatedAt} IS NOT NULL AND ${table.entitlementDueAt} IS NOT NULL AND ${table.retirementDueAt} IS NULL AND ${table.retiredAt} IS NULL) OR (${table.status} = 'retirement_due' AND ${table.runnerId} IS NOT NULL AND ${table.workStoppedAt} IS NOT NULL AND ${table.retirementDueAt} IS NOT NULL AND ${table.retiredAt} IS NULL) OR (${table.status} = 'retired' AND ${table.runnerId} IS NOT NULL AND ${table.workStoppedAt} IS NOT NULL AND ${table.retirementDueAt} IS NOT NULL AND ${table.retiredAt} IS NOT NULL)`,
+    ),
+    check(
+      "founder_general_release_activations_admission_check",
+      sql`${table.admissionState} IN ('eligible', 'waitlisted', 'unavailable') AND length(trim(${table.admissionReason})) BETWEEN 1 AND 500 AND (${table.admissionState} <> 'eligible' OR length(trim(${table.publishedPriceLabel})) BETWEEN 1 AND 80)`,
+    ),
+    check(
+      "founder_general_release_activations_geography_check",
+      sql`${table.geographyCode} ~ '^[A-Z]{2}$'`,
+    ),
+    check(
+      "founder_general_release_activations_creation_check",
+      sql`(${table.runnerId} IS NULL AND ${table.dropletCreatedAt} IS NULL AND ${table.activationDueAt} IS NULL) OR (${table.runnerId} IS NOT NULL AND ${table.createConfirmedAt} IS NOT NULL AND ${table.dropletCreatedAt} IS NOT NULL AND ${table.activationDueAt} = ${table.dropletCreatedAt} + interval '24 hours')`,
+    ),
+    check(
+      "founder_general_release_activations_activation_check",
+      sql`(${table.activatedAt} IS NULL AND ${table.firstBriefId} IS NULL AND ${table.activationEvidenceDigest} IS NULL AND ${table.entitlementDueAt} IS NULL) OR (${table.activatedAt} IS NOT NULL AND ${table.firstBriefId} IS NOT NULL AND ${table.activationEvidenceDigest} ~ '^sha256:[a-f0-9]{64}$' AND ${table.dropletCreatedAt} IS NOT NULL AND ${table.activatedAt} >= ${table.dropletCreatedAt} AND ${table.activationDueAt} IS NOT NULL AND ${table.activatedAt} <= ${table.activationDueAt} AND ${table.entitlementDueAt} = ${table.activatedAt} + interval '24 hours')`,
+    ),
+    check(
+      "founder_general_release_activations_retirement_check",
+      sql`(${table.retirementDueAt} IS NULL AND ${table.retiredAt} IS NULL) OR (${table.retirementDueAt} IS NOT NULL AND ${table.workStoppedAt} IS NOT NULL AND (${table.retiredAt} IS NULL OR ${table.retiredAt} >= ${table.workStoppedAt}))`,
+    ),
+    index("founder_general_release_activations_deadline_idx").on(
+      table.status,
+      table.activationDueAt,
+      table.entitlementDueAt,
+      table.retirementDueAt,
+    ),
   ],
 );
 

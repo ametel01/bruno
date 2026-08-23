@@ -720,4 +720,40 @@ describe("Founder Operator preparation shell", () => {
     expect(released).not.toContain("Optional Mail Sending Connection");
     expect(released).not.toContain("Review send-only Gmail");
   });
+
+  it("keeps the free first brief inspectable and promotes only entitled General Release users", () => {
+    const activatedOnboarding = {
+      nextStep: "conversation",
+      defaultRoute: "/operator#conversation",
+      activated: true,
+      operation: "core",
+      capabilities: { ai: "ready", calendar: "ready", mail: "ready", core: "ready" },
+      facts: {
+        timezoneConfirmed: true,
+        runtimeReady: true,
+        processingConsent: true,
+        firstBriefReady: true,
+        primarySuiteIdentity: "founder@example.com",
+      },
+    } satisfies FounderOnboardingDto;
+    const activated = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: OPERATOR,
+        initialOnboarding: activatedOnboarding,
+        generalReleaseBriefInspectable: true,
+      }),
+    );
+    const entitled = renderToStaticMarkup(
+      createElement(FounderOperatorPreparation, {
+        initialOperator: OPERATOR,
+        initialOnboarding: activatedOnboarding,
+        generalReleaseWorkspaceAvailable: true,
+      }),
+    );
+
+    expect(activated).toContain('aria-label="General Release first brief"');
+    expect(activated).not.toContain('aria-label="Current Founder workspace"');
+    expect(entitled).toContain('aria-label="Current Founder workspace"');
+    expect(entitled).not.toContain('aria-label="General Release first brief"');
+  });
 });

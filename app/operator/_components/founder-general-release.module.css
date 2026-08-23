@@ -1,0 +1,129 @@
+.card {
+  margin-bottom: 1.5rem;
+  padding: 1.5rem;
+  border: 1px solid #d8d4cc;
+  border-radius: 1.25rem;
+  background: #fff;
+}
+
+.heading,
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.heading h2,
+.offer h3 {
+  margin: 0.25rem 0;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #765a35;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.badge,
+.notice {
+  border-radius: 0.75rem;
+  background: #f5f1e9;
+  color: #4b4030;
+}
+
+.badge {
+  padding: 0.4rem 0.7rem;
+  text-transform: capitalize;
+}
+
+.notice {
+  padding: 0.8rem 1rem;
+}
+
+.form,
+.decision,
+.offer {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.form label:not(.check) {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.form input[type="text"],
+.form input:not([type]) {
+  max-width: 8rem;
+  padding: 0.65rem;
+  border: 1px solid #b9b2a6;
+  border-radius: 0.6rem;
+  font: inherit;
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.checklist {
+  display: grid;
+  gap: 0.5rem;
+  padding-left: 1.3rem;
+}
+
+.checklist li[data-ready="true"]::marker {
+  color: #28754d;
+}
+
+.checklist li[data-ready="false"]::marker {
+  color: #a25d31;
+}
+
+.card button,
+.actions a {
+  width: fit-content;
+  padding: 0.7rem 1rem;
+  border: 1px solid #25211b;
+  border-radius: 999px;
+  background: #25211b;
+  color: #fff;
+  font: inherit;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.actions button {
+  background: transparent;
+  color: #25211b;
+}
+
+.card button:focus-visible,
+.actions a:focus-visible,
+.form input:focus-visible {
+  outline: 3px solid #c99544;
+  outline-offset: 3px;
+}
+
+.error {
+  color: #9b2c2c;
+}
+
+@media (max-width: 42rem) {
+  .card {
+    padding: 1.1rem;
+  }
+}

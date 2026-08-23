@@ -60,6 +60,9 @@ export async function createFounderProductContractFixture(
   const runtimeId = randomUUID();
   const runnerId = randomUUID();
   const credentialId = randomUUID();
+  const aiConnectionId = randomUUID();
+  const calendarConnectionId = randomUUID();
+  const mailConnectionId = randomUUID();
   const expiredArchiveId = randomUUID();
   const checkoutCorrelation = `${randomUUID()}.${randomUUID()}`;
   const externalBetaOwnerUserId = randomUUID();
@@ -92,6 +95,11 @@ export async function createFounderProductContractFixture(
     await sql`insert into operator_runtimes (id, operator_id, status, transport_state, safety_state, config_revision, runtime_identity, attempt_count, started_at, ready_at, created_at, updated_at) values (${runtimeId}, ${operatorId}, 'ready', 'connected', 'verified', 'founder-contract-v1', 'founder-contract-runtime', 1, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
     await sql`insert into runners (id, user_id, name, kind, endpoint_url, status, provider, provider_resource_id, provider_firewall_id, region, size_slug, image, provisioning_status, provisioning_operation_key, provisioning_started_at, provisioning_completed_at, created_at, updated_at) values (${runnerId}, ${userId}, ${`founder-${runnerId}`}, 'digitalocean', 'https://203.0.113.10', 'online', 'digitalocean', ${`droplet-${runnerId}`}, ${`firewall-${runnerId}`}, 'sfo3', 's-1vcpu-1gb', 'ubuntu-24-04-x64', 'ready', ${`bruno-deploy-${runnerId.replaceAll("-", "")}`}, ${createdAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
     await sql`insert into runner_credentials (id, runner_id, credential_hash, credential_prefix, status, created_at, updated_at) values (${credentialId}, ${runnerId}, ${`sha256:${runnerId.replaceAll("-", "")}`}, 'fpct', 'active', ${createdAt}, ${readyAt})`;
+    await sql`insert into runner_provisioning_events (runner_id, phase, status, message, metadata, created_at) values (${runnerId}, 'creating', 'completed', 'Provider creation confirmed.', ${sql.json({ providerCreatedAt: readyAt })}, ${readyAt})`;
+    await sql`insert into operator_ai_connections (id, operator_id, provider, provider_subject_id, account_label, status, authorization_state, capacity_state, inference_state, eligible_account, authorization_persisted, approved_model_assignment, authorized_at, last_verified_at, created_at, updated_at) values (${aiConnectionId}, ${operatorId}, 'openai', ${`openai-${userId}`}, 'Founder OpenAI', 'ready', 'authorized', 'available', 'passed', true, true, 'openai-codex', ${readyAt}, ${readyAt}, ${createdAt}, ${readyAt})`;
+    await sql`insert into operator_calendar_connections (id, operator_id, provider, provider_subject_id, account_label, status, authorization_state, access_token_ciphertext, access_token_iv, access_token_auth_tag, refresh_token_ciphertext, refresh_token_iv, refresh_token_auth_tag, secret_key_version, granted_scopes, authorized_at, last_verified_at, last_evidence_at, last_evidence_count, evidence_state, created_at, updated_at) values (${calendarConnectionId}, ${operatorId}, 'google_calendar', ${`google-${userId}`}, 'founder@example.com', 'ready', 'authorized', 'a', 'b', 'c', 'd', 'e', 'f', 'test-v1', ${sql.json(["calendar.readonly"])}, ${readyAt}, ${readyAt}, ${readyAt}, 1, 'current', ${createdAt}, ${readyAt})`;
+    await sql`insert into operator_mail_connections (id, operator_id, provider, provider_subject_id, account_label, status, authorization_state, access_token_ciphertext, access_token_iv, access_token_auth_tag, refresh_token_ciphertext, refresh_token_iv, refresh_token_auth_tag, secret_key_version, granted_scopes, authorized_at, last_verified_at, last_evidence_at, last_evidence_count, evidence_state, suite_status, created_at, updated_at) values (${mailConnectionId}, ${operatorId}, 'google_gmail', ${`google-${userId}`}, 'founder@example.com', 'ready', 'authorized', 'a', 'b', 'c', 'd', 'e', 'f', 'test-v1', ${sql.json(["gmail.readonly"])}, ${readyAt}, ${readyAt}, ${readyAt}, 1, 'current', 'matched', ${createdAt}, ${readyAt})`;
+    await sql`insert into operator_primary_communications_suites (operator_id, calendar_connection_id, mail_connection_id, provider_subject_id, status, created_at, updated_at) values (${operatorId}, ${calendarConnectionId}, ${mailConnectionId}, ${`google-${userId}`}, 'active', ${createdAt}, ${readyAt})`;
     await sql`insert into founder_checkout_correlations (user_id, correlation_digest, status, created_at, expires_at) values (${userId}, ${`sha256:${createHash("sha256").update(checkoutCorrelation).digest("hex")}`}, 'pending', ${createdAt}, ${new Date(clock.now().valueOf() + 60 * 60 * 1_000).toISOString()})`;
     await sql`insert into founder_recovery_archives (id, user_id, operator_id, status, format_version, storage_object_key, recovery_credential_object_key, ciphertext_digest, recovery_credential_digest, state_digest, restorable_verified, restore_verified_at, failure_code, observed_at, expires_at, created_at, deleted_at) values (${expiredArchiveId}, ${userId}, ${operatorId}, 'verified', 1, ${`founder-recovery/expired/${expiredArchiveId}.age`}, ${`founder-recovery/expired/${expiredArchiveId}.key`}, ${`sha256:${createHash("sha256").update(`expired:${userId}`).digest("hex")}`}, ${`sha256:${createHash("sha256").update(`expired-credential:${userId}`).digest("hex")}`}, ${`sha256:${createHash("sha256").update(`expired-state:${userId}`).digest("hex")}`}, true, ${expiredArchiveObservedAt.toISOString()}, null, ${expiredArchiveObservedAt.toISOString()}, ${expiredArchiveExpiresAt.toISOString()}, ${expiredArchiveObservedAt.toISOString()}, null)`;
     for (const branch of restorationBranches) {
@@ -237,6 +245,30 @@ export async function deleteFounderProductContractFixture(
       fixture.restorationDeletedArchiveUserId,
       fixture.restorationExpiredArchiveUserId,
     ];
+    const operatorRows = await sql<
+      { id: string }[]
+    >`select id from operators where user_id = any(${allUserIds})`;
+    const allOperatorIds = operatorRows.map(({ id }) => id);
+    const aiConnectionRows = await sql<
+      { id: string }[]
+    >`select id from operator_ai_connections where operator_id = any(${allOperatorIds})`;
+    const aiConnectionIds = aiConnectionRows.map(({ id }) => id);
+    const calendarConnectionRows = await sql<
+      { id: string }[]
+    >`select id from operator_calendar_connections where operator_id = any(${allOperatorIds})`;
+    const calendarConnectionIds = calendarConnectionRows.map(({ id }) => id);
+    const mailConnectionRows = await sql<
+      { id: string }[]
+    >`select id from operator_mail_connections where operator_id = any(${allOperatorIds})`;
+    const mailConnectionIds = mailConnectionRows.map(({ id }) => id);
+    const mailSendingConnectionRows = await sql<
+      { id: string }[]
+    >`select id from operator_mail_sending_connections where operator_id = any(${allOperatorIds})`;
+    const mailSendingConnectionIds = mailSendingConnectionRows.map(({ id }) => id);
+    const runnerRows = await sql<
+      { id: string }[]
+    >`select id from runners where user_id = any(${allUserIds})`;
+    const runnerIds = runnerRows.map(({ id }) => id);
     const contractRunId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID;
     if (contractRunId) {
       await sql`delete from founder_preview_qualifications where cohort = ${`external-beta-contract:${contractRunId}`}`;
@@ -249,6 +281,7 @@ export async function deleteFounderProductContractFixture(
     await sql`delete from founder_external_beta_measurements where participant_user_id = any(${allUserIds})`;
     await sql`delete from founder_external_beta_consent_receipts where participant_user_id = any(${allUserIds})`;
     await sql`delete from founder_external_beta_invitations where cohort_owner_user_id = ${fixture.externalBetaOwnerUserId} or participant_user_id = any(${[fixture.userId, fixture.externalBetaParticipantUserId]})`;
+    await sql`delete from founder_general_release_activations where user_id = any(${allUserIds})`;
     await sql`delete from founder_product_entitlements where user_id = any(${allUserIds})`;
     await sql`delete from founder_commerce_lifecycle_receipts where user_id = any(${allUserIds})`;
     await sql`delete from founder_infrastructure_retirements where user_id = any(${allUserIds})`;
@@ -258,14 +291,99 @@ export async function deleteFounderProductContractFixture(
     await sql`delete from founder_recovery_archives where user_id = any(${allUserIds})`;
     await sql`delete from founder_release_decisions where user_id = any(${allUserIds})`;
     await sql`delete from runner_credentials where runner_id in (select id from runners where user_id = any(${allUserIds}))`;
+    await sql`delete from runner_provisioning_events where runner_id in (select id from runners where user_id = any(${allUserIds}))`;
     await sql`delete from runners where user_id = any(${allUserIds})`;
     await sql`delete from operator_conversation_messages where conversation_id in (select id from operator_conversations where operator_id in (select id from operators where user_id = any(${allUserIds})))`;
     await sql`delete from operator_conversations where operator_id in (select id from operators where user_id = any(${allUserIds}))`;
-    await sql`delete from operator_runtimes where operator_id in (select id from operators where user_id = any(${allUserIds}))`;
-    await sql`delete from operator_preparations where operator_id in (select id from operators where user_id = any(${allUserIds}))`;
+    await sql.begin(async (transaction) => {
+      await transaction`alter table operator_founder_activations disable trigger operator_founder_activations_immutable_delete`;
+      await transaction`alter table operator_governance_receipts disable trigger operator_governance_receipts_immutable_delete`;
+      await transaction`alter table operator_ai_connection_receipts disable trigger operator_ai_connection_receipts_immutable_delete`;
+      await transaction`alter table operator_calendar_connection_receipts disable trigger operator_calendar_connection_receipts_immutable_delete`;
+      await transaction`alter table operator_mail_connection_receipts disable trigger operator_mail_connection_receipts_immutable_delete`;
+      await transaction`delete from operator_founder_activations where operator_id = any(${allOperatorIds})`;
+      await transaction`delete from operator_governance_receipts where operator_id = any(${allOperatorIds})`;
+      await transaction`delete from operator_ai_connection_receipts where connection_id = any(${aiConnectionIds})`;
+      await transaction`delete from operator_calendar_connection_receipts where connection_id = any(${calendarConnectionIds})`;
+      await transaction`delete from operator_mail_connection_receipts where connection_id = any(${mailConnectionIds})`;
+      await transaction`alter table operator_founder_activations enable trigger operator_founder_activations_immutable_delete`;
+      await transaction`alter table operator_governance_receipts enable trigger operator_governance_receipts_immutable_delete`;
+      await transaction`alter table operator_ai_connection_receipts enable trigger operator_ai_connection_receipts_immutable_delete`;
+      await transaction`alter table operator_calendar_connection_receipts enable trigger operator_calendar_connection_receipts_immutable_delete`;
+      await transaction`alter table operator_mail_connection_receipts enable trigger operator_mail_connection_receipts_immutable_delete`;
+    });
+    await sql`delete from operator_action_receipts where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_mail_sending_connection_receipts where connection_id = any(${mailSendingConnectionIds})`;
+    await sql`delete from operator_mail_sending_connections where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_morning_brief_items where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_morning_briefs where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_limited_operations where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_processing_consents where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_authority_policies where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_primary_communications_suites where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_relationship_evidence where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_relationship_corrections where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_relationship_candidates where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_relationship_records where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_founder_data_exports where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_mail_connections where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_calendar_connections where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_ai_connections where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_runtimes where operator_id = any(${allOperatorIds})`;
+    await sql`delete from operator_preparations where operator_id = any(${allOperatorIds})`;
     await sql`delete from operators where user_id = any(${allUserIds})`;
     await sql`delete from users where id = any(${allUserIds})`;
     await sql`delete from app_metadata where key = 'founder_owner_preview_owner_user_id:v1' and value = any(${allUserIds})`;
+
+    const remainingRows = await sql<
+      { relation: string; remaining: number }[]
+    >`select relation, remaining from (
+      select 'operator_ai_connection_receipts' as relation, count(*)::integer as remaining from operator_ai_connection_receipts where connection_id = any(${aiConnectionIds})
+      union all select 'operator_calendar_connection_receipts', count(*)::integer from operator_calendar_connection_receipts where connection_id = any(${calendarConnectionIds})
+      union all select 'operator_mail_connection_receipts', count(*)::integer from operator_mail_connection_receipts where connection_id = any(${mailConnectionIds})
+      union all select 'operator_mail_sending_connection_receipts', count(*)::integer from operator_mail_sending_connection_receipts where connection_id = any(${mailSendingConnectionIds})
+      union all select 'operator_action_receipts', count(*)::integer from operator_action_receipts where operator_id = any(${allOperatorIds})
+      union all select 'operator_founder_activations', count(*)::integer from operator_founder_activations where operator_id = any(${allOperatorIds})
+      union all select 'operator_governance_receipts', count(*)::integer from operator_governance_receipts where operator_id = any(${allOperatorIds})
+      union all select 'operator_limited_operations', count(*)::integer from operator_limited_operations where operator_id = any(${allOperatorIds})
+      union all select 'operator_processing_consents', count(*)::integer from operator_processing_consents where operator_id = any(${allOperatorIds})
+      union all select 'operator_authority_policies', count(*)::integer from operator_authority_policies where operator_id = any(${allOperatorIds})
+      union all select 'operator_primary_communications_suites', count(*)::integer from operator_primary_communications_suites where operator_id = any(${allOperatorIds})
+      union all select 'operator_morning_briefs', count(*)::integer from operator_morning_briefs where operator_id = any(${allOperatorIds})
+      union all select 'operator_morning_brief_items', count(*)::integer from operator_morning_brief_items where operator_id = any(${allOperatorIds})
+      union all select 'operator_relationship_evidence', count(*)::integer from operator_relationship_evidence where operator_id = any(${allOperatorIds})
+      union all select 'operator_relationship_corrections', count(*)::integer from operator_relationship_corrections where operator_id = any(${allOperatorIds})
+      union all select 'operator_relationship_candidates', count(*)::integer from operator_relationship_candidates where operator_id = any(${allOperatorIds})
+      union all select 'operator_relationship_records', count(*)::integer from operator_relationship_records where operator_id = any(${allOperatorIds})
+      union all select 'operator_founder_data_exports', count(*)::integer from operator_founder_data_exports where operator_id = any(${allOperatorIds})
+      union all select 'operator_ai_connections', count(*)::integer from operator_ai_connections where id = any(${aiConnectionIds})
+      union all select 'operator_calendar_connections', count(*)::integer from operator_calendar_connections where id = any(${calendarConnectionIds})
+      union all select 'operator_mail_connections', count(*)::integer from operator_mail_connections where id = any(${mailConnectionIds})
+      union all select 'operator_mail_sending_connections', count(*)::integer from operator_mail_sending_connections where id = any(${mailSendingConnectionIds})
+      union all select 'operator_runtimes', count(*)::integer from operator_runtimes where operator_id = any(${allOperatorIds})
+      union all select 'operator_preparations', count(*)::integer from operator_preparations where operator_id = any(${allOperatorIds})
+      union all select 'runner_credentials', count(*)::integer from runner_credentials where runner_id = any(${runnerIds})
+      union all select 'runner_provisioning_events', count(*)::integer from runner_provisioning_events where runner_id = any(${runnerIds})
+      union all select 'runners', count(*)::integer from runners where id = any(${runnerIds})
+      union all select 'founder_operator_restorations', count(*)::integer from founder_operator_restorations where user_id = any(${allUserIds})
+      union all select 'founder_external_beta_recordings', count(*)::integer from founder_external_beta_recordings where participant_user_id = any(${allUserIds})
+      union all select 'founder_external_beta_measurements', count(*)::integer from founder_external_beta_measurements where participant_user_id = any(${allUserIds})
+      union all select 'founder_external_beta_consent_receipts', count(*)::integer from founder_external_beta_consent_receipts where participant_user_id = any(${allUserIds})
+      union all select 'founder_external_beta_invitations', count(*)::integer from founder_external_beta_invitations where cohort_owner_user_id = any(${allUserIds}) or participant_user_id = any(${allUserIds})
+      union all select 'founder_general_release_activations', count(*)::integer from founder_general_release_activations where user_id = any(${allUserIds})
+      union all select 'founder_product_entitlements', count(*)::integer from founder_product_entitlements where user_id = any(${allUserIds})
+      union all select 'founder_commerce_lifecycle_receipts', count(*)::integer from founder_commerce_lifecycle_receipts where user_id = any(${allUserIds})
+      union all select 'founder_infrastructure_retirements', count(*)::integer from founder_infrastructure_retirements where user_id = any(${allUserIds})
+      union all select 'founder_commerce_events', count(*)::integer from founder_commerce_events where user_id = any(${allUserIds})
+      union all select 'founder_checkout_correlations', count(*)::integer from founder_checkout_correlations where user_id = any(${allUserIds})
+      union all select 'founder_recovery_archive_deletion_receipts', count(*)::integer from founder_recovery_archive_deletion_receipts where user_id = any(${allUserIds})
+      union all select 'founder_recovery_archives', count(*)::integer from founder_recovery_archives where user_id = any(${allUserIds})
+      union all select 'founder_release_decisions', count(*)::integer from founder_release_decisions where user_id = any(${allUserIds})
+      union all select 'operators', count(*)::integer from operators where id = any(${allOperatorIds})
+      union all select 'users', count(*)::integer from users where id = any(${allUserIds})
+      union all select 'app_metadata', count(*)::integer from app_metadata where key = 'founder_owner_preview_owner_user_id:v1' and value = any(${allUserIds})
+    ) cleanup where remaining <> 0`;
+    expect(remainingRows, "Founder Product Contract teardown left fixture-owned rows.").toEqual([]);
   });
 }
 
@@ -322,7 +440,7 @@ export async function assertPersistedFounderLifecycleAuthority(
     expect(authority).toMatchObject({
       release_decisions: 3,
       release_decision_outcomes: ["enter", "hold", "resume"],
-      scenario_executions: 6,
+      scenario_executions: 7,
       commerce_events: 2,
       terminal_entitlements: 1,
       consumed_correlations: 1,

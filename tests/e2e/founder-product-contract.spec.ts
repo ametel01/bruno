@@ -14,7 +14,24 @@ test("Operator UI remains usable across the required browser matrix", async ({ p
   );
   const fixture = await createFounderProductContractFixture(clock);
   const pageErrors: string[] = [];
+  const connectionGets: string[] = [];
+  const connectionPosts: unknown[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("request", (outgoingRequest) => {
+    const outgoingUrl = new URL(outgoingRequest.url());
+    if (
+      outgoingRequest.method() === "GET" &&
+      outgoingUrl.pathname === "/api/operator/connections"
+    ) {
+      connectionGets.push(outgoingUrl.searchParams.get("provider") ?? "");
+    }
+    if (
+      outgoingRequest.method() === "POST" &&
+      outgoingUrl.pathname === "/api/operator/connections"
+    ) {
+      connectionPosts.push(outgoingRequest.postDataJSON());
+    }
+  });
 
   try {
     await withPinnedFounderDevelopmentUser(fixture.userId, async () => {
@@ -23,16 +40,30 @@ test("Operator UI remains usable across the required browser matrix", async ({ p
       expect(apiResponse.headers()["cache-control"]).toBe("no-store");
       const apiBody = (await apiResponse.json()) as { operator: { id: string } };
       expect(apiBody.operator.id).toBe(fixture.operatorId);
+      const eligibility = await request.post("/api/operator/general-release", {
+        data: {
+          action: "confirm_eligibility",
+          serviceBusinessConfirmed: true,
+          geographyCode: "PH",
+        },
+      });
+      expect(eligibility.status()).toBe(200);
 
       await page.goto("/operator");
       await expect(page.getByRole("heading", { name: "Bruno.Ai Operator" })).toBeVisible();
       await expect(page.getByText("Your Operator is ready.")).toBeVisible();
-      await expect(page.getByText("Next step: Connect your Ready AI Connection")).toBeVisible();
-      await expect(page.getByRole("heading", { name: "Owner Preview" })).toBeVisible();
-      await expect(page.getByText("Available now: OpenAI and Calendar reading.")).toBeVisible();
-      await expect(page.getByText(/Core Operation/)).toHaveCount(0);
+      await expect(page.getByText("Next step: Confirm Processing Consent")).toBeVisible();
+      const ownerPreview = page.getByRole("region", { name: "Owner Preview" });
+      await expect(ownerPreview.getByRole("heading", { name: "Owner Preview" })).toBeVisible();
+      await expect(
+        ownerPreview.getByText("Available now: OpenAI and Calendar reading."),
+      ).toBeVisible();
+      await expect(ownerPreview.getByText(/Gmail|Anthropic|Core Operation/)).toHaveCount(0);
       await expect(page.getByText(/Support is fully attended/)).toBeVisible();
       await expect(page.getByText(/never promotes Bruno automatically/)).toBeVisible();
+      await expect(page.getByRole("heading", { name: "OpenAI is ready" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Connect Anthropic" })).toBeVisible();
+      expect(connectionGets).toEqual(expect.arrayContaining(["openai", "anthropic"]));
 
       const forbiddenTechnicalControl =
         /agent template|manage api keys?|connect telegram|numeric allowlist|cron expression|runner management|deployment configuration|view raw logs?|open terminal/i;
@@ -52,6 +83,11 @@ test("Operator UI remains usable across the required browser matrix", async ({ p
         .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
         .analyze();
       expect(accessibility.violations).toEqual([]);
+
+      await page.getByRole("button", { name: "Connect Anthropic" }).click();
+      await expect
+        .poll(() => connectionPosts)
+        .toEqual(expect.arrayContaining([{ action: "start", provider: "anthropic" }]));
 
       const externalBeta = await prepareFounderExternalBetaBrowserFixture(fixture, {
         runId: `${process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID ?? "browser"}:${test.info().project.name}`,

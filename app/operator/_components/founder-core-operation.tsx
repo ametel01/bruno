@@ -8,7 +8,7 @@ import { FounderMorningBriefSettings } from "./founder-morning-brief-settings";
 import { FounderProposedActionCard } from "./founder-proposed-action";
 import { FounderRecoveryStatus } from "./founder-recovery-status";
 
-export function FounderCoreOperation() {
+export function FounderCoreOperation({ readOnly = false }: { readOnly?: boolean } = {}) {
   const [operation, setOperation] = useState<FounderCoreOperationDto | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -164,7 +164,7 @@ export function FounderCoreOperation() {
               ))}
             </ul>
           ) : null}
-          <FounderMorningBriefSettings />
+          {!readOnly ? <FounderMorningBriefSettings /> : null}
           {!activated ? (
             <button
               className={styles.button}
@@ -176,7 +176,9 @@ export function FounderCoreOperation() {
             </button>
           ) : (
             <p className={styles.activated} role="status">
-              Founder Activation recorded. Conversation is your current workspace.
+              {readOnly
+                ? "Founder Activation recorded. This first brief remains available while new Operator work is paused for your purchase decision."
+                : "Founder Activation recorded. Conversation is your current workspace."}
             </p>
           )}
         </article>
@@ -185,10 +187,10 @@ export function FounderCoreOperation() {
           Bruno is waiting for Current evidence from both Calendar and Mail.
         </p>
       ) : null}
-      {operation.actionPreview ? (
+      {!readOnly && operation.actionPreview ? (
         <FounderActionPreviewCard preview={operation.actionPreview} compact />
       ) : null}
-      {operation.proposedAction ? (
+      {!readOnly && operation.proposedAction ? (
         <FounderProposedActionCard
           action={operation.proposedAction}
           compact

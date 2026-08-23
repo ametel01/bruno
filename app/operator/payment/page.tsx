@@ -1,5 +1,6 @@
 import { FounderOperatorShell } from "@/app/operator/_components/founder-operator-shell";
 import { getFounderCommerceStatusForUser } from "@/src/server/commerce/founder-commerce";
+import { getFounderGeneralReleaseActivationForUser } from "@/src/server/founder-product-contract/initial-general-release";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import { FounderPaymentStatus } from "./founder-payment-status";
 
@@ -17,10 +18,13 @@ export default async function FounderPaymentPage() {
       </FounderOperatorShell>
     );
   }
-  const status = await getFounderCommerceStatusForUser(applicationUser.userId);
+  const [status, generalRelease] = await Promise.all([
+    getFounderCommerceStatusForUser(applicationUser.userId),
+    getFounderGeneralReleaseActivationForUser(applicationUser.userId),
+  ]);
   return (
     <FounderOperatorShell>
-      <FounderPaymentStatus initialStatus={status} />
+      <FounderPaymentStatus initialStatus={status} generalRelease={generalRelease} />
     </FounderOperatorShell>
   );
 }

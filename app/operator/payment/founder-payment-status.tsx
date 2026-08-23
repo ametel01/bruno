@@ -2,12 +2,15 @@
 
 import { useEffect, useState } from "react";
 import type { FounderCommerceStatusDto } from "@/src/server/commerce/founder-commerce";
+import type { FounderGeneralReleaseActivationDto } from "@/src/server/founder-product-contract/initial-general-release";
 import styles from "./payment.module.css";
 
 export function FounderPaymentStatus({
   initialStatus,
+  generalRelease,
 }: {
   initialStatus: FounderCommerceStatusDto;
+  generalRelease?: FounderGeneralReleaseActivationDto;
 }) {
   const [status, setStatus] = useState(initialStatus);
 
@@ -38,13 +41,35 @@ export function FounderPaymentStatus({
   }, [status.state]);
 
   if (status.state === "not_started") {
+    if (!generalRelease?.offer.available || !generalRelease.offer.priceLabel) {
+      return (
+        <section className={styles.card} aria-labelledby="payment-title">
+          <p className={styles.eyebrow}>Bruno.Ai subscription</p>
+          <h2 id="payment-title">The paid offer is not available yet</h2>
+          <p>
+            Open your first evidence-backed Founder Morning Brief before reviewing checkout. Signup,
+            connections, setup waiting, and the first brief are free.
+          </p>
+          <a className={styles.primary} href="/operator">
+            Return to setup
+          </a>
+        </section>
+      );
+    }
     return (
       <section className={styles.card} aria-labelledby="payment-title">
         <p className={styles.eyebrow}>Bruno.Ai subscription</p>
         <h2 id="payment-title">Continue with paid access</h2>
         <p>
+          <strong>{generalRelease.offer.priceLabel}</strong>
+        </p>
+        <p>
           Bruno.Ai is billed separately from your OpenAI or Anthropic plan. Checkout, receipts, tax,
           and refunds are handled securely by Lemon Squeezy.
+        </p>
+        <p className={styles.muted}>
+          Your first brief is free. There is no permanent free tier, secret beta price, or automatic
+          beta conversion.
         </p>
         <form action="/api/operator/commerce/checkout" method="post">
           <button className={styles.primary} type="submit">

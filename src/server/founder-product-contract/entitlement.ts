@@ -343,11 +343,11 @@ export async function requireOperationalEntitlement(
   }
 }
 
-export async function requireRetirementDue(
+export async function findProductEntitlementRetirementDue(
   tx: Transaction,
   userId: string,
   now: Date,
-): Promise<Date> {
+): Promise<Date | null> {
   const [entitlement] = await tx
     .select({ retirementDueAt: founderProductEntitlements.retirementDueAt })
     .from(founderProductEntitlements)
@@ -365,7 +365,12 @@ export async function requireRetirementDue(
       ),
     )
     .limit(1);
-  if (entitlement?.retirementDueAt) return entitlement.retirementDueAt;
+  if (entitlement) {
+    if (!entitlement.retirementDueAt) {
+      throw new Error("Product Entitlement retirement deadline is unavailable.");
+    }
+    return entitlement.retirementDueAt;
+  }
   const [externalBeta] = await tx
     .select({ retirementDueAt: founderExternalBetaInvitations.retirementDueAt })
     .from(founderExternalBetaInvitations)
@@ -376,10 +381,7 @@ export async function requireRetirementDue(
       ),
     )
     .limit(1);
-  if (!externalBeta?.retirementDueAt) {
-    throw new Error("Infrastructure Retirement is not due.");
-  }
-  return externalBeta.retirementDueAt;
+  return externalBeta?.retirementDueAt ?? null;
 }
 
 async function consumeOrVerifyCheckoutCorrelation(

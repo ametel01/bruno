@@ -15,6 +15,11 @@ import {
   executeFounderInfrastructureRetirement,
   type FounderInfrastructureRetirementProvider,
 } from "@/src/server/founder-product-contract/infrastructure-retirement";
+import {
+  findNextFounderGeneralReleaseDeadlineUser,
+  findNextFounderGeneralReleaseRetirementUser,
+  reconcileFounderGeneralReleaseDeadlineForUser,
+} from "@/src/server/founder-product-contract/initial-general-release";
 import { lockFounderProductContractLifecycleInTransaction } from "@/src/server/founder-product-contract/operator-authority";
 import {
   executeFounderReturningRestoration,
@@ -45,6 +50,7 @@ export type FounderCommerceReconciliationResult = {
     | "idle"
     | "receipt_applied"
     | "receipt_pending"
+    | "general_release_deadline_reconciled"
     | "restoration_completed"
     | "restoration_refunded"
     | "refund_confirmed"
@@ -105,6 +111,36 @@ export async function reconcileNextFounderCommerce(input: {
         processed: 1,
         outcome: confirmed ? "refund_confirmed" : "refund_retrying",
       };
+    }
+
+    const deadlineUser = await findNextFounderGeneralReleaseDeadlineUser(input.now, connection);
+    if (deadlineUser) {
+      await reconcileFounderGeneralReleaseDeadlineForUser(deadlineUser, input.now, {
+        createConnection: () => connection,
+      });
+      return { processed: 1, outcome: "general_release_deadline_reconciled" };
+    }
+
+    const generalReleaseRetirementUser = await findNextFounderGeneralReleaseRetirementUser(
+      input.now,
+      connection,
+    );
+    if (generalReleaseRetirementUser) {
+      try {
+        await executeFounderInfrastructureRetirement(
+          {
+            action: "infrastructure_retirement",
+            runId: `general-release:${generalReleaseRetirementUser}`,
+            userId: generalReleaseRetirementUser,
+            now: input.now,
+          },
+          { providers: input.retirementProvider, applicationRevision: input.applicationRevision },
+          connection,
+        );
+        return { processed: 1, outcome: "retirement_completed" };
+      } catch {
+        return { processed: 1, outcome: "retirement_retrying" };
+      }
     }
 
     const [retirement] = await connection.db

@@ -53,6 +53,7 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
 
         for (const id of [
           "release_stage_admission",
+          "initial_general_release_activation",
           "external_beta_cohort_lifecycle",
           "product_entitlement_lifecycle",
           "subscription_lifecycle",
@@ -165,6 +166,17 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
                   evidenceClassification: string;
                   founderAcceptanceEligible: boolean;
                 };
+                initialGeneralRelease?: {
+                  abandonedSetupCreatedNoDroplet: boolean;
+                  explicitCreateRequired: boolean;
+                  exactActivationWindow: boolean;
+                  prematureCheckoutBlocked: boolean;
+                  firstEvidenceBackedBriefActivated: boolean;
+                  acceptedPurchaseAvailable: boolean;
+                  declinedPurchaseRetirementDue: boolean;
+                  timedOutPurchaseRetirementDue: boolean;
+                  cleanupDelegatedToInfrastructureRetirement: boolean;
+                };
                 cleanup: {
                   resourcesBefore: number;
                   resourcesAfter: number;
@@ -188,6 +200,31 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
               };
             };
             expect(body.outcome.providerCalls.length).toBeGreaterThan(0);
+            if (id === "initial_general_release_activation") {
+              expect(body.outcome.initialGeneralRelease).toEqual({
+                abandonedSetupCreatedNoDroplet: true,
+                explicitCreateRequired: true,
+                exactActivationWindow: true,
+                prematureCheckoutBlocked: true,
+                firstEvidenceBackedBriefActivated: true,
+                acceptedPurchaseAvailable: true,
+                declinedPurchaseRetirementDue: true,
+                timedOutPurchaseRetirementDue: true,
+                cleanupDelegatedToInfrastructureRetirement: true,
+              });
+              const publicStatus = await application.request({
+                method: "GET",
+                path: "/api/operator/general-release",
+              });
+              expect(publicStatus.status).toBe(200);
+              const generalRelease = await expectGeneralReleaseState(publicStatus, "activated");
+              expect(generalRelease.offer).toMatchObject({
+                available: true,
+                brunoPriceSeparateFromAiProviderCosts: true,
+                freeTier: false,
+                betaConversion: false,
+              });
+            }
             if (id === "release_stage_admission") {
               expect(body.outcome.providerCalls).toEqual(
                 expect.arrayContaining(["archive.encrypt", "archive.store", "archive.restore"]),
@@ -407,8 +444,20 @@ test("one persisted lifecycle producer emits the exact-run ledger", async ({ req
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
     expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
+    expect.objectContaining({ status: "passed", attempts: 1, cleanup_verified: true }),
   ]);
 });
+
+async function expectGeneralReleaseState(
+  response: { json(): Promise<unknown> },
+  state: string,
+): Promise<{ state?: unknown; offer?: Record<string, unknown> }> {
+  const body = (await response.json()) as {
+    generalRelease?: { state?: unknown; offer?: Record<string, unknown> };
+  };
+  expect(body.generalRelease).toMatchObject({ state });
+  return body.generalRelease ?? {};
+}
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  founderGeneralReleaseActivations,
   operatorActionPreviews,
   operatorAiConnections,
   operatorConversationMessages,
@@ -309,6 +310,81 @@ describe("Founder Conversation application seam", () => {
     });
     expect(anthropic?.id).toBeTruthy();
     expect(operator.id).toBeTruthy();
+  });
+
+  it("routes public General Release work through a released Anthropic-only connection", async () => {
+    const operator = await ensureFounderOperatorForUser(OWNER_ID, {
+      createConnection: () => connection,
+      now: () => now,
+    });
+    await connection.db.insert(operatorAiConnections).values({
+      operatorId: operator.id,
+      provider: "anthropic",
+      providerSubjectId: "anthropic-general-release",
+      accountLabel: "founder@anthropic.example",
+      status: "ready",
+      authorizationState: "authorized",
+      capacityState: "available",
+      inferenceState: "passed",
+      eligibleAccount: true,
+      billingVerified: true,
+      privacyAccepted: true,
+      retentionBounded: true,
+      thirdPartyPermissionGranted: true,
+      credentialHealthy: true,
+      reconnectSupported: true,
+      productionUseApproved: true,
+      processingConsentActive: true,
+      authorizationPersisted: true,
+      approvedModelAssignment: "anthropic-claude",
+      authorizedAt: now,
+      lastVerifiedAt: now,
+    });
+    await connection.db.insert(founderGeneralReleaseActivations).values({
+      userId: OWNER_ID,
+      operatorId: operator.id,
+      status: "setup",
+      serviceBusinessConfirmedAt: now,
+      geographyCode: "PH",
+      admissionState: "eligible",
+      admissionReason: "Public capacity is available in this geography.",
+      publishedPriceLabel: "$30/month",
+      capacityObservedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    let anthropicCalls = 0;
+    const sent = await sendFounderConversationMessageForUser(
+      OWNER_ID,
+      "Use my selected General Release provider",
+      {
+        createConnection: () => connection,
+        requireOwnerPreviewAccess: allowOwnerPreviewWork,
+        adapters: {
+          anthropic: {
+            async send() {
+              anthropicCalls += 1;
+              return { ok: true, response: "Handled by Anthropic." };
+            },
+          },
+        },
+        routingPolicy: MULTI_PROVIDER_POLICY,
+        requestId: "request-general-release-anthropic",
+        now: () => now,
+        requireReadyConnection: async () => ({
+          provider: "anthropic" as const,
+          status: "ready" as const,
+          accountLabel: "founder@anthropic.example",
+          connectedAt: now.toISOString(),
+          lastVerifiedAt: now.toISOString(),
+          workState: "available" as const,
+          recoveryMessage: null,
+          receipt: null,
+        }),
+      },
+    );
+    expect(sent.activeWork).toMatchObject({ provider: "anthropic", state: "completed" });
+    expect(anthropicCalls).toBe(1);
   });
 
   it("keeps a paused Owner Preview checkpoint from failing over to hidden Anthropic", async () => {
