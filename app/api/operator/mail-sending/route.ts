@@ -1,9 +1,11 @@
-import { isFounderGoogleMailSendingReleased } from "@/src/server/operators/founder-google-mail-sending-release";
+import { requireFounderOperatorWorkspaceAccess } from "@/app/api/operator/_shared/owner-preview-access";
+import { hasFounderGeneralReleaseSetupAccessForUser } from "@/src/server/founder-product-contract/initial-general-release";
 import {
   disconnectFounderGoogleMailSendingForUser,
   FounderMailSendingConnectionError,
   getFounderGoogleMailSendingConnectionForUser,
   getFounderGoogleMailSendingOfferForUser,
+  isFounderGoogleMailSendingReleased,
   startFounderGoogleMailSendingAuthorizationForUser,
   verifyFounderGoogleMailSendingForUser,
 } from "@/src/server/operators/founder-mail-sending-connection";
@@ -18,6 +20,7 @@ type Dependencies = {
   verifyConnection?: typeof verifyFounderGoogleMailSendingForUser;
   disconnectConnection?: typeof disconnectFounderGoogleMailSendingForUser;
   isMailSendingReleased?: () => boolean;
+  hasGeneralReleaseSetupAccess?: typeof hasFounderGeneralReleaseSetupAccessForUser;
 };
 
 export const dynamic = "force-dynamic";
@@ -27,6 +30,8 @@ export async function GET(_request: Request, _context?: unknown, dependencies: D
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!user.ok) return authenticationResponse(user.status);
+  const accessError = await requireMailSendingSetupAccess(user.userId, dependencies);
+  if (accessError) return accessError;
   if (!(dependencies.isMailSendingReleased ?? isFounderGoogleMailSendingReleased)()) {
     return providerNotReleasedResponse();
   }
@@ -50,20 +55,22 @@ export async function POST(request: Request, _context?: unknown, dependencies: D
   }
   const action = isRecord(payload) && typeof payload.action === "string" ? payload.action : null;
   try {
-    if (
-      action !== "disconnect" &&
-      !(dependencies.isMailSendingReleased ?? isFounderGoogleMailSendingReleased)()
-    ) {
-      return providerNotReleasedResponse();
+    if (action !== "disconnect") {
+      const accessError = await requireMailSendingSetupAccess(user.userId, dependencies);
+      if (accessError) return accessError;
+      if (!(dependencies.isMailSendingReleased ?? isFounderGoogleMailSendingReleased)()) {
+        return providerNotReleasedResponse();
+      }
     }
-    if (action === "start")
+    if (action === "start") {
       return Response.json(
         await (
           dependencies.startAuthorization ?? startFounderGoogleMailSendingAuthorizationForUser
         )(user.userId),
         { headers: noStoreHeaders() },
       );
-    if (action === "verify")
+    }
+    if (action === "verify") {
       return Response.json(
         {
           connection: await (
@@ -72,15 +79,18 @@ export async function POST(request: Request, _context?: unknown, dependencies: D
         },
         { headers: noStoreHeaders() },
       );
-    if (action === "disconnect")
-      return Response.json(
-        {
-          connection: await (
-            dependencies.disconnectConnection ?? disconnectFounderGoogleMailSendingForUser
-          )(user.userId),
-        },
-        { headers: noStoreHeaders() },
-      );
+    }
+    if (action !== "disconnect") {
+      return validationResponse("Choose a supported Mail Sending action.");
+    }
+    return Response.json(
+      {
+        connection: await (
+          dependencies.disconnectConnection ?? disconnectFounderGoogleMailSendingForUser
+        )(user.userId),
+      },
+      { headers: noStoreHeaders() },
+    );
   } catch (error) {
     if (error instanceof FounderMailSendingConnectionError)
       return Response.json(
@@ -89,7 +99,23 @@ export async function POST(request: Request, _context?: unknown, dependencies: D
       );
     throw error;
   }
-  return validationResponse("Choose a supported Mail Sending action.");
+}
+
+async function requireMailSendingSetupAccess(
+  userId: string,
+  dependencies: Dependencies,
+): Promise<Response | null> {
+  const hasSetupAccess =
+    dependencies.hasGeneralReleaseSetupAccess ?? hasFounderGeneralReleaseSetupAccessForUser;
+  if (!(await hasSetupAccess(userId, {}, ["gmail_sending"]))) {
+    return ownerPreviewUnavailableResponse();
+  }
+  return requireFounderOperatorWorkspaceAccess(userId, ["gmail_sending"], {
+    allowGeneralReleaseSetup: true,
+    ...(dependencies.hasGeneralReleaseSetupAccess
+      ? { hasGeneralReleaseSetupAccess: dependencies.hasGeneralReleaseSetupAccess }
+      : {}),
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -115,12 +141,23 @@ function validationResponse(message: string) {
     { status: 400, headers: noStoreHeaders() },
   );
 }
+function ownerPreviewUnavailableResponse() {
+  return Response.json(
+    {
+      error: {
+        code: "owner_preview_capability_unavailable",
+        message: "Gmail sending is unavailable during Owner Preview.",
+      },
+    },
+    { status: 409, headers: noStoreHeaders() },
+  );
+}
 function providerNotReleasedResponse() {
   return Response.json(
     {
       error: {
         code: "mail_sending_not_released",
-        message: "Gmail sending is not available in this Bruno release.",
+        message: "Gmail sending is unavailable until current Connected Acceptance passes.",
       },
     },
     { status: 409, headers: noStoreHeaders() },

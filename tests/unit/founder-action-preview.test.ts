@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  operatorActionPreviewRevisions,
+  operatorActionPreviews,
+  users,
+} from "@/src/server/db/schema";
+import {
   editFounderActionPreviewForUser,
   getFounderActionPreviewForUser,
 } from "@/src/server/operators/founder-action-previews";
-import { users } from "@/src/server/db/schema";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 
 const OWNER_ID = "00000000-0000-4000-8000-000000003461";
 const OTHER_OWNER_ID = "00000000-0000-4000-8000-000000003462";
@@ -25,14 +30,13 @@ describe("Founder Action Preview application seam", () => {
   });
 
   it("keeps one identity, appends a new draft revision, and never exposes authority", async () => {
-    const initial = await getFounderActionPreviewForUser(OWNER_ID, {
-      createConnection: () => connection,
-      now: () => now,
-      randomUUID: () => "00000000-0000-4000-8000-000000003463",
-    });
-    expect(initial.current).toMatchObject({ revision: 1, state: "draft" });
-    expect(initial.authority).toBe("none");
-    expect(initial.executable).toBe(false);
+    await expect(
+      getFounderActionPreviewForUser(OWNER_ID, { createConnection: () => connection }),
+    ).resolves.toBeNull();
+    await expect(connection.db.select().from(operatorActionPreviews)).resolves.toHaveLength(0);
+    await expect(connection.db.select().from(operatorActionPreviewRevisions)).resolves.toHaveLength(
+      0,
+    );
 
     const edited = await editFounderActionPreviewForUser(
       OWNER_ID,
@@ -43,32 +47,81 @@ describe("Founder Action Preview application seam", () => {
         supportingEvidence: [{ label: "Calendar", detail: "Planning call on 19 August." }],
         expectedExternalEffect: "A message would be prepared for review; nothing is sent.",
       },
-      { createConnection: () => connection, now: () => now },
+      {
+        createConnection: () => connection,
+        now: () => now,
+        requireReleaseStageAccess: async () => undefined,
+      },
     );
 
-    expect(edited.id).toBe(initial.id);
+    expect(edited.authority).toBe("none");
+    expect(edited.executable).toBe(false);
     expect(edited.current).toMatchObject({
       revision: 2,
       state: "draft",
       recipient: { name: "Ada Lovelace", address: "ada@example.com" },
     });
     expect(edited.history.map((revision) => revision.revision)).toEqual([2, 1]);
-    expect(edited.history[1]?.content).toBe(initial.current.content);
     await expect(
       getFounderActionPreviewForUser(OWNER_ID, { createConnection: () => connection }),
     ).resolves.toEqual(edited);
   });
 
   it("isolates the canonical preview identity by Founder owner", async () => {
-    const first = await getFounderActionPreviewForUser(OWNER_ID, {
+    const draft = {
+      recipientName: "Ada Lovelace",
+      recipientAddress: "ada@example.com",
+      content: "Following up.",
+      supportingEvidence: [{ label: "Calendar", detail: "Planning call." }],
+      expectedExternalEffect: "Nothing is sent.",
+    };
+    const first = await editFounderActionPreviewForUser(OWNER_ID, draft, {
       createConnection: () => connection,
       now: () => now,
+      requireReleaseStageAccess: async () => undefined,
     });
-    const second = await getFounderActionPreviewForUser(OTHER_OWNER_ID, {
+    const second = await editFounderActionPreviewForUser(OTHER_OWNER_ID, draft, {
       createConnection: () => connection,
       now: () => now,
+      requireReleaseStageAccess: async () => undefined,
     });
     expect(second.id).not.toBe(first.id);
+  });
+
+  it("rejects an edit when protection expires before its transaction", async () => {
+    const expiredAt = new Date(now.getTime() + 24 * 60 * 60 * 1_000);
+    let current = now;
+    const guardedAt: Date[] = [];
+
+    await expect(
+      editFounderActionPreviewForUser(
+        OWNER_ID,
+        {
+          recipientName: "Ada Lovelace",
+          recipientAddress: "ada@example.com",
+          content: "Following up.",
+          supportingEvidence: [{ label: "Calendar", detail: "Planning call." }],
+          expectedExternalEffect: "Nothing is sent.",
+        },
+        {
+          createConnection: () => connection,
+          now: () => current,
+          requireReleaseStageAccessForUser: async () => {
+            current = expiredAt;
+          },
+          requireReleaseStageAccess: async (_tx, input) => {
+            guardedAt.push(input.now);
+            if (input.now >= expiredAt) throw new FounderReleaseStageAccessError();
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+
+    expect(guardedAt).toEqual([expiredAt]);
+    await expect(connection.db.select().from(operatorActionPreviews)).resolves.toHaveLength(0);
+    await expect(connection.db.select().from(operatorActionPreviewRevisions)).resolves.toHaveLength(
+      0,
+    );
   });
 });
 

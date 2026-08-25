@@ -7,35 +7,19 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: CI proves automated invariants; release also requires attended AT digests
+        description: Both modes require signed lifecycle evidence; release also requires attended AT digests
         required: true
         default: ci
         type: choice
         options:
           - ci
           - release
-      voiceover_evidence_digest:
-        description: Sanitized sha256 digest from attended VoiceOver on Safari evidence
+      voiceover_attended_summary_json:
+        description: Strict sanitized exact-candidate VoiceOver/Safari attended summary JSON
         required: false
         type: string
-      voiceover_os_version:
-        description: OS version used for the attended VoiceOver journey
-        required: false
-        type: string
-      voiceover_browser_version:
-        description: Safari version used for the attended VoiceOver journey
-        required: false
-        type: string
-      talkback_evidence_digest:
-        description: Sanitized sha256 digest from attended TalkBack on Chrome evidence
-        required: false
-        type: string
-      talkback_os_version:
-        description: OS version used for the attended TalkBack journey
-        required: false
-        type: string
-      talkback_browser_version:
-        description: Chrome version used for the attended TalkBack journey
+      talkback_attended_summary_json:
+        description: Strict sanitized exact-candidate TalkBack/Chrome attended summary JSON
         required: false
         type: string
       moderated_founder_summary_json:
@@ -43,17 +27,27 @@ on:
         required: false
         type: string
       provider_decision_summary_json:
-        description: Exact-revision provider outcomes and evidence digests
+        description: Exact-revision provider outcomes, clean-attempt metadata, and evidence digests
+        required: false
+        type: string
+      production_provider_qualification_summary_json:
+        description: Allowlisted attended Clerk and Lemon clean-attempt qualification summary; no source payloads
+        required: false
+        type: string
+      general_release_operational_summary_json:
+        description: Allowlisted exact-candidate clean-attempt operational, privacy, billing, recovery, and retirement evidence
         required: false
         type: string
 
 permissions:
+  actions: read
+  checks: write
   contents: read
   id-token: write
   attestations: write
 
 concurrency:
-  group: founder-product-contract-${{ github.ref }}
+  group: founder-product-contract-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -61,6 +55,7 @@ jobs:
     name: Exact-release Founder contract
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: ${{ inputs.mode == 'release' && 'runner-release-canary' || 'ci' }}
 
     services:
       postgres:
@@ -84,16 +79,19 @@ jobs:
       PORT: "3100"
       PLAYWRIGHT_BASE_URL: http://localhost:3100
       BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION: ${{ github.sha }}
-      BRUNO_FOUNDER_CONTRACT_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
+      BRUNO_FOUNDER_PROTECTED_RUNTIME_REVISION: ${{ vars.BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION }}
+      BRUNO_FOUNDER_CONTRACT_RUN_ID: github-${{ github.run_id }}
+      BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT: ${{ github.run_attempt }}
       BRUNO_FOUNDER_CONTRACT_MODE: ${{ inputs.mode || 'ci' }}
-      BRUNO_FOUNDER_CONTRACT_VOICEOVER_DIGEST: ${{ inputs.voiceover_evidence_digest }}
-      BRUNO_FOUNDER_CONTRACT_VOICEOVER_OS_VERSION: ${{ inputs.voiceover_os_version }}
-      BRUNO_FOUNDER_CONTRACT_VOICEOVER_BROWSER_VERSION: ${{ inputs.voiceover_browser_version }}
-      BRUNO_FOUNDER_CONTRACT_TALKBACK_DIGEST: ${{ inputs.talkback_evidence_digest }}
-      BRUNO_FOUNDER_CONTRACT_TALKBACK_OS_VERSION: ${{ inputs.talkback_os_version }}
-      BRUNO_FOUNDER_CONTRACT_TALKBACK_BROWSER_VERSION: ${{ inputs.talkback_browser_version }}
+      BRUNO_FOUNDER_CONTRACT_VOICEOVER_ATTENDED_SUMMARY_JSON: ${{ inputs.voiceover_attended_summary_json }}
+      BRUNO_FOUNDER_CONTRACT_TALKBACK_ATTENDED_SUMMARY_JSON: ${{ inputs.talkback_attended_summary_json }}
       BRUNO_FOUNDER_MODERATED_SUMMARY_JSON: ${{ inputs.moderated_founder_summary_json }}
       BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON: ${{ inputs.provider_decision_summary_json }}
+      BRUNO_FOUNDER_PRODUCTION_PROVIDER_QUALIFICATION_SUMMARY_JSON: ${{ inputs.production_provider_qualification_summary_json }}
+      BRUNO_FOUNDER_GENERAL_RELEASE_OPERATIONAL_SUMMARY_JSON: ${{ inputs.general_release_operational_summary_json }}
+      BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST: ${{ vars.BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST }}
+      BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST: ${{ vars.BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST }}
+      BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH: founder-contract-artifacts/scenario-ledger.json
 
     steps:
       - name: Check out exact release candidate
@@ -107,6 +105,32 @@ jobs:
       - name: Install frozen dependencies
         run: bun install --frozen-lockfile
 
+      - name: Require the exact release runtime revision
+        if: inputs.mode == 'release'
+        shell: bash
+        run: |
+          [[ "$BRUNO_FOUNDER_PROTECTED_RUNTIME_REVISION" =~ ^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$ ]]
+          [[ "$BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST" != "$BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST"
+          echo "BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION=$BRUNO_FOUNDER_PROTECTED_RUNTIME_REVISION" >> "$GITHUB_ENV"
+
+      - name: Bind the deterministic CI runtime revision
+        if: inputs.mode != 'release'
+        run: echo "BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION=founder-contract-v1" >> "$GITHUB_ENV"
+
+      - name: Reject previously failed exact candidate
+        env:
+          BRUNO_FOUNDER_CONTRACT_GITHUB_TOKEN: ${{ github.token }}
+        run: bun scripts/check-founder-product-contract-candidate-history.ts
+
+      - name: Create the durable protected release candidate control
+        id: release_candidate_control
+        if: inputs.mode == 'release'
+        env:
+          BRUNO_FOUNDER_CONTRACT_GITHUB_TOKEN: ${{ github.token }}
+        run: bun scripts/founder-product-contract-candidate-control.ts create
+
       - name: Install exact browser engines
         run: bunx playwright install --with-deps chromium firefox webkit
 
@@ -116,8 +140,19 @@ jobs:
       - name: Bind the observation time
         run: echo "BRUNO_FOUNDER_CONTRACT_OBSERVED_AT=$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" >> "$GITHUB_ENV"
 
-      - name: Run all-or-nothing Founder Product Contract
+      - name: Run all-or-nothing Founder Product Contract (release)
+        if: inputs.mode == 'release'
+        env:
+          BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: ${{ secrets.BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET }}
         run: bun run founder:contract
+
+      - name: Run all-or-nothing Founder Product Contract (ci)
+        if: inputs.mode != 'release'
+        shell: bash
+        run: |
+          ci_signing_secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$ci_signing_secret"
+          BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET="$ci_signing_secret" bun run founder:contract
 
       - name: Attest the allowlisted exact-release summary
         uses: actions/attest-build-provenance@v2
@@ -135,3 +170,13 @@ jobs:
             founder-contract-artifacts/founder-initial-general-release-decision.json
           if-no-files-found: error
           retention-days: 90
+
+      - name: Finalize and enforce the durable release candidate control
+        if: always() && inputs.mode == 'release'
+        env:
+          BRUNO_FOUNDER_CANDIDATE_CHECK_RUN_ID: ${{ steps.release_candidate_control.outputs.check_run_id }}
+          BRUNO_FOUNDER_CONTRACT_GITHUB_TOKEN: ${{ github.token }}
+          BRUNO_FOUNDER_PRIOR_JOB_STATUS: ${{ job.status }}
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
+          BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION: ${{ env.BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION }}
+        run: bun scripts/founder-product-contract-candidate-control.ts finalize

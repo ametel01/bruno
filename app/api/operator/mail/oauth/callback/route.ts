@@ -1,38 +1,55 @@
-import { redirect } from "next/navigation";
-import { isFounderGoogleMailReadingReleased } from "@/src/server/operators/founder-google-reading-release";
 import {
   completeFounderGoogleMailAuthorizationForState,
   denyFounderGoogleMailAuthorizationForState,
   FounderMailConnectionError,
+  isFounderGoogleMailReadingReleased,
 } from "@/src/server/operators/founder-mail-connection";
+
+type Dependencies = {
+  completeAuthorization?: typeof completeFounderGoogleMailAuthorizationForState;
+  denyAuthorization?: typeof denyFounderGoogleMailAuthorizationForState;
+  isMailReadingReleased?: () => boolean;
+};
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request): Promise<Response> {
+export async function GET(
+  request: Request,
+  _context?: unknown,
+  dependencies: Dependencies = {},
+): Promise<Response> {
   const url = new URL(request.url);
   const state = url.searchParams.get("state") ?? "";
-  const code = url.searchParams.get("code") ?? "";
-  const providerError = url.searchParams.get("error");
-  if (providerError) {
-    await denyFounderGoogleMailAuthorizationForState(state);
-    return redirect("/operator?mail=authorization_denied#mail");
+  if (url.searchParams.get("error")) {
+    try {
+      await (dependencies.denyAuthorization ?? denyFounderGoogleMailAuthorizationForState)(state);
+    } catch (error) {
+      if (error instanceof FounderMailConnectionError)
+        return redirectToOperator(request, error.code);
+      throw error;
+    }
+    return redirectToOperator(request, "authorization_denied");
   }
-  if (!isFounderGoogleMailReadingReleased()) {
-    return redirect("/operator?mail=mail_reading_not_released#mail");
+  if (!(dependencies.isMailReadingReleased ?? isFounderGoogleMailReadingReleased)()) {
+    return redirectToOperator(request, "mail_reading_not_released");
   }
-
   try {
-    const connection = await completeFounderGoogleMailAuthorizationForState(state, code);
-    return redirect(
-      connection.status === "selecting"
-        ? "/operator?mail=connected#mail"
-        : "/operator?mail=needs_attention#mail",
+    const connection = await (
+      dependencies.completeAuthorization ?? completeFounderGoogleMailAuthorizationForState
+    )(state, url.searchParams.get("code") ?? "");
+    return redirectToOperator(
+      request,
+      connection.status === "selecting" ? "connected" : "needs_attention",
     );
   } catch (error) {
-    if (error instanceof FounderMailConnectionError) {
-      const query = encodeURIComponent(error.code);
-      return redirect(`/operator?mail=${query}#mail`);
-    }
+    if (error instanceof FounderMailConnectionError) return redirectToOperator(request, error.code);
     throw error;
   }
+}
+
+function redirectToOperator(request: Request, outcome: string): Response {
+  const destination = new URL("/operator", request.url);
+  destination.searchParams.set("mail", outcome);
+  destination.hash = "mail";
+  return Response.redirect(destination, 303);
 }

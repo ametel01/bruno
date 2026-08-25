@@ -1,3 +1,8 @@
+import {
+  founderOperatorAccessErrorResponse,
+  requireFounderOperatorWorkspaceAccess,
+} from "@/app/api/operator/_shared/owner-preview-access";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
 import { FounderExternalActionPauseError } from "@/src/server/operators/founder-ai-work";
 import {
   executeFounderApprovedGmailActionForUser,
@@ -24,6 +29,12 @@ export async function POST(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.mailSending,
+    { allowGeneralReleaseSetup: true },
+  );
+  if (accessFailure) return accessFailure;
   const { actionId } = await context.params;
   if (!actionId) return validationResponse("Proposed Action ID is required.");
   let payload: unknown;
@@ -46,6 +57,8 @@ export async function POST(
     );
     return Response.json(result, { headers: noStoreHeaders() });
   } catch (error) {
+    const accessResponse = founderOperatorAccessErrorResponse(error);
+    if (accessResponse) return accessResponse;
     if (error instanceof FounderMailExecutionError) {
       return Response.json(
         { error: { code: error.code, message: error.message } },

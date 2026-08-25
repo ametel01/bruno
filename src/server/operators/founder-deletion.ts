@@ -1,43 +1,69 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type * as schema from "@/src/server/db/schema";
-import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  type FounderAccountClosureCommerceObservation,
+  reconcileFounderAccountClosureCommerceCancellation,
+} from "@/src/server/commerce/founder-account-closure-commerce";
+import {
+  closePendingFounderCheckoutCorrelationsForAccountClosureInTransaction,
+  FOUNDER_COMMERCE_WEBHOOK_INTAKE_PENDING_CODE,
+  lockFounderCommerceWebhookIntakeInTransaction,
+} from "@/src/server/commerce/founder-account-closure-fence";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
+import {
+  founderCheckoutCorrelations,
+  founderCommerceEvents,
+  founderCommerceLifecycleReceipts,
+  founderProductEntitlements,
   operatorActionPreviewRevisions,
   operatorActionPreviews,
   operatorAiConnections,
   operatorCalendarConnections,
+  operatorConversationMessages,
+  operatorConversations,
+  operatorConversationWorks,
   operatorDeletionBackupExpiries,
+  operatorDeletionCommerceCancellations,
   operatorDeletionReceipts,
   operatorDeletionRequests,
   operatorDeletionRevocations,
   operatorDeletionTombstones,
   operatorFounderActivations,
   operatorFounderDataExports,
-  operatorMorningBriefItems,
-  operatorMorningBriefs,
   operatorMailConnections,
   operatorMailSendingConnections,
-  operatorProposedActions,
+  operatorMorningBriefItems,
+  operatorMorningBriefs,
   operatorProcessingConsents,
+  operatorProposedActions,
   operatorRelationshipCandidates,
   operatorRelationshipCorrections,
   operatorRelationshipEvidence,
   operatorRelationshipRecords,
-  operatorConversationMessages,
-  operatorConversationWorks,
-  operatorConversations,
   operators,
 } from "@/src/server/db/schema";
 import {
+  revokeDeterministicFounderContractConnection,
+  revokeDeterministicFounderContractGoogleConnection,
+} from "@/src/server/founder-product-contract/deterministic-providers";
+import { lockFounderProductContractLifecycleInTransaction } from "@/src/server/founder-product-contract/operator-authority";
+import {
+  createHermesOpenAiAdapter,
   disconnectFounderAnthropicForUser,
   disconnectFounderOpenAiForUser,
 } from "@/src/server/operators/founder-ai-connection";
-import { disconnectFounderGoogleCalendarForUser } from "@/src/server/operators/founder-calendar-connection";
-import { disconnectFounderGoogleMailForUser } from "@/src/server/operators/founder-mail-connection";
+import {
+  createGoogleCalendarAdapter,
+  disconnectFounderGoogleCalendarForUser,
+} from "@/src/server/operators/founder-calendar-connection";
+import {
+  createGoogleMailAdapter,
+  disconnectFounderGoogleMailForUser,
+} from "@/src/server/operators/founder-mail-connection";
 import { disconnectFounderGoogleMailSendingForUser } from "@/src/server/operators/founder-mail-sending-connection";
 
 type DeletionTransaction = Parameters<
@@ -47,11 +73,13 @@ type DeletionTransaction = Parameters<
 export const FOUNDER_ACTIVE_PURGE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const FOUNDER_BACKUP_EXPIRY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 export const FOUNDER_REVOCATION_RETRY_MS = 60 * 60 * 1000;
+export const FOUNDER_REVOCATION_MAX_ATTEMPTS = 3;
 
 export type FounderDeletionKind = "retained_data" | "account_closure";
 export type FounderDeletionStage =
   | "requested"
   | "access_stopped"
+  | "commerce_cancellation"
   | "active_purge_complete"
   | "backup_expiry"
   | "revocation";
@@ -66,7 +94,14 @@ export type FounderDeletionDependencies = {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
   randomUUID?: () => string;
-  revokeConnections?: (userId: string) => Promise<FounderDeletionRevocationResult[]>;
+  revokeConnections?: (
+    userId: string,
+    connectionKinds?: readonly string[],
+  ) => Promise<FounderDeletionRevocationResult[]>;
+  cancelCommerce?: (providerSubscriptionId: string) => Promise<void>;
+  readCommerce?: (
+    providerSubscriptionId: string,
+  ) => Promise<FounderAccountClosureCommerceObservation>;
 };
 
 export type FounderDeletionReceipt = {
@@ -97,6 +132,26 @@ export type FounderDeletionReceipt = {
     lastAttemptAt: string | null;
     nextAttemptAt: string | null;
   }>;
+  commerceCancellation: {
+    provider: "lemon_squeezy";
+    providerSubscriptionId: string;
+    status: "pending" | "succeeded" | "failed";
+    attemptCount: number;
+    lastAttemptAt: string | null;
+    confirmedAt: string | null;
+    errorCode: string | null;
+    refundStarted: false;
+  } | null;
+  commerceCancellations: Array<{
+    provider: "lemon_squeezy";
+    providerSubscriptionId: string;
+    status: "pending" | "succeeded" | "failed";
+    attemptCount: number;
+    lastAttemptAt: string | null;
+    confirmedAt: string | null;
+    errorCode: string | null;
+    refundStarted: false;
+  }>;
   backups: Array<{
     backupKind: string;
     backupId: string;
@@ -119,6 +174,9 @@ export async function requestFounderDeletionForUser(
   const makeId = dependencies.randomUUID ?? randomUUID;
   try {
     const request = await connection.db.transaction(async (tx) => {
+      if (kind === "account_closure") {
+        await lockFounderProductContractLifecycleInTransaction(tx, userId);
+      }
       const [operator] = await tx
         .select()
         .from(operators)
@@ -159,7 +217,7 @@ export async function requestFounderDeletionForUser(
             updatedAt: now(),
           })
           .where(eq(operators.id, operator.id));
-        await stageAccountClosure(tx, operator.id, existing.id, now(), makeId);
+        await stageAccountClosure(tx, userId, operator.id, existing.id, now(), makeId);
         return upgraded ?? { ...existing, kind: "account_closure" as const };
       }
 
@@ -232,7 +290,7 @@ export async function requestFounderDeletionForUser(
       ]);
 
       if (kind === "account_closure") {
-        await stageAccountClosure(tx, operator.id, created.id, requestedAt, makeId);
+        await stageAccountClosure(tx, userId, operator.id, created.id, requestedAt, makeId);
       }
 
       const exports = await tx
@@ -259,7 +317,8 @@ export async function requestFounderDeletionForUser(
     });
     if (!request) return null;
     if (request.kind === "account_closure") {
-      await attemptFounderDeletionRevocations(userId, request.id, dependencies);
+      await coordinateFounderAccountClosureEffects(userId, request.id, dependencies);
+      await synchronizeAccountClosureCompletionState(request.id, dependencies);
     }
     return getFounderDeletionReceiptForUser(userId, {
       ...dependencies,
@@ -280,20 +339,41 @@ export async function processFounderDeletionRequests(
     const requests = await connection.db
       .select()
       .from(operatorDeletionRequests)
-      .where(sql`${operatorDeletionRequests.status} <> 'completed'`);
+      .where(sql`${operatorDeletionRequests.status} <> 'completed'
+        OR EXISTS (
+          SELECT 1 FROM ${operatorDeletionCommerceCancellations}
+          WHERE ${operatorDeletionCommerceCancellations.requestId} = ${operatorDeletionRequests.id}
+            AND ${operatorDeletionCommerceCancellations.status} <> 'succeeded'
+        )
+        OR EXISTS (
+          SELECT 1 FROM ${operatorDeletionRevocations}
+          WHERE ${operatorDeletionRevocations.requestId} = ${operatorDeletionRequests.id}
+            AND ${operatorDeletionRevocations.status} <> 'succeeded'
+        )`);
     let processed = 0;
     let failed = 0;
     for (const request of requests) {
       try {
-        await connection.db.transaction((tx) => processRequest(tx, request, now()));
-        if (request.kind === "account_closure" && now() < request.backupExpiryDueAt) {
+        if (request.kind === "account_closure") {
           const [owner] = await connection.db
             .select({ userId: operators.userId })
             .from(operators)
             .where(eq(operators.id, request.operatorId))
             .limit(1);
-          if (owner)
-            await attemptFounderDeletionRevocations(owner.userId, request.id, dependencies);
+          if (!owner) throw new Error("account_closure_owner_unavailable");
+          await coordinateFounderAccountClosureEffects(owner.userId, request.id, dependencies);
+          const effectsResolved = await synchronizeAccountClosureCompletionState(
+            request.id,
+            dependencies,
+          );
+          if (!effectsResolved) {
+            processed += 1;
+            continue;
+          }
+        }
+        await connection.db.transaction((tx) => processRequest(tx, request, now()));
+        if (request.kind === "account_closure") {
+          await synchronizeAccountClosureCompletionState(request.id, dependencies);
         }
         processed += 1;
       } catch {
@@ -322,16 +402,13 @@ export async function retryFounderDeletionRevocationsForUser(
       .from(operatorDeletionRequests)
       .innerJoin(operators, eq(operators.id, operatorDeletionRequests.operatorId))
       .where(
-        and(
-          eq(operators.userId, userId),
-          eq(operatorDeletionRequests.kind, "account_closure"),
-          sql`${operatorDeletionRequests.status} <> 'completed'`,
-        ),
+        and(eq(operators.userId, userId), eq(operatorDeletionRequests.kind, "account_closure")),
       )
       .orderBy(desc(operatorDeletionRequests.createdAt))
       .limit(1);
     if (!request) return null;
-    await attemptFounderDeletionRevocations(userId, request.request.id, dependencies);
+    await coordinateFounderAccountClosureEffects(userId, request.request.id, dependencies);
+    await synchronizeAccountClosureCompletionState(request.request.id, dependencies);
     return getFounderDeletionReceiptForUser(userId, {
       ...dependencies,
       createConnection: () => connection,
@@ -357,7 +434,7 @@ export async function getFounderDeletionReceiptForUser(
         .orderBy(desc(operatorDeletionRequests.createdAt))
         .limit(1);
       if (!row) return null;
-      const [stages, revocations, backups] = await Promise.all([
+      const [stages, revocations, commerceCancellations, backups] = await Promise.all([
         tx
           .select()
           .from(operatorDeletionReceipts)
@@ -370,6 +447,11 @@ export async function getFounderDeletionReceiptForUser(
           .orderBy(operatorDeletionRevocations.connectionKind),
         tx
           .select()
+          .from(operatorDeletionCommerceCancellations)
+          .where(eq(operatorDeletionCommerceCancellations.requestId, row.request.id))
+          .orderBy(operatorDeletionCommerceCancellations.providerSubscriptionId),
+        tx
+          .select()
           .from(operatorDeletionBackupExpiries)
           .where(eq(operatorDeletionBackupExpiries.requestId, row.request.id))
           .orderBy(
@@ -377,6 +459,21 @@ export async function getFounderDeletionReceiptForUser(
             operatorDeletionBackupExpiries.backupId,
           ),
       ]);
+      const commerceCancellationRows = commerceCancellations.map((item) => ({
+        provider: "lemon_squeezy" as const,
+        providerSubscriptionId: item.providerSubscriptionId,
+        status: item.status,
+        attemptCount: item.attemptCount,
+        lastAttemptAt: item.lastAttemptAt?.toISOString() ?? null,
+        confirmedAt: item.confirmedAt?.toISOString() ?? null,
+        errorCode: item.errorCode,
+        refundStarted: false as const,
+      }));
+      const commerceCancellation =
+        commerceCancellationRows.find((item) => item.status === "failed") ??
+        commerceCancellationRows.find((item) => item.status === "pending") ??
+        commerceCancellationRows[0] ??
+        null;
       return {
         request: {
           id: row.request.id,
@@ -405,6 +502,8 @@ export async function getFounderDeletionReceiptForUser(
           lastAttemptAt: item.lastAttemptAt?.toISOString() ?? null,
           nextAttemptAt: item.nextAttemptAt?.toISOString() ?? null,
         })),
+        commerceCancellation,
+        commerceCancellations: commerceCancellationRows,
         backups: backups.map((item) => ({
           backupKind: item.backupKind,
           backupId: item.backupId,
@@ -422,11 +521,17 @@ export async function getFounderDeletionReceiptForUser(
 
 async function stageAccountClosure(
   tx: DeletionTransaction,
+  userId: string,
   operatorId: string,
   requestId: string,
   requestedAt: Date,
   makeId: () => string,
 ): Promise<void> {
+  await closePendingFounderCheckoutCorrelationsForAccountClosureInTransaction(
+    tx,
+    userId,
+    requestedAt,
+  );
   await tx
     .update(operatorProposedActions)
     .set({ state: "cancelled", updatedAt: requestedAt })
@@ -436,6 +541,150 @@ async function stageAccountClosure(
         inArray(operatorProposedActions.state, ["proposed", "awaiting_approval", "authorized"]),
       ),
     );
+  const [commerce] = await tx
+    .select({
+      providerSubscriptionId: founderProductEntitlements.providerSubscriptionId,
+      status: founderProductEntitlements.status,
+      sourceEventId: founderProductEntitlements.sourceEventId,
+    })
+    .from(founderProductEntitlements)
+    .innerJoin(operators, eq(operators.userId, founderProductEntitlements.userId))
+    .where(eq(operators.id, operatorId))
+    .limit(1);
+  const paidCorrelations = await tx
+    .select({
+      id: founderCheckoutCorrelations.id,
+      providerSubscriptionId: founderCheckoutCorrelations.providerSubscriptionId,
+    })
+    .from(founderCheckoutCorrelations)
+    .where(
+      and(
+        eq(founderCheckoutCorrelations.userId, userId),
+        or(
+          inArray(founderCheckoutCorrelations.status, ["consumed", "refund_pending"]),
+          and(
+            eq(founderCheckoutCorrelations.status, "closed"),
+            isNotNull(founderCheckoutCorrelations.consumedAt),
+          ),
+        ),
+        isNotNull(founderCheckoutCorrelations.providerSubscriptionId),
+      ),
+    );
+  const terminalReceipts =
+    paidCorrelations.length > 0
+      ? await tx
+          .select({
+            checkoutCorrelationId: founderCommerceEvents.checkoutCorrelationId,
+            sourceEventId: founderCommerceLifecycleReceipts.sourceEventId,
+            providerSubscriptionId: founderCommerceLifecycleReceipts.providerSubscriptionId,
+            kind: founderCommerceLifecycleReceipts.kind,
+            confirmedAt: founderCommerceLifecycleReceipts.createdAt,
+          })
+          .from(founderCommerceLifecycleReceipts)
+          .innerJoin(
+            founderCommerceEvents,
+            eq(founderCommerceEvents.id, founderCommerceLifecycleReceipts.sourceEventId),
+          )
+          .where(
+            and(
+              inArray(
+                founderCommerceEvents.checkoutCorrelationId,
+                paidCorrelations.map((correlation) => correlation.id),
+              ),
+              eq(founderCommerceEvents.applicationStatus, "applied"),
+              sql`${founderCommerceEvents.providerSubscriptionId} = ${founderCommerceLifecycleReceipts.providerSubscriptionId}`,
+              eq(founderCommerceLifecycleReceipts.kind, "cancellation"),
+            ),
+          )
+      : [];
+  const terminalReceiptsBySubscription = Map.groupBy(
+    terminalReceipts,
+    (receipt) => receipt.providerSubscriptionId,
+  );
+  const commerceTargets = new Map<
+    string,
+    { status: "pending" | "succeeded"; confirmedAt: Date | null; expired: boolean }
+  >();
+  if (commerce) {
+    const exactCurrentTerminalReceipt = terminalReceiptsBySubscription
+      .get(commerce.providerSubscriptionId)
+      ?.find(
+        (receipt) =>
+          receipt.sourceEventId === commerce.sourceEventId &&
+          commerce.status === "cancelled" &&
+          receipt.kind === "cancellation",
+      );
+    commerceTargets.set(
+      commerce.providerSubscriptionId,
+      commerce.status === "expired"
+        ? { status: "succeeded", confirmedAt: requestedAt, expired: true }
+        : exactCurrentTerminalReceipt
+          ? {
+              status: "succeeded",
+              confirmedAt: exactCurrentTerminalReceipt.confirmedAt,
+              expired: false,
+            }
+          : { status: "pending", confirmedAt: null, expired: false },
+    );
+  }
+  for (const correlation of paidCorrelations) {
+    if (correlation.providerSubscriptionId) {
+      const existing = commerceTargets.get(correlation.providerSubscriptionId);
+      if (!existing) {
+        commerceTargets.set(correlation.providerSubscriptionId, {
+          status: "pending",
+          confirmedAt: null,
+          expired: false,
+        });
+      }
+    }
+  }
+  if (commerceTargets.size > 0) {
+    await tx
+      .insert(operatorDeletionCommerceCancellations)
+      .values(
+        [...commerceTargets].map(([providerSubscriptionId, target]) => ({
+          id: makeId(),
+          requestId,
+          operatorId,
+          provider: "lemon_squeezy",
+          providerSubscriptionId,
+          ...(target.status === "succeeded"
+            ? { status: "succeeded" as const, confirmedAt: target.confirmedAt }
+            : {}),
+          createdAt: requestedAt,
+          updatedAt: requestedAt,
+        })),
+      )
+      .onConflictDoNothing({
+        target: [
+          operatorDeletionCommerceCancellations.requestId,
+          operatorDeletionCommerceCancellations.providerSubscriptionId,
+        ],
+      });
+  }
+  if (commerceTargets.size === 1 && [...commerceTargets.values()][0]?.expired) {
+    await tx
+      .insert(operatorDeletionReceipts)
+      .values({
+        id: makeId(),
+        requestId,
+        operatorId,
+        stage: "commerce_cancellation",
+        occurredAt: requestedAt,
+        details: {
+          provider: "lemon_squeezy",
+          outcome: "subscription_already_terminal",
+          providerStatus: "expired",
+          productEntitlementChanged: false,
+          refundStarted: false,
+        },
+        createdAt: requestedAt,
+      })
+      .onConflictDoNothing({
+        target: [operatorDeletionReceipts.requestId, operatorDeletionReceipts.stage],
+      });
+  }
   const [aiConnections, calendarConnections, mailConnections, sendingConnections] =
     await Promise.all([
       tx
@@ -443,6 +692,8 @@ async function stageAccountClosure(
           id: operatorAiConnections.id,
           provider: operatorAiConnections.provider,
           providerSubjectId: operatorAiConnections.providerSubjectId,
+          authorizationState: operatorAiConnections.authorizationState,
+          authorizationSessionHash: operatorAiConnections.authorizationSessionHash,
         })
         .from(operatorAiConnections)
         .where(eq(operatorAiConnections.operatorId, operatorId)),
@@ -451,6 +702,7 @@ async function stageAccountClosure(
           id: operatorCalendarConnections.id,
           provider: operatorCalendarConnections.provider,
           providerSubjectId: operatorCalendarConnections.providerSubjectId,
+          authorizationState: operatorCalendarConnections.authorizationState,
         })
         .from(operatorCalendarConnections)
         .where(eq(operatorCalendarConnections.operatorId, operatorId)),
@@ -459,6 +711,7 @@ async function stageAccountClosure(
           id: operatorMailConnections.id,
           provider: operatorMailConnections.provider,
           providerSubjectId: operatorMailConnections.providerSubjectId,
+          authorizationState: operatorMailConnections.authorizationState,
         })
         .from(operatorMailConnections)
         .where(eq(operatorMailConnections.operatorId, operatorId)),
@@ -467,15 +720,32 @@ async function stageAccountClosure(
           id: operatorMailSendingConnections.id,
           provider: operatorMailSendingConnections.provider,
           providerSubjectId: operatorMailSendingConnections.providerSubjectId,
+          authorizationState: operatorMailSendingConnections.authorizationState,
         })
         .from(operatorMailSendingConnections)
         .where(eq(operatorMailSendingConnections.operatorId, operatorId)),
     ]);
   const revocations = [
-    ...aiConnections.map((item) => ({ ...item, connectionKind: `ai:${item.provider}` })),
-    ...calendarConnections.map((item) => ({ ...item, connectionKind: "calendar" })),
-    ...mailConnections.map((item) => ({ ...item, connectionKind: "mail" })),
-    ...sendingConnections.map((item) => ({ ...item, connectionKind: "mail_sending" })),
+    ...aiConnections.map((item) => ({
+      ...item,
+      connectionKind: `ai:${item.provider}`,
+      providerGrantAbsent: !item.providerSubjectId && !item.authorizationSessionHash,
+    })),
+    ...calendarConnections.map((item) => ({
+      ...item,
+      connectionKind: "calendar",
+      providerGrantAbsent: false,
+    })),
+    ...mailConnections.map((item) => ({
+      ...item,
+      connectionKind: "mail",
+      providerGrantAbsent: false,
+    })),
+    ...sendingConnections.map((item) => ({
+      ...item,
+      connectionKind: "mail_sending",
+      providerGrantAbsent: false,
+    })),
   ];
   if (revocations.length === 0) return;
   await tx
@@ -489,12 +759,221 @@ async function stageAccountClosure(
         connectionId: item.id,
         provider: item.provider,
         providerIdentity: item.providerSubjectId,
-        status: "pending" as const,
+        status:
+          item.authorizationState === "revoked" || item.providerGrantAbsent
+            ? ("succeeded" as const)
+            : ("pending" as const),
         createdAt: requestedAt,
         updatedAt: requestedAt,
       })),
     )
     .onConflictDoNothing();
+  if (
+    revocations.every((item) => item.authorizationState === "revoked" || item.providerGrantAbsent)
+  ) {
+    const outcome = revocations.every((item) => item.authorizationState === "revoked")
+      ? "connections_already_revoked"
+      : "connections_absent_or_already_revoked";
+    await tx
+      .insert(operatorDeletionReceipts)
+      .values({
+        id: makeId(),
+        requestId,
+        operatorId,
+        stage: "revocation",
+        occurredAt: requestedAt,
+        details: { outcome },
+        createdAt: requestedAt,
+      })
+      .onConflictDoNothing({
+        target: [operatorDeletionReceipts.requestId, operatorDeletionReceipts.stage],
+      });
+  }
+}
+
+async function attemptFounderCommerceCancellation(
+  requestId: string,
+  dependencies: FounderDeletionDependencies,
+): Promise<void> {
+  await reconcileFounderAccountClosureCommerceCancellation(requestId, {
+    ...(dependencies.createConnection ? { createConnection: dependencies.createConnection } : {}),
+    ...(dependencies.cancelCommerce ? { cancelSubscription: dependencies.cancelCommerce } : {}),
+    ...(dependencies.readCommerce ? { readSubscription: dependencies.readCommerce } : {}),
+    ...(dependencies.now ? { now: dependencies.now } : {}),
+  });
+}
+
+async function coordinateFounderAccountClosureEffects(
+  userId: string,
+  requestId: string,
+  dependencies: FounderDeletionDependencies,
+): Promise<void> {
+  await attemptFounderCommerceCancellation(requestId, dependencies);
+  await attemptFounderDeletionRevocations(userId, requestId, dependencies);
+}
+
+async function hasUnresolvedAccountClosureCommerceInTransaction(
+  tx: DeletionTransaction,
+  requestId: string,
+): Promise<boolean> {
+  const [unresolvedCancellation, untrackedPaidCorrelation, pendingWebhookIntake] =
+    await Promise.all([
+      tx
+        .select({ id: operatorDeletionCommerceCancellations.id })
+        .from(operatorDeletionCommerceCancellations)
+        .where(
+          and(
+            eq(operatorDeletionCommerceCancellations.requestId, requestId),
+            sql`${operatorDeletionCommerceCancellations.status} <> 'succeeded'`,
+          ),
+        )
+        .limit(1),
+      tx
+        .select({ id: founderCheckoutCorrelations.id })
+        .from(founderCheckoutCorrelations)
+        .innerJoin(operators, eq(operators.userId, founderCheckoutCorrelations.userId))
+        .innerJoin(
+          operatorDeletionRequests,
+          and(
+            eq(operatorDeletionRequests.id, requestId),
+            eq(operatorDeletionRequests.operatorId, operators.id),
+          ),
+        )
+        .where(
+          and(
+            or(
+              inArray(founderCheckoutCorrelations.status, ["consumed", "refund_pending"]),
+              and(
+                eq(founderCheckoutCorrelations.status, "closed"),
+                isNotNull(founderCheckoutCorrelations.consumedAt),
+              ),
+            ),
+            isNotNull(founderCheckoutCorrelations.providerSubscriptionId),
+            sql`NOT EXISTS (
+            SELECT 1 FROM ${operatorDeletionCommerceCancellations}
+            WHERE ${operatorDeletionCommerceCancellations.requestId} = ${requestId}
+              AND ${operatorDeletionCommerceCancellations.providerSubscriptionId} = ${founderCheckoutCorrelations.providerSubscriptionId}
+              AND ${operatorDeletionCommerceCancellations.status} = 'succeeded'
+          )`,
+          ),
+        )
+        .limit(1),
+      tx
+        .select({ id: founderCommerceEvents.id })
+        .from(founderCommerceEvents)
+        .innerJoin(
+          founderCheckoutCorrelations,
+          eq(founderCheckoutCorrelations.id, founderCommerceEvents.checkoutCorrelationId),
+        )
+        .innerJoin(operators, eq(operators.userId, founderCheckoutCorrelations.userId))
+        .innerJoin(
+          operatorDeletionRequests,
+          and(
+            eq(operatorDeletionRequests.id, requestId),
+            eq(operatorDeletionRequests.operatorId, operators.id),
+          ),
+        )
+        .where(
+          and(
+            eq(founderCommerceEvents.lastErrorCode, FOUNDER_COMMERCE_WEBHOOK_INTAKE_PENDING_CODE),
+            eq(founderCommerceEvents.applicationStatus, "pending"),
+          ),
+        )
+        .limit(1),
+    ]);
+  return Boolean(
+    unresolvedCancellation[0] || untrackedPaidCorrelation[0] || pendingWebhookIntake[0],
+  );
+}
+
+async function synchronizeAccountClosureCompletionState(
+  requestId: string,
+  dependencies: FounderDeletionDependencies,
+): Promise<boolean> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now ?? (() => new Date());
+  try {
+    return await connection.db.transaction(async (tx) => {
+      const [authority] = await tx
+        .select({ userId: operators.userId })
+        .from(operatorDeletionRequests)
+        .innerJoin(operators, eq(operators.id, operatorDeletionRequests.operatorId))
+        .where(eq(operatorDeletionRequests.id, requestId))
+        .limit(1);
+      if (!authority) return false;
+      await lockFounderProductContractLifecycleInTransaction(tx, authority.userId);
+      const [request] = await tx
+        .select({
+          status: operatorDeletionRequests.status,
+          activePurgeCompletedAt: operatorDeletionRequests.activePurgeCompletedAt,
+          backupExpiredAt: operatorDeletionRequests.backupExpiredAt,
+          completedAt: operatorDeletionRequests.completedAt,
+        })
+        .from(operatorDeletionRequests)
+        .where(eq(operatorDeletionRequests.id, requestId))
+        .limit(1)
+        .for("update");
+      if (!request) return false;
+      const [unresolvedCommerce, unresolvedRevocation, exhaustedRevocation] = await Promise.all([
+        hasUnresolvedAccountClosureCommerceInTransaction(tx, requestId),
+        tx
+          .select({ id: operatorDeletionRevocations.id })
+          .from(operatorDeletionRevocations)
+          .where(
+            and(
+              eq(operatorDeletionRevocations.requestId, requestId),
+              sql`${operatorDeletionRevocations.status} <> 'succeeded'`,
+            ),
+          )
+          .limit(1),
+        tx
+          .select({ id: operatorDeletionRevocations.id })
+          .from(operatorDeletionRevocations)
+          .where(
+            and(
+              eq(operatorDeletionRevocations.requestId, requestId),
+              eq(operatorDeletionRevocations.errorCode, "provider_revocation_recovery_exhausted"),
+            ),
+          )
+          .limit(1),
+      ]);
+      const unresolved = Boolean(unresolvedCommerce || unresolvedRevocation[0]);
+      const recoveryExhausted = Boolean(exhaustedRevocation[0]);
+      await tx
+        .update(operatorDeletionRequests)
+        .set(
+          unresolved
+            ? {
+                status: "failed",
+                failureCode: recoveryExhausted
+                  ? "account_closure_revocation_recovery_exhausted"
+                  : "account_closure_external_effects_unresolved",
+                completedAt: null,
+                updatedAt: now(),
+              }
+            : !request.backupExpiredAt
+              ? {
+                  status: request.activePurgeCompletedAt
+                    ? "backup_expiry_pending"
+                    : "access_stopped",
+                  failureCode: null,
+                  completedAt: null,
+                  updatedAt: now(),
+                }
+              : {
+                  status: "completed",
+                  failureCode: null,
+                  completedAt: request.completedAt ?? request.backupExpiredAt,
+                  updatedAt: now(),
+                },
+        )
+        .where(eq(operatorDeletionRequests.id, requestId));
+      return !unresolved;
+    });
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
 }
 
 async function attemptFounderDeletionRevocations(
@@ -502,18 +981,70 @@ async function attemptFounderDeletionRevocations(
   requestId: string,
   dependencies: FounderDeletionDependencies,
 ): Promise<void> {
-  let results: FounderDeletionRevocationResult[] = [];
-  let revocationCallFailed = false;
-  try {
-    results = await (dependencies.revokeConnections ?? defaultRevokeConnections)(userId);
-  } catch {
-    revocationCallFailed = true;
-  }
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
   try {
+    const attemptedAt = now();
+    const due = await connection.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:account-closure-revocation:${requestId}`}, 0))`,
+      );
+      const unresolved = await tx
+        .select()
+        .from(operatorDeletionRevocations)
+        .where(
+          and(
+            eq(operatorDeletionRevocations.requestId, requestId),
+            sql`${operatorDeletionRevocations.status} <> 'succeeded'`,
+          ),
+        )
+        .for("update");
+      const newlyExhausted = unresolved.filter(
+        (row) =>
+          row.attemptCount >= FOUNDER_REVOCATION_MAX_ATTEMPTS &&
+          row.errorCode !== "provider_revocation_recovery_exhausted" &&
+          (!row.nextAttemptAt || row.nextAttemptAt <= attemptedAt),
+      );
+      if (newlyExhausted.length > 0) {
+        await markFounderRevocationRecoveryExhausted(tx, newlyExhausted, attemptedAt);
+      }
+      const dueRows = unresolved.filter(
+        (row) =>
+          row.attemptCount < FOUNDER_REVOCATION_MAX_ATTEMPTS &&
+          (!row.nextAttemptAt || row.nextAttemptAt <= attemptedAt),
+      );
+      for (const row of dueRows) {
+        await tx
+          .update(operatorDeletionRevocations)
+          .set({
+            status: "failed",
+            attemptCount: row.attemptCount + 1,
+            lastAttemptAt: attemptedAt,
+            nextAttemptAt: new Date(attemptedAt.getTime() + FOUNDER_REVOCATION_RETRY_MS),
+            errorCode: "provider_revocation_attempt_in_progress",
+            updatedAt: attemptedAt,
+          })
+          .where(eq(operatorDeletionRevocations.id, row.id));
+      }
+      return dueRows.map((row) => ({ ...row, attemptCount: row.attemptCount + 1 }));
+    });
+    if (due.length === 0) return;
+
+    let results: FounderDeletionRevocationResult[] = [];
+    let revocationCallFailed = false;
+    try {
+      results = await (dependencies.revokeConnections ?? defaultRevokeConnections)(
+        userId,
+        due.map((row) => row.connectionKind),
+      );
+    } catch {
+      revocationCallFailed = true;
+    }
     await connection.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:account-closure-revocation:${requestId}`}, 0))`,
+      );
       const [requestOwner] = await tx
         .select({ operatorId: operatorDeletionRequests.operatorId })
         .from(operatorDeletionRequests)
@@ -522,161 +1053,146 @@ async function attemptFounderDeletionRevocations(
       if (!requestOwner) return;
       const localRevocationMessage =
         "Access was removed locally. Provider revocation remains unconfirmed and can be retried.";
-      await tx
-        .update(operatorAiConnections)
-        .set({
-          status: "disconnected",
-          authorizationState: "revocation_unconfirmed",
-          capacityState: "unknown",
-          inferenceState: "unknown",
-          authorizationPersisted: false,
-          authorizationSessionHash: null,
-          authorizationExpiresAt: null,
-          approvedModelAssignment: null,
-          disconnectedAt: sql`coalesce(${operatorAiConnections.disconnectedAt}, now())`,
-          failureCode: "provider_revocation_unconfirmed",
-          recoveryMessage: localRevocationMessage,
-          workPausedReason: localRevocationMessage,
-          updatedAt: now(),
-        })
-        .where(
-          and(
-            eq(operatorAiConnections.operatorId, requestOwner.operatorId),
-            sql`${operatorAiConnections.status} <> 'disconnected'`,
-          ),
-        );
-      await tx
-        .update(operatorCalendarConnections)
-        .set({
-          status: "disconnected",
-          authorizationState: "revocation_unconfirmed",
-          authorizationSessionHash: null,
-          authorizationExpiresAt: null,
-          accessTokenCiphertext: null,
-          accessTokenIv: null,
-          accessTokenAuthTag: null,
-          refreshTokenCiphertext: null,
-          refreshTokenIv: null,
-          refreshTokenAuthTag: null,
-          secretKeyVersion: null,
-          tokenExpiresAt: null,
-          failureCode: "provider_revocation_unconfirmed",
-          recoveryMessage: localRevocationMessage,
-          disconnectedAt: sql`coalesce(${operatorCalendarConnections.disconnectedAt}, now())`,
-          updatedAt: now(),
-        })
-        .where(
-          and(
-            eq(operatorCalendarConnections.operatorId, requestOwner.operatorId),
-            sql`${operatorCalendarConnections.status} <> 'disconnected'`,
-          ),
-        );
-      await tx
-        .update(operatorMailConnections)
-        .set({
-          status: "disconnected",
-          authorizationState: "revocation_unconfirmed",
-          authorizationSessionHash: null,
-          authorizationExpiresAt: null,
-          accessTokenCiphertext: null,
-          accessTokenIv: null,
-          accessTokenAuthTag: null,
-          refreshTokenCiphertext: null,
-          refreshTokenIv: null,
-          refreshTokenAuthTag: null,
-          secretKeyVersion: null,
-          tokenExpiresAt: null,
-          failureCode: "provider_revocation_unconfirmed",
-          recoveryMessage: localRevocationMessage,
-          disconnectedAt: sql`coalesce(${operatorMailConnections.disconnectedAt}, now())`,
-          updatedAt: now(),
-        })
-        .where(
-          and(
-            eq(operatorMailConnections.operatorId, requestOwner.operatorId),
-            sql`${operatorMailConnections.status} <> 'disconnected'`,
-          ),
-        );
-      await tx
-        .update(operatorMailSendingConnections)
-        .set({
-          status: "disconnected",
-          authorizationState: "revocation_unconfirmed",
-          authorizationSessionHash: null,
-          authorizationExpiresAt: null,
-          accessTokenCiphertext: null,
-          accessTokenIv: null,
-          accessTokenAuthTag: null,
-          refreshTokenCiphertext: null,
-          refreshTokenIv: null,
-          refreshTokenAuthTag: null,
-          secretKeyVersion: null,
-          tokenExpiresAt: null,
-          failureCode: "provider_revocation_unconfirmed",
-          recoveryMessage: localRevocationMessage,
-          disconnectedAt: sql`coalesce(${operatorMailSendingConnections.disconnectedAt}, now())`,
-          updatedAt: now(),
-        })
-        .where(
-          and(
-            eq(operatorMailSendingConnections.operatorId, requestOwner.operatorId),
-            sql`${operatorMailSendingConnections.status} <> 'disconnected'`,
-          ),
-        );
-      for (const result of results) {
-        const [row] = await tx
-          .select()
-          .from(operatorDeletionRevocations)
-          .where(
-            and(
-              eq(operatorDeletionRevocations.requestId, requestId),
-              eq(operatorDeletionRevocations.connectionKind, result.connectionKind),
-            ),
-          )
-          .limit(1);
-        if (!row) continue;
-        const attemptedAt = now();
+      const dueIds = new Set(due.map((row) => row.connectionId));
+      const aiIds = due
+        .filter((row) => row.connectionKind.startsWith("ai:"))
+        .map((row) => row.connectionId);
+      const calendarIds = due
+        .filter((row) => row.connectionKind === "calendar")
+        .map((row) => row.connectionId);
+      const mailIds = due
+        .filter((row) => row.connectionKind === "mail")
+        .map((row) => row.connectionId);
+      const sendingIds = due
+        .filter((row) => row.connectionKind === "mail_sending")
+        .map((row) => row.connectionId);
+      if (aiIds.length > 0) {
         await tx
-          .update(operatorDeletionRevocations)
+          .update(operatorAiConnections)
           .set({
-            status: result.ok ? "succeeded" : "failed",
-            attemptCount: row.attemptCount + 1,
-            lastAttemptAt: attemptedAt,
-            nextAttemptAt: result.ok
-              ? null
-              : new Date(attemptedAt.getTime() + FOUNDER_REVOCATION_RETRY_MS),
-            errorCode: result.ok ? null : (result.errorCode ?? "provider_revocation_unconfirmed"),
-            updatedAt: attemptedAt,
+            status: "disconnected",
+            authorizationState: "revocation_unconfirmed",
+            capacityState: "unknown",
+            inferenceState: "unknown",
+            authorizationPersisted: false,
+            authorizationSessionHash: null,
+            authorizationExpiresAt: null,
+            approvedModelAssignment: null,
+            disconnectedAt: sql`coalesce(${operatorAiConnections.disconnectedAt}, now())`,
+            failureCode: "provider_revocation_unconfirmed",
+            recoveryMessage: localRevocationMessage,
+            workPausedReason: localRevocationMessage,
+            updatedAt: now(),
           })
-          .where(eq(operatorDeletionRevocations.id, row.id));
-      }
-      if (revocationCallFailed) {
-        const pendingRows = await tx
-          .select()
-          .from(operatorDeletionRevocations)
           .where(
             and(
-              eq(operatorDeletionRevocations.requestId, requestId),
-              or(
-                eq(operatorDeletionRevocations.status, "pending"),
-                eq(operatorDeletionRevocations.status, "failed"),
-              ),
+              eq(operatorAiConnections.operatorId, requestOwner.operatorId),
+              inArray(operatorAiConnections.id, aiIds),
+              sql`${operatorAiConnections.authorizationState} <> 'revoked'`,
             ),
           );
-        for (const row of pendingRows) {
-          const attemptedAt = now();
-          await tx
-            .update(operatorDeletionRevocations)
-            .set({
-              status: "failed",
-              attemptCount: row.attemptCount + 1,
-              lastAttemptAt: attemptedAt,
-              nextAttemptAt: new Date(attemptedAt.getTime() + FOUNDER_REVOCATION_RETRY_MS),
-              errorCode: "provider_revocation_failed",
-              updatedAt: attemptedAt,
-            })
-            .where(eq(operatorDeletionRevocations.id, row.id));
-        }
+      }
+      if (calendarIds.length > 0) {
+        await tx
+          .update(operatorCalendarConnections)
+          .set({
+            status: "disconnected",
+            authorizationState: "revocation_unconfirmed",
+            authorizationSessionHash: null,
+            authorizationExpiresAt: null,
+            failureCode: "provider_revocation_unconfirmed",
+            recoveryMessage: localRevocationMessage,
+            disconnectedAt: sql`coalesce(${operatorCalendarConnections.disconnectedAt}, now())`,
+            updatedAt: now(),
+          })
+          .where(
+            and(
+              eq(operatorCalendarConnections.operatorId, requestOwner.operatorId),
+              inArray(operatorCalendarConnections.id, calendarIds),
+              sql`${operatorCalendarConnections.authorizationState} <> 'revoked'`,
+            ),
+          );
+      }
+      if (mailIds.length > 0) {
+        await tx
+          .update(operatorMailConnections)
+          .set({
+            status: "disconnected",
+            authorizationState: "revocation_unconfirmed",
+            authorizationSessionHash: null,
+            authorizationExpiresAt: null,
+            failureCode: "provider_revocation_unconfirmed",
+            recoveryMessage: localRevocationMessage,
+            disconnectedAt: sql`coalesce(${operatorMailConnections.disconnectedAt}, now())`,
+            updatedAt: now(),
+          })
+          .where(
+            and(
+              eq(operatorMailConnections.operatorId, requestOwner.operatorId),
+              inArray(operatorMailConnections.id, mailIds),
+              sql`${operatorMailConnections.authorizationState} <> 'revoked'`,
+            ),
+          );
+      }
+      if (sendingIds.length > 0) {
+        await tx
+          .update(operatorMailSendingConnections)
+          .set({
+            status: "disconnected",
+            authorizationState: "revocation_unconfirmed",
+            authorizationSessionHash: null,
+            authorizationExpiresAt: null,
+            failureCode: "provider_revocation_unconfirmed",
+            recoveryMessage: localRevocationMessage,
+            disconnectedAt: sql`coalesce(${operatorMailSendingConnections.disconnectedAt}, now())`,
+            updatedAt: now(),
+          })
+          .where(
+            and(
+              eq(operatorMailSendingConnections.operatorId, requestOwner.operatorId),
+              inArray(operatorMailSendingConnections.id, sendingIds),
+              sql`${operatorMailSendingConnections.authorizationState} <> 'revoked'`,
+            ),
+          );
+      }
+      const exhaustedAfterAttempt: typeof due = [];
+      for (const row of due) {
+        if (!dueIds.has(row.connectionId)) continue;
+        const result = results.find((item) => item.connectionKind === row.connectionKind);
+        const ok = !revocationCallFailed && result?.ok === true;
+        const exhausted = !ok && row.attemptCount >= FOUNDER_REVOCATION_MAX_ATTEMPTS;
+        const updated = await tx
+          .update(operatorDeletionRevocations)
+          .set({
+            status: ok ? "succeeded" : "failed",
+            lastAttemptAt: attemptedAt,
+            nextAttemptAt:
+              ok || exhausted
+                ? null
+                : new Date(attemptedAt.getTime() + FOUNDER_REVOCATION_RETRY_MS),
+            errorCode: ok
+              ? null
+              : exhausted
+                ? "provider_revocation_recovery_exhausted"
+                : (result?.errorCode ??
+                  (revocationCallFailed
+                    ? "provider_revocation_failed"
+                    : "provider_revocation_unconfirmed")),
+            updatedAt: attemptedAt,
+          })
+          .where(
+            and(
+              eq(operatorDeletionRevocations.id, row.id),
+              eq(operatorDeletionRevocations.attemptCount, row.attemptCount),
+              eq(operatorDeletionRevocations.lastAttemptAt, attemptedAt),
+              eq(operatorDeletionRevocations.errorCode, "provider_revocation_attempt_in_progress"),
+            ),
+          )
+          .returning({ id: operatorDeletionRevocations.id });
+        if (updated.length === 1 && exhausted) exhaustedAfterAttempt.push(row);
+      }
+      if (exhaustedAfterAttempt.length > 0) {
+        await markFounderRevocationRecoveryExhausted(tx, exhaustedAfterAttempt, attemptedAt);
       }
       const [pending] = await tx
         .select({ count: sql<number>`count(*)` })
@@ -716,11 +1232,97 @@ async function attemptFounderDeletionRevocations(
   }
 }
 
+async function markFounderRevocationRecoveryExhausted(
+  tx: DeletionTransaction,
+  rows: Array<{ id: string; connectionId: string; connectionKind: string }>,
+  at: Date,
+): Promise<void> {
+  const exhaustedMessage =
+    "Recovery Exhausted. Provider revocation could not be confirmed within the safe retry budget. Retained retry credentials were removed; attended resolution is required.";
+  await tx
+    .update(operatorDeletionRevocations)
+    .set({
+      status: "failed",
+      nextAttemptAt: null,
+      errorCode: "provider_revocation_recovery_exhausted",
+      updatedAt: at,
+    })
+    .where(
+      inArray(
+        operatorDeletionRevocations.id,
+        rows.map((row) => row.id),
+      ),
+    );
+  const calendarIds = rows
+    .filter((row) => row.connectionKind === "calendar")
+    .map((row) => row.connectionId);
+  const mailIds = rows
+    .filter((row) => row.connectionKind === "mail")
+    .map((row) => row.connectionId);
+  const sendingIds = rows
+    .filter((row) => row.connectionKind === "mail_sending")
+    .map((row) => row.connectionId);
+  const clearedGrant = {
+    accessTokenCiphertext: null,
+    accessTokenIv: null,
+    accessTokenAuthTag: null,
+    refreshTokenCiphertext: null,
+    refreshTokenIv: null,
+    refreshTokenAuthTag: null,
+    secretKeyVersion: null,
+    tokenExpiresAt: null,
+    failureCode: "provider_revocation_recovery_exhausted",
+    recoveryMessage: exhaustedMessage,
+    updatedAt: at,
+  };
+  if (calendarIds.length > 0) {
+    await tx
+      .update(operatorCalendarConnections)
+      .set(clearedGrant)
+      .where(inArray(operatorCalendarConnections.id, calendarIds));
+  }
+  if (mailIds.length > 0) {
+    await tx
+      .update(operatorMailConnections)
+      .set(clearedGrant)
+      .where(inArray(operatorMailConnections.id, mailIds));
+  }
+  if (sendingIds.length > 0) {
+    await tx
+      .update(operatorMailSendingConnections)
+      .set(clearedGrant)
+      .where(inArray(operatorMailSendingConnections.id, sendingIds));
+  }
+}
+
 async function processRequest(
   tx: DeletionTransaction,
   request: typeof operatorDeletionRequests.$inferSelect,
   now: Date,
 ): Promise<void> {
+  let accountClosureUserId: string | null = null;
+  if (request.kind === "account_closure") {
+    const [owner] = await tx
+      .select({ userId: operators.userId })
+      .from(operators)
+      .where(eq(operators.id, request.operatorId))
+      .limit(1);
+    if (!owner) throw new Error("account_closure_owner_unavailable");
+    accountClosureUserId = owner.userId;
+    await lockFounderProductContractLifecycleInTransaction(tx, owner.userId);
+    if (await hasUnresolvedAccountClosureCommerceInTransaction(tx, request.id)) {
+      await tx
+        .update(operatorDeletionRequests)
+        .set({
+          status: "failed",
+          failureCode: "account_closure_external_effects_unresolved",
+          completedAt: null,
+          updatedAt: now,
+        })
+        .where(eq(operatorDeletionRequests.id, request.id));
+      return;
+    }
+  }
   if (request.backupExpiredAt) {
     await tx
       .update(operatorDeletionRequests)
@@ -739,7 +1341,19 @@ async function processRequest(
     return;
   }
   if (!request.activePurgeCompletedAt && now >= request.activePurgeDueAt) {
-    const counts = await purgeActiveFounderContent(tx, request);
+    const counts = await purgeActiveFounderContent(tx, request, accountClosureUserId);
+    if (!counts) {
+      await tx
+        .update(operatorDeletionRequests)
+        .set({
+          status: "failed",
+          failureCode: "account_closure_external_effects_unresolved",
+          completedAt: null,
+          updatedAt: now,
+        })
+        .where(eq(operatorDeletionRequests.id, request.id));
+      return;
+    }
     await tx
       .update(operatorDeletionRequests)
       .set({
@@ -760,6 +1374,26 @@ async function processRequest(
     });
   }
   if (now >= request.backupExpiryDueAt) {
+    if (accountClosureUserId) {
+      await tx
+        .select({ id: operatorDeletionBackupExpiries.id })
+        .from(operatorDeletionBackupExpiries)
+        .where(eq(operatorDeletionBackupExpiries.requestId, request.id))
+        .for("update");
+      await lockFounderCommerceWebhookIntakeInTransaction(tx, accountClosureUserId, "settlement");
+      if (await hasUnresolvedAccountClosureCommerceInTransaction(tx, request.id)) {
+        await tx
+          .update(operatorDeletionRequests)
+          .set({
+            status: "failed",
+            failureCode: "account_closure_external_effects_unresolved",
+            completedAt: null,
+            updatedAt: now,
+          })
+          .where(eq(operatorDeletionRequests.id, request.id));
+        return;
+      }
+    }
     const expiredExports = await tx
       .update(operatorFounderDataExports)
       .set({ expiresAt: new Date(0), payload: { schemaVersion: 1, expired: true } })
@@ -799,7 +1433,8 @@ async function processRequest(
 async function purgeActiveFounderContent(
   tx: DeletionTransaction,
   request: typeof operatorDeletionRequests.$inferSelect,
-): Promise<Record<string, number>> {
+  accountClosureUserId: string | null,
+): Promise<Record<string, number> | null> {
   const at = request.activePurgeDueAt;
   const tombstone = async (entityType: string, entityId: string) => {
     await tx
@@ -819,7 +1454,12 @@ async function purgeActiveFounderContent(
   const conversations = await tx
     .select({ id: operatorConversations.id })
     .from(operatorConversations)
-    .where(eq(operatorConversations.operatorId, request.operatorId));
+    .where(eq(operatorConversations.operatorId, request.operatorId))
+    .for("update");
+  if (accountClosureUserId) {
+    await lockFounderCommerceWebhookIntakeInTransaction(tx, accountClosureUserId, "settlement");
+    if (await hasUnresolvedAccountClosureCommerceInTransaction(tx, request.id)) return null;
+  }
   const conversationIds = conversations.map((item) => item.id);
   let conversationMessages = 0;
   let conversationWorks = 0;
@@ -949,18 +1589,103 @@ async function purgeActiveFounderContent(
 
 async function defaultRevokeConnections(
   userId: string,
+  connectionKinds: readonly string[] = [
+    "ai:openai",
+    "ai:anthropic",
+    "calendar",
+    "mail",
+    "mail_sending",
+  ],
 ): Promise<FounderDeletionRevocationResult[]> {
+  const selectedKinds = new Set(connectionKinds);
+  const contractRunId = process.env.BRUNO_FOUNDER_CONTRACT_RUN_ID?.trim();
+  const deterministicContract =
+    process.env.BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE === "deterministic" && contractRunId
+      ? { runId: contractRunId, userId }
+      : null;
+  const deterministicOpenAiAdapter = deterministicContract
+    ? {
+        ...createHermesOpenAiAdapter(),
+        revokeAuthorization: async (input: { providerIdentity: string | null }) =>
+          revokeDeterministicFounderContractConnection({
+            ...deterministicContract,
+            connectionKind: "ai:openai",
+            providerIdentity: input.providerIdentity,
+          }),
+      }
+    : null;
+  const deterministicCalendarAdapter = deterministicContract
+    ? {
+        ...createGoogleCalendarAdapter(),
+        revokeAuthorization: async (input: {
+          accessToken: string | null;
+          refreshToken: string | null;
+        }) => {
+          const token = input.refreshToken ?? input.accessToken;
+          if (!token) return { providerRevoked: false };
+          return revokeDeterministicFounderContractGoogleConnection({
+            ...deterministicContract,
+            connectionKind: "calendar",
+            token,
+          });
+        },
+      }
+    : null;
+  const deterministicMailAdapter = deterministicContract
+    ? {
+        ...createGoogleMailAdapter(),
+        revokeAuthorization: async (input: {
+          accessToken: string | null;
+          refreshToken: string | null;
+        }) => {
+          const token = input.refreshToken ?? input.accessToken;
+          if (!token) return { providerRevoked: false };
+          return revokeDeterministicFounderContractConnection({
+            ...deterministicContract,
+            connectionKind: "mail",
+            token,
+          });
+        },
+      }
+    : null;
   const calls: Array<
     [string, () => Promise<{ status?: string; recoveryMessage?: string | null } | null>]
   > = [
-    ["ai:openai", () => disconnectFounderOpenAiForUser(userId)],
+    [
+      "ai:openai",
+      () =>
+        disconnectFounderOpenAiForUser(userId, {
+          ...(deterministicOpenAiAdapter ? { adapter: deterministicOpenAiAdapter } : {}),
+        }),
+    ],
     ["ai:anthropic", () => disconnectFounderAnthropicForUser(userId)],
-    ["calendar", () => disconnectFounderGoogleCalendarForUser(userId)],
-    ["mail", () => disconnectFounderGoogleMailForUser(userId)],
-    ["mail_sending", () => disconnectFounderGoogleMailSendingForUser(userId)],
+    [
+      "calendar",
+      () =>
+        disconnectFounderGoogleCalendarForUser(userId, {
+          preserveCredentialsOnUnconfirmedRevocation: true,
+          ...(deterministicCalendarAdapter ? { adapter: deterministicCalendarAdapter } : {}),
+        }),
+    ],
+    [
+      "mail",
+      () =>
+        disconnectFounderGoogleMailForUser(userId, {
+          preserveCredentialsOnUnconfirmedRevocation: true,
+          ...(deterministicMailAdapter ? { adapter: deterministicMailAdapter } : {}),
+        }),
+    ],
+    [
+      "mail_sending",
+      () =>
+        disconnectFounderGoogleMailSendingForUser(userId, {
+          preserveCredentialsOnUnconfirmedRevocation: true,
+        }),
+    ],
   ];
   const results: FounderDeletionRevocationResult[] = [];
   for (const [connectionKind, call] of calls) {
+    if (!selectedKinds.has(connectionKind)) continue;
     try {
       const result = await call();
       if (result) {

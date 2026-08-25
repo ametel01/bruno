@@ -12,6 +12,16 @@ import {
   operatorConversationWorks,
 } from "@/src/server/db/schema";
 import {
+  founderGeneralReleaseAuthorizesNewWorkInTransaction,
+  founderGeneralReleaseAvailableAiProvidersInTransaction,
+} from "@/src/server/founder-product-contract/initial-general-release";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import type {
+  requireFounderOwnerPreviewAccessForUser,
+  requireFounderOwnerPreviewAccessInTransaction,
+} from "@/src/server/founder-product-contract/release-stage-access";
+import { withFounderOwnerPreviewWorkAuthority } from "@/src/server/founder-product-contract/work-authority";
+import {
   type FounderActionPreviewDto,
   projectFounderActionPreview,
 } from "@/src/server/operators/founder-action-previews";
@@ -20,9 +30,9 @@ import {
   requireReadyFounderAiConnectionForUser,
 } from "@/src/server/operators/founder-ai-connection";
 import {
-  routeFounderAiProvider,
   type FounderAiCompatibilityPolicy,
   type FounderAiProvider,
+  routeFounderAiProvider,
 } from "@/src/server/operators/founder-ai-routing";
 import {
   buildFounderAiCheckpointIdentity,
@@ -32,15 +42,18 @@ import {
   FOUNDER_AI_WORK_PROVIDER,
   type FounderAiRecoveryChoice,
 } from "@/src/server/operators/founder-ai-work";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
 import {
-  deriveFounderConversationRecovery,
-  type FounderRecoveryDto,
-} from "@/src/server/operators/founder-recovery";
+  ensureFounderOperatorForUser,
+  getFounderOperatorForUser,
+} from "@/src/server/operators/founder-operator";
 import {
   type FounderProposedActionDto,
   projectFounderProposedAction,
 } from "@/src/server/operators/founder-proposed-actions";
+import {
+  deriveFounderConversationRecovery,
+  type FounderRecoveryDto,
+} from "@/src/server/operators/founder-recovery";
 
 type FounderConversationTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -78,7 +91,7 @@ export type FounderConversationDto = {
   status: "active" | "paused";
   messages: FounderConversationMessageDto[];
   activeWork: FounderConversationWorkDto | null;
-  actionPreview: FounderActionPreviewDto;
+  actionPreview: FounderActionPreviewDto | null;
   proposedAction?: FounderProposedActionDto | null;
   createdAt: string;
   updatedAt: string;
@@ -120,6 +133,10 @@ export type FounderConversationDependencies = {
     userId: string,
     dependencies?: { createConnection?: () => DatabaseConnection },
   ) => Promise<FounderAiConnectionDto>;
+  applicationRevision?: string;
+  env?: Record<string, string | undefined>;
+  requireOwnerPreviewAccess?: typeof requireFounderOwnerPreviewAccessInTransaction;
+  requireOwnerPreviewAccessForUser?: typeof requireFounderOwnerPreviewAccessForUser;
   maxMessageLength?: number;
 };
 
@@ -127,14 +144,15 @@ export class FounderConversationError extends Error {
   readonly code:
     | "invalid_message"
     | "operator_not_ready"
+    | "product_entitlement_required"
     | "conversation_unavailable"
     | "conversation_ai_unavailable";
-  readonly status: 400 | 409 | 503;
+  readonly status: 400 | 403 | 409 | 503;
 
   constructor(
     code: FounderConversationError["code"],
     message: string,
-    status: 400 | 409 | 503 = 409,
+    status: 400 | 403 | 409 | 503 = 409,
   ) {
     super(message);
     this.name = "FounderConversationError";
@@ -146,14 +164,19 @@ export class FounderConversationError extends Error {
 export async function getFounderConversationForUser(
   userId: string,
   dependencies: Pick<FounderConversationDependencies, "createConnection"> = {},
-): Promise<FounderConversationDto> {
-  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+): Promise<FounderConversationDto | null> {
+  const operator = await getFounderOperatorForUser(userId, dependencies);
+  if (!operator) return null;
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   try {
     return await connection.db.transaction(async (tx) => {
-      const conversation = await ensureConversation(tx, operator.id, new Date());
-      return projectConversation(tx, conversation);
+      const [conversation] = await tx
+        .select()
+        .from(operatorConversations)
+        .where(eq(operatorConversations.operatorId, operator.id))
+        .limit(1);
+      return conversation ? projectConversation(tx, conversation) : null;
     });
   } finally {
     if (ownsConnection) await connection.close();
@@ -189,77 +212,91 @@ export async function sendFounderConversationMessageForUser(
   const requestId = normalizeRequestId(dependencies.requestId) ?? makeId();
 
   try {
-    const started = await connection.db.transaction(async (tx) => {
-      await lockOperator(tx, operator.id);
-      const conversation = await ensureConversation(tx, operator.id, now());
-      const [existing] = await tx
-        .select()
-        .from(operatorConversationWorks)
-        .where(
-          and(
-            eq(operatorConversationWorks.conversationId, conversation.id),
-            eq(operatorConversationWorks.requestId, requestId),
-          ),
-        )
-        .limit(1);
-      if (existing) return { kind: "existing" as const, conversation };
+    const started = await withFounderOwnerPreviewWorkAuthority(
+      {
+        userId,
+        now,
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+      },
+      conversationWorkAuthorityDependencies(connection, dependencies),
+      async (tx, checkedAt) => {
+        await lockOperator(tx, operator.id);
+        if (!(await founderGeneralReleaseAuthorizesNewWorkInTransaction(tx, userId, checkedAt))) {
+          throw new FounderConversationError(
+            "product_entitlement_required",
+            "New Operator work is paused after Founder Activation until Product Entitlement is verified.",
+          );
+        }
+        const conversation = await ensureConversation(tx, operator.id, checkedAt);
+        const [existing] = await tx
+          .select()
+          .from(operatorConversationWorks)
+          .where(
+            and(
+              eq(operatorConversationWorks.conversationId, conversation.id),
+              eq(operatorConversationWorks.requestId, requestId),
+            ),
+          )
+          .limit(1);
+        if (existing) return { kind: "existing" as const, conversation };
 
-      const founderMessageId = makeId();
-      const workId = makeId();
-      const checkpointId = buildFounderAiCheckpointIdentity(
-        conversation.id,
-        conversation.nextSequence,
-      );
-      const createdAt = now();
-      await tx.insert(operatorConversationWorks).values({
-        id: workId,
-        conversationId: conversation.id,
-        requestId,
-        checkpointId,
-        provider: FOUNDER_AI_WORK_PROVIDER,
-        policyVersion: FOUNDER_AI_COMPATIBILITY_POLICY_VERSION,
-        completionIdentity: buildFounderAiCompletionIdentity(workId),
-        responseSequence: conversation.nextSequence + 1,
-        state: "running",
-        founderMessageId,
-        recoveryChoices: [],
-        createdAt,
-        updatedAt: createdAt,
-      });
-      await tx.insert(operatorConversationMessages).values({
-        id: founderMessageId,
-        conversationId: conversation.id,
-        workId,
-        sequence: conversation.nextSequence,
-        role: "founder",
-        status: "complete",
-        body: message,
-        createdAt,
-      });
-      await tx
-        .update(operatorConversations)
-        .set({ nextSequence: conversation.nextSequence + 2, updatedAt: createdAt })
-        .where(eq(operatorConversations.id, conversation.id));
+        const founderMessageId = makeId();
+        const workId = makeId();
+        const checkpointId = buildFounderAiCheckpointIdentity(
+          conversation.id,
+          conversation.nextSequence,
+        );
+        const createdAt = checkedAt;
+        await tx.insert(operatorConversationWorks).values({
+          id: workId,
+          conversationId: conversation.id,
+          requestId,
+          checkpointId,
+          provider: FOUNDER_AI_WORK_PROVIDER,
+          policyVersion: FOUNDER_AI_COMPATIBILITY_POLICY_VERSION,
+          completionIdentity: buildFounderAiCompletionIdentity(workId),
+          responseSequence: conversation.nextSequence + 1,
+          state: "running",
+          founderMessageId,
+          recoveryChoices: [],
+          createdAt,
+          updatedAt: createdAt,
+        });
+        await tx.insert(operatorConversationMessages).values({
+          id: founderMessageId,
+          conversationId: conversation.id,
+          workId,
+          sequence: conversation.nextSequence,
+          role: "founder",
+          status: "complete",
+          body: message,
+          createdAt,
+        });
+        await tx
+          .update(operatorConversations)
+          .set({ nextSequence: conversation.nextSequence + 2, updatedAt: createdAt })
+          .where(eq(operatorConversations.id, conversation.id));
 
-      const history = await tx
-        .select({
-          role: operatorConversationMessages.role,
-          body: operatorConversationMessages.body,
-        })
-        .from(operatorConversationMessages)
-        .where(eq(operatorConversationMessages.conversationId, conversation.id))
-        .orderBy(asc(operatorConversationMessages.sequence));
-      return {
-        kind: "started" as const,
-        conversation,
-        workId,
-        checkpointId,
-        messages: history.map((item) => ({
-          role: item.role === "founder" ? ("user" as const) : ("assistant" as const),
-          content: item.body,
-        })),
-      };
-    });
+        const history = await tx
+          .select({
+            role: operatorConversationMessages.role,
+            body: operatorConversationMessages.body,
+          })
+          .from(operatorConversationMessages)
+          .where(eq(operatorConversationMessages.conversationId, conversation.id))
+          .orderBy(asc(operatorConversationMessages.sequence));
+        return {
+          kind: "started" as const,
+          conversation,
+          workId,
+          checkpointId,
+          messages: history.map((item) => ({
+            role: item.role === "founder" ? ("user" as const) : ("assistant" as const),
+            content: item.body,
+          })),
+        };
+      },
+    );
 
     if (started.kind === "existing") {
       return connection.db.transaction((tx) => projectConversation(tx, started.conversation));
@@ -278,8 +315,16 @@ export async function sendFounderConversationMessageForUser(
     }
 
     const routed = await connection.db.transaction(async (tx) => {
+      const routingAt = now();
+      const generalReleaseProviders = await founderGeneralReleaseAvailableAiProvidersInTransaction(
+        tx,
+        userId,
+        dependencies.env ?? process.env,
+        routingAt,
+      );
       const decision = await routeFounderAiProvider(tx, operator.id, {
-        now: now(),
+        now: routingAt,
+        allowedProviders: generalReleaseProviders ?? ["openai"],
         ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
       });
       if (!decision) return null;
@@ -317,6 +362,14 @@ export async function sendFounderConversationMessageForUser(
       );
     }
     const provider = routed?.provider ?? readyConnection.provider;
+    if (provider !== "openai" && !routed) {
+      return finalizePausedConversation(
+        connection,
+        started,
+        "No Owner Preview-qualified OpenAI connection is ready. Bruno paused this message safely.",
+        now(),
+      );
+    }
     const adapter =
       dependencies.adapters?.[provider] ??
       dependencies.adapter ??
@@ -380,142 +433,154 @@ export async function resumeFounderConversationWorkForUser(
   const now = dependencies.now ?? (() => new Date());
 
   try {
-    const started = await connection.db.transaction(async (tx) => {
-      await lockOperator(tx, operator.id);
-      const [work] = await tx
-        .select()
-        .from(operatorConversationWorks)
-        .where(eq(operatorConversationWorks.id, workId))
-        .limit(1);
-      if (!work)
-        throw new FounderConversationError(
-          "conversation_unavailable",
-          "Conversation work could not be reloaded.",
-          503,
-        );
-      const [conversation] = await tx
-        .select()
-        .from(operatorConversations)
-        .where(
-          and(
-            eq(operatorConversations.id, work.conversationId),
-            eq(operatorConversations.operatorId, operator.id),
-          ),
-        )
-        .limit(1)
-        .for("update");
-      if (!conversation)
-        throw new FounderConversationError(
-          "conversation_unavailable",
-          "Conversation could not be reloaded.",
-          503,
-        );
-      if (work.state !== "paused" || work.externalEffectStarted) {
-        return { kind: "unchanged" as const, conversation };
-      }
+    const started = await withFounderOwnerPreviewWorkAuthority(
+      {
+        userId,
+        now,
+        requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+      },
+      conversationWorkAuthorityDependencies(connection, dependencies),
+      async (tx, checkedAt) => {
+        await lockOperator(tx, operator.id);
+        const [work] = await tx
+          .select()
+          .from(operatorConversationWorks)
+          .where(eq(operatorConversationWorks.id, workId))
+          .limit(1);
+        if (!work)
+          throw new FounderConversationError(
+            "conversation_unavailable",
+            "Conversation work could not be reloaded.",
+            503,
+          );
+        const [conversation] = await tx
+          .select()
+          .from(operatorConversations)
+          .where(
+            and(
+              eq(operatorConversations.id, work.conversationId),
+              eq(operatorConversations.operatorId, operator.id),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (!conversation)
+          throw new FounderConversationError(
+            "conversation_unavailable",
+            "Conversation could not be reloaded.",
+            503,
+          );
+        if (work.state !== "paused" || work.externalEffectStarted) {
+          return { kind: "unchanged" as const, conversation };
+        }
 
-      const recovery = deriveFounderConversationRecovery({
-        now: now(),
-        state: work.state,
-        startedAt: work.createdAt,
-        attemptCount: work.providerAttempts.length,
-        externalEffectStarted: work.externalEffectStarted,
-        recoveryMessage: work.recoveryMessage,
-      });
-      if (recovery?.state === "recovery_exhausted") {
-        await tx
+        const recovery = deriveFounderConversationRecovery({
+          now: checkedAt,
+          state: work.state,
+          startedAt: work.createdAt,
+          attemptCount: work.providerAttempts.length,
+          externalEffectStarted: work.externalEffectStarted,
+          recoveryMessage: work.recoveryMessage,
+        });
+        if (recovery?.state === "recovery_exhausted") {
+          await tx
+            .update(operatorConversationWorks)
+            .set({
+              state: "failed",
+              recoveryMessage:
+                "Bruno stopped recovery after the safe conversation budget was reached. Your checkpoint is preserved.",
+              recoveryChoices: [],
+              updatedAt: checkedAt,
+            })
+            .where(eq(operatorConversationWorks.id, work.id));
+          const [pausedConversation] = await tx
+            .update(operatorConversations)
+            .set({ status: "paused", updatedAt: checkedAt })
+            .where(eq(operatorConversations.id, conversation.id))
+            .returning();
+          return {
+            kind: "unchanged" as const,
+            conversation: pausedConversation ?? conversation,
+          };
+        }
+
+        const generalReleaseProviders =
+          await founderGeneralReleaseAvailableAiProvidersInTransaction(
+            tx,
+            userId,
+            dependencies.env ?? process.env,
+            checkedAt,
+          );
+        const decision = await routeFounderAiProvider(tx, operator.id, {
+          now: checkedAt,
+          allowedProviders: generalReleaseProviders ?? ["openai"],
+          ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
+        });
+        if (!decision) return { kind: "unchanged" as const, conversation };
+        const history = await tx
+          .select()
+          .from(operatorConversationMessages)
+          .where(eq(operatorConversationMessages.conversationId, conversation.id))
+          .orderBy(asc(operatorConversationMessages.sequence));
+        const [updatedWork] = await tx
           .update(operatorConversationWorks)
           .set({
-            state: "failed",
-            recoveryMessage:
-              "Bruno stopped recovery after the safe conversation budget was reached. Your checkpoint is preserved.",
+            state: "running",
+            provider: decision.provider,
+            policyVersion: decision.policyVersion,
+            providerConnectionId: decision.connectionId,
+            providerSubjectId: decision.providerSubjectId,
+            providerAccountLabel: decision.accountLabel,
+            approvedModelAssignment: decision.approvedModelAssignment,
+            providerAttempts: [
+              ...work.providerAttempts.map((attempt) =>
+                attempt.state === "running" ? { ...attempt, state: "paused" as const } : attempt,
+              ),
+              {
+                provider: decision.provider,
+                policyVersion: decision.policyVersion,
+                connectionId: decision.connectionId,
+                providerSubjectId: decision.providerSubjectId,
+                accountLabel: decision.accountLabel,
+                approvedModelAssignment: decision.approvedModelAssignment,
+                state: "running",
+              },
+            ],
+            recoveryMessage: null,
             recoveryChoices: [],
-            updatedAt: now(),
+            pausedAt: null,
+            updatedAt: checkedAt,
           })
-          .where(eq(operatorConversationWorks.id, work.id));
-        const [pausedConversation] = await tx
-          .update(operatorConversations)
-          .set({ status: "paused", updatedAt: now() })
-          .where(eq(operatorConversations.id, conversation.id))
+          .where(eq(operatorConversationWorks.id, work.id))
           .returning();
+        if (!updatedWork)
+          throw new FounderConversationError(
+            "conversation_unavailable",
+            "Conversation work could not be resumed.",
+            503,
+          );
+        await tx
+          .update(operatorConversations)
+          .set({ status: "active", updatedAt: checkedAt })
+          .where(eq(operatorConversations.id, conversation.id));
         return {
-          kind: "unchanged" as const,
-          conversation: pausedConversation ?? conversation,
-        };
-      }
-
-      const attemptedProvider = work.providerAttempts.at(-1)?.provider as
-        | FounderAiProvider
-        | undefined;
-      const decision = await routeFounderAiProvider(tx, operator.id, {
-        now: now(),
-        ...(attemptedProvider ? { excludedProviders: [attemptedProvider] } : {}),
-        ...(dependencies.routingPolicy ? { policy: dependencies.routingPolicy } : {}),
-      });
-      if (!decision) return { kind: "unchanged" as const, conversation };
-      const history = await tx
-        .select()
-        .from(operatorConversationMessages)
-        .where(eq(operatorConversationMessages.conversationId, conversation.id))
-        .orderBy(asc(operatorConversationMessages.sequence));
-      const [updatedWork] = await tx
-        .update(operatorConversationWorks)
-        .set({
-          state: "running",
+          kind: "started" as const,
+          conversation,
+          workId: work.id,
+          checkpointId: work.checkpointId,
           provider: decision.provider,
-          policyVersion: decision.policyVersion,
           providerConnectionId: decision.connectionId,
-          providerSubjectId: decision.providerSubjectId,
-          providerAccountLabel: decision.accountLabel,
           approvedModelAssignment: decision.approvedModelAssignment,
-          providerAttempts: [
-            ...work.providerAttempts.map((attempt) =>
-              attempt.state === "running" ? { ...attempt, state: "paused" as const } : attempt,
-            ),
-            {
-              provider: decision.provider,
-              policyVersion: decision.policyVersion,
-              connectionId: decision.connectionId,
-              providerSubjectId: decision.providerSubjectId,
-              accountLabel: decision.accountLabel,
-              approvedModelAssignment: decision.approvedModelAssignment,
-              state: "running",
-            },
-          ],
-          recoveryMessage: null,
-          recoveryChoices: [],
-          pausedAt: null,
-          updatedAt: now(),
-        })
-        .where(eq(operatorConversationWorks.id, work.id))
-        .returning();
-      if (!updatedWork)
-        throw new FounderConversationError(
-          "conversation_unavailable",
-          "Conversation work could not be resumed.",
-          503,
-        );
-      await tx
-        .update(operatorConversations)
-        .set({ status: "active", updatedAt: now() })
-        .where(eq(operatorConversations.id, conversation.id));
-      return {
-        kind: "started" as const,
-        conversation,
-        workId: work.id,
-        checkpointId: work.checkpointId,
-        provider: decision.provider,
-        providerConnectionId: decision.connectionId,
-        approvedModelAssignment: decision.approvedModelAssignment,
-        requestId: work.requestId,
-        messages: history
-          .filter((message) => message.id !== work.operatorMessageId)
-          .map((message) => ({
-            role: message.role === "founder" ? ("user" as const) : ("assistant" as const),
-            content: message.body,
-          })),
-      };
-    });
+          requestId: work.requestId,
+          messages: history
+            .filter((message) => message.id !== work.operatorMessageId)
+            .map((message) => ({
+              role: message.role === "founder" ? ("user" as const) : ("assistant" as const),
+              content: message.body,
+            })),
+        };
+      },
+    );
 
     if (started.kind === "unchanged") {
       return connection.db.transaction((tx) => projectConversation(tx, started.conversation));
@@ -559,6 +624,26 @@ export async function resumeFounderConversationWorkForUser(
   } finally {
     if (ownsConnection) await connection.close();
   }
+}
+
+function conversationWorkAuthorityDependencies(
+  connection: DatabaseConnection,
+  dependencies: FounderConversationDependencies,
+): Parameters<typeof withFounderOwnerPreviewWorkAuthority>[1] {
+  return {
+    createConnection: () => connection,
+    generalReleaseAuthority: "work",
+    ...(dependencies.env ? { env: dependencies.env } : {}),
+    ...(dependencies.applicationRevision
+      ? { applicationRevision: dependencies.applicationRevision }
+      : {}),
+    ...(dependencies.requireOwnerPreviewAccess
+      ? { requireReleaseStageAccess: dependencies.requireOwnerPreviewAccess }
+      : {}),
+    ...(dependencies.requireOwnerPreviewAccessForUser
+      ? { requireReleaseStageAccessForUser: dependencies.requireOwnerPreviewAccessForUser }
+      : {}),
+  };
 }
 
 function normalizeRequestId(value: string | undefined): string | null {

@@ -1,0 +1,2 @@
+ALTER TABLE "founder_checkout_correlations" DROP CONSTRAINT "founder_checkout_correlations_closed_check";--> statement-breakpoint
+ALTER TABLE "founder_checkout_correlations" ADD CONSTRAINT "founder_checkout_correlations_closed_check" CHECK ("founder_checkout_correlations"."status" <> 'closed' OR ("founder_checkout_correlations"."closure_reason" IN ('payment_without_access_refunded', 'payment_without_access_refunded_superseded') AND "founder_checkout_correlations"."refunded_at" IS NOT NULL));

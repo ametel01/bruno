@@ -1,0 +1,136 @@
+.page {
+  display: grid;
+  min-height: 100svh;
+  place-items: center;
+  background: #f7f4ee;
+  color: #101314;
+  padding: 32px 20px;
+}
+
+.card {
+  width: min(100%, 680px);
+  border: 1px solid rgb(107 77 60 / 18%);
+  border-radius: 24px;
+  background: #fffdfa;
+  box-shadow: 0 24px 80px rgb(36 26 20 / 8%);
+  padding: clamp(24px, 5vw, 48px);
+}
+
+.brand {
+  display: inline-flex;
+  color: inherit;
+  margin-bottom: 28px;
+}
+
+.brand svg {
+  width: 34px;
+  height: auto;
+}
+
+.kicker {
+  margin: 0 0 8px;
+  color: #6f6d68;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.card h1 {
+  margin: 0 0 16px;
+  font-family: Satoshi, Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(2rem, 6vw, 3.4rem);
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+
+.card > p,
+.help,
+.boundary p,
+.notice p {
+  color: #575650;
+  line-height: 1.65;
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.form label {
+  font-weight: 700;
+}
+
+.form textarea {
+  min-height: 130px;
+  resize: vertical;
+  border: 1px solid rgb(16 19 20 / 28%);
+  border-radius: 14px;
+  background: white;
+  font: inherit;
+  padding: 14px;
+}
+
+.form textarea:focus-visible,
+.primary:focus-visible,
+.brand:focus-visible {
+  outline: 3px solid #59d6c5;
+  outline-offset: 3px;
+}
+
+.help {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.primary {
+  display: inline-flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: #101314;
+  color: #fffdfa;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0 20px;
+  text-decoration: none;
+}
+
+.primary:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.error,
+.notice,
+.boundary {
+  margin-top: 24px;
+  border-radius: 16px;
+  padding: 16px 18px;
+}
+
+.error {
+  background: #fff0ed;
+  color: #8d2f21;
+}
+
+.notice {
+  background: #dff6f1;
+}
+
+.notice p {
+  margin-top: 0;
+}
+
+.boundary {
+  border: 1px solid rgb(107 77 60 / 18%);
+  background: #f7f4ee;
+}
+
+.boundary p {
+  margin-bottom: 0;
+}

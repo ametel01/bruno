@@ -210,7 +210,10 @@ async function ensureFounderOperatorInTransaction(
     const [created] = await tx
       .insert(operators)
       .values({ userId, createdAt: now, updatedAt: now })
-      .onConflictDoNothing({ target: operators.userId })
+      .onConflictDoNothing({
+        target: operators.userId,
+        where: eq(operators.status, "active"),
+      })
       .returning();
     operator = created;
   }

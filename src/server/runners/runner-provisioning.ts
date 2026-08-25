@@ -1029,6 +1029,7 @@ export async function createDigitalOceanRunnerForUser(
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
   const operationStartedAt = now();
+  const provisioningOperationKey = `bruno-deploy-${randomUUID().replaceAll("-", "")}`;
   const firewallNamePrefix = DEFAULT_FIREWALL_NAME;
   let resolvedConfig: DigitalOceanProviderConfig | null | undefined;
   let resolvedProvider: DigitalOceanProvider | undefined;
@@ -1121,7 +1122,9 @@ export async function createDigitalOceanRunnerForUser(
       return { ok: false, reason: "provider_not_configured" };
     }
 
-    const managedTags = [...new Set([...config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG])].sort();
+    const managedTags = [
+      ...new Set([...config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG, provisioningOperationKey]),
+    ].sort();
     const hermesConfig = resolveHermesDeploymentConfig(config);
 
     log("provider_config_loaded", {
@@ -1180,6 +1183,7 @@ export async function createDigitalOceanRunnerForUser(
           image: selectedImage.image,
           requiredRunnerImageDigest: requiredRunnerImageDigestForProvider(config),
           provisioningStatus: "pending",
+          provisioningOperationKey,
           provisioningStartedAt: createdAt,
           createdAt,
           updatedAt: createdAt,
@@ -1747,6 +1751,7 @@ async function runProviderStep(
       tags: result.value.tags,
       firewallApplied: result.value.firewallApplied,
     };
+    if (result.value.createdAt) metadata.providerCreatedAt = result.value.createdAt;
 
     if (input.phase === "firewall_configuring") {
       metadata.firewallName = input.firewallName ?? DEFAULT_FIREWALL_NAME;
@@ -2648,6 +2653,30 @@ async function getRunnerProvisioningDto(
   runnerId: string,
 ): Promise<RunnerProvisioningDto> {
   return await connection.db.transaction((tx) => toRunnerProvisioningDto(tx, userId, runnerId));
+}
+
+export async function getDigitalOceanRunnerProvisioningForUser(
+  userId: string,
+  dependencies: Pick<RunnerProvisioningDependencies, "createConnection"> = {},
+): Promise<RunnerProvisioningDto | null> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  try {
+    const [runner] = await connection.db
+      .select({ id: runners.id })
+      .from(runners)
+      .where(
+        and(
+          eq(runners.userId, userId),
+          eq(runners.kind, DIGITALOCEAN_RUNNER_KIND),
+          eq(runners.provider, DIGITALOCEAN_PROVIDER),
+        ),
+      )
+      .limit(1);
+    return runner ? await getRunnerProvisioningDto(connection, userId, runner.id) : null;
+  } finally {
+    if (ownsConnection) await connection.close();
+  }
 }
 
 async function toRunnerProvisioningDto(

@@ -18,16 +18,29 @@ import {
   operatorProcessingConsents,
   operatorProductGuardrails,
 } from "@/src/server/db/schema";
+import { recordFounderGeneralReleaseActivationInTransaction } from "@/src/server/founder-product-contract/initial-general-release";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import {
+  type FounderOwnerPreviewWorkAuthorityDependencies,
+  withFounderOwnerPreviewWorkAuthority,
+} from "@/src/server/founder-product-contract/work-authority";
 import {
   type FounderActionPreviewDto,
   projectFounderActionPreview,
 } from "@/src/server/operators/founder-action-previews";
 import {
+  type FounderAiCompatibilityPolicy,
+  selectFounderAiProvider,
+} from "@/src/server/operators/founder-ai-routing";
+import {
   type FounderMorningBriefProjection,
   prepareFounderMorningBrief,
   projectFounderMorningBrief,
 } from "@/src/server/operators/founder-morning-brief";
-import { ensureFounderOperatorForUser } from "@/src/server/operators/founder-operator";
+import {
+  ensureFounderOperatorForUser,
+  getFounderOperatorForUser,
+} from "@/src/server/operators/founder-operator";
 import type {
   FounderActionFamily,
   FounderAuthorityMode,
@@ -36,7 +49,6 @@ import {
   type FounderProposedActionDto,
   projectFounderProposedAction,
 } from "@/src/server/operators/founder-proposed-actions";
-import { selectFounderAiProvider } from "@/src/server/operators/founder-ai-routing";
 import type { FounderRecoveryDto } from "@/src/server/operators/founder-recovery";
 
 type CoreTransaction = Parameters<
@@ -94,14 +106,15 @@ export type FounderCoreOperationDto = {
     items?: FounderMorningBriefProjection["items"];
     delivery?: FounderMorningBriefProjection["delivery"];
   } | null;
-  actionPreview?: FounderActionPreviewDto;
+  actionPreview?: FounderActionPreviewDto | null;
   proposedAction?: FounderProposedActionDto | null;
   activatedAt: string | null;
 };
 
-export type FounderCoreOperationDependencies = {
+export type FounderCoreOperationDependencies = FounderOwnerPreviewWorkAuthorityDependencies & {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
+  routingPolicy?: FounderAiCompatibilityPolicy;
 };
 
 export class FounderCoreOperationError extends Error {
@@ -120,15 +133,16 @@ export async function getFounderCoreOperationForUser(
   userId: string,
   dependencies: FounderCoreOperationDependencies = {},
 ): Promise<FounderCoreOperationDto | null> {
-  const operator = await ensureFounderOperatorForUser(userId, dependencies);
+  const operator = await getFounderOperatorForUser(userId, dependencies);
+  if (!operator) return null;
   return withConnection(dependencies, async (connection) =>
     connection.db.transaction(async (tx) => {
-      const operation = await ensureCoreOperation(
-        tx,
-        operator.id,
-        dependencies.now?.() ?? new Date(),
-      );
-      return operation ? projectCoreOperation(tx, operation, operator.id) : null;
+      const [operation] = await tx
+        .select()
+        .from(operatorLimitedOperations)
+        .where(eq(operatorLimitedOperations.operatorId, operator.id))
+        .limit(1);
+      return operation?.mailConnectionId ? projectCoreOperation(tx, operation, operator.id) : null;
     }),
   );
 }
@@ -138,11 +152,13 @@ export async function confirmFounderCoreProcessingConsentForUser(
   dependencies: FounderCoreOperationDependencies = {},
 ): Promise<FounderCoreOperationDto> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
-  return withConnection(dependencies, async (connection) => {
-    const at = dependencies.now?.() ?? new Date();
-    return connection.db.transaction(async (tx) => {
+  const now = dependencies.now ?? (() => new Date());
+  return withFounderOwnerPreviewWorkAuthority(
+    { userId, now, requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden },
+    { ...dependencies, generalReleaseAuthority: "setup" },
+    async (tx, at) => {
       await lockOperator(tx, operator.id);
-      const pair = await readyCoreConnectionSet(tx, operator.id, at);
+      const pair = await readyCoreConnectionSet(tx, operator.id, at, dependencies.routingPolicy);
       if (!pair) {
         throw new FounderCoreOperationError(
           "core_connections_not_ready",
@@ -229,8 +245,8 @@ export async function confirmFounderCoreProcessingConsentForUser(
       }
       await ensureCoreBrief(tx, saved, at);
       return projectCoreOperation(tx, saved, operator.id);
-    });
-  });
+    },
+  );
 }
 
 export async function reconcileFounderCoreOperationForUser(
@@ -238,13 +254,18 @@ export async function reconcileFounderCoreOperationForUser(
   dependencies: FounderCoreOperationDependencies = {},
 ): Promise<FounderCoreOperationDto | null> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
-  return withConnection(dependencies, async (connection) =>
-    connection.db.transaction(async (tx) => {
+  const now = dependencies.now ?? (() => new Date());
+  return withFounderOwnerPreviewWorkAuthority(
+    { userId, now, requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden },
+    { ...dependencies, generalReleaseAuthority: "setup" },
+    async (tx, at) => {
       await lockOperator(tx, operator.id);
       const operation = await ensureCoreOperation(
         tx,
         operator.id,
-        dependencies.now?.() ?? new Date(),
+        at,
+        undefined,
+        dependencies.routingPolicy,
       );
       if (operation?.status !== "core" || !operation.processingConsentId) {
         return operation ? projectCoreOperation(tx, operation, operator.id) : null;
@@ -262,7 +283,7 @@ export async function reconcileFounderCoreOperationForUser(
             .limit(1)
         : [];
       if (calendar?.evidenceState === "current" && mail?.evidenceState === "current") {
-        await ensureCoreBrief(tx, operation, dependencies.now?.() ?? new Date());
+        await ensureCoreBrief(tx, operation, at);
       }
       const [fresh] = await tx
         .select()
@@ -270,7 +291,7 @@ export async function reconcileFounderCoreOperationForUser(
         .where(eq(operatorLimitedOperations.id, operation.id))
         .limit(1);
       return fresh ? projectCoreOperation(tx, fresh, operator.id) : null;
-    }),
+    },
   );
 }
 
@@ -279,11 +300,19 @@ export async function openFounderCoreBriefForUser(
   dependencies: FounderCoreOperationDependencies = {},
 ): Promise<FounderCoreOperationDto> {
   const operator = await ensureFounderOperatorForUser(userId, dependencies);
-  return withConnection(dependencies, async (connection) => {
-    const at = dependencies.now?.() ?? new Date();
-    return connection.db.transaction(async (tx) => {
+  const now = dependencies.now ?? (() => new Date());
+  return withFounderOwnerPreviewWorkAuthority(
+    { userId, now, requiredCapabilities: FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.forbidden },
+    { ...dependencies, generalReleaseAuthority: "setup" },
+    async (tx, at) => {
       await lockOperator(tx, operator.id);
-      const operation = await ensureCoreOperation(tx, operator.id, at);
+      const operation = await ensureCoreOperation(
+        tx,
+        operator.id,
+        at,
+        undefined,
+        dependencies.routingPolicy,
+      );
       if (operation?.status !== "core") {
         throw new FounderCoreOperationError(
           "core_operation_not_ready",
@@ -301,6 +330,15 @@ export async function openFounderCoreBriefForUser(
         throw new FounderCoreOperationError(
           "first_brief_not_ready",
           "Bruno is waiting for Current Calendar and Mail evidence.",
+        );
+      }
+      if (
+        brief.evidenceState !== "current" ||
+        !((brief.quiet && brief.attentionCount === 0) || (!brief.quiet && brief.attentionCount > 0))
+      ) {
+        throw new FounderCoreOperationError(
+          "first_brief_evidence_unavailable",
+          "Founder Activation requires a supported item or a Verified Quiet Brief from Current evidence.",
         );
       }
       const openedAt = brief.openedAt ?? at;
@@ -323,6 +361,12 @@ export async function openFounderCoreBriefForUser(
           }),
         })
         .onConflictDoNothing();
+      await recordFounderGeneralReleaseActivationInTransaction(tx, {
+        userId,
+        operatorId: operator.id,
+        firstBriefId: brief.id,
+        activatedAt: at,
+      });
       await tx
         .update(operatorLimitedOperations)
         .set({
@@ -343,8 +387,8 @@ export async function openFounderCoreBriefForUser(
           503,
         );
       return projectCoreOperation(tx, fresh, operator.id);
-    });
-  });
+    },
+  );
 }
 
 async function ensureCoreOperation(
@@ -352,8 +396,9 @@ async function ensureCoreOperation(
   operatorId: string,
   at: Date,
   pair?: Awaited<ReturnType<typeof readyCoreConnectionSet>>,
+  routingPolicy?: FounderAiCompatibilityPolicy,
 ) {
-  const currentPair = pair ?? (await readyCoreConnectionSet(tx, operatorId, at));
+  const currentPair = pair ?? (await readyCoreConnectionSet(tx, operatorId, at, routingPolicy));
   const [existing] = await tx
     .select()
     .from(operatorLimitedOperations)
@@ -425,7 +470,12 @@ async function ensureCoreOperation(
   );
 }
 
-async function readyCoreConnectionSet(tx: CoreTransaction, operatorId: string, now = new Date()) {
+async function readyCoreConnectionSet(
+  tx: CoreTransaction,
+  operatorId: string,
+  now = new Date(),
+  routingPolicy?: FounderAiCompatibilityPolicy,
+) {
   const aiConnections = await tx
     .select()
     .from(operatorAiConnections)
@@ -436,7 +486,10 @@ async function readyCoreConnectionSet(tx: CoreTransaction, operatorId: string, n
       ),
     )
     .orderBy(desc(operatorAiConnections.updatedAt));
-  const aiDecision = selectFounderAiProvider(aiConnections, { now });
+  const aiDecision = selectFounderAiProvider(aiConnections, {
+    now,
+    ...(routingPolicy ? { policy: routingPolicy } : {}),
+  });
   const ai = aiDecision
     ? aiConnections.find((connection) => connection.id === aiDecision.connectionId)
     : undefined;

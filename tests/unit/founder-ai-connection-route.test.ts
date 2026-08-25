@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   pollAnthropicAuthorization: vi.fn(),
   recheckAnthropicConnection: vi.fn(),
   disconnectAnthropicConnection: vi.fn(),
+  hasGeneralReleaseSetupAccess: vi.fn(),
   requireApplicationUser: vi.fn(),
+  requireWorkspaceAccess: vi.fn(),
 }));
 
 vi.mock("@/src/server/operators/founder-ai-connection", async (importOriginal) => {
@@ -32,6 +34,14 @@ vi.mock("@/src/server/operators/founder-ai-connection", async (importOriginal) =
 
 vi.mock("@/src/server/users/configured-application-user", () => ({
   requireConfiguredApplicationUser: mocks.requireApplicationUser,
+}));
+
+vi.mock("@/src/server/founder-product-contract/initial-general-release", () => ({
+  hasFounderGeneralReleaseSetupAccessForUser: mocks.hasGeneralReleaseSetupAccess,
+}));
+
+vi.mock("@/app/api/operator/_shared/owner-preview-access", () => ({
+  requireFounderOperatorWorkspaceAccess: mocks.requireWorkspaceAccess,
 }));
 
 vi.mock("@/src/server/operators/founder-openai-release", async (importOriginal) => ({
@@ -59,6 +69,8 @@ const CONNECTION = {
 describe("Founder AI connection route", () => {
   beforeEach(() => {
     mocks.requireApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+    mocks.requireWorkspaceAccess.mockResolvedValue(null);
+    mocks.hasGeneralReleaseSetupAccess.mockResolvedValue(false);
     mocks.getConnection.mockResolvedValue(CONNECTION);
     mocks.startAuthorization.mockResolvedValue({
       connection: { ...CONNECTION, status: "authorizing", workState: "paused", receipt: null },
@@ -101,7 +113,10 @@ describe("Founder AI connection route", () => {
     });
   });
 
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+  });
 
   it("returns a plain connection summary without model or credential fields", async () => {
     const { GET } = await import("@/app/api/operator/connections/route");
@@ -112,6 +127,30 @@ describe("Founder AI connection route", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(body).toEqual({ connection: CONNECTION });
     expect(JSON.stringify(body)).not.toMatch(/model|token|secret|credential|api.?key/i);
+  });
+
+  it("reads persisted OpenAI state without a live provider recheck only in the deterministic development contract", async () => {
+    vi.stubEnv("BRUNO_AUTH_MODE", "development");
+    vi.stubEnv("BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE", "deterministic");
+    const { GET } = await import("@/app/api/operator/connections/route");
+
+    const response = await GET(new Request("http://localhost/api/operator/connections"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.getConnection).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.recheckConnection).not.toHaveBeenCalled();
+  });
+
+  it("preserves the live OpenAI recheck outside the deterministic development contract", async () => {
+    vi.stubEnv("BRUNO_AUTH_MODE", "production");
+    vi.stubEnv("BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE", "deterministic");
+    const { GET } = await import("@/app/api/operator/connections/route");
+
+    const response = await GET(new Request("http://localhost/api/operator/connections"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recheckConnection).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.getConnection).not.toHaveBeenCalled();
   });
 
   it("starts structured device authorization and returns only the browser handoff", async () => {
@@ -170,7 +209,7 @@ describe("Founder AI connection route", () => {
     expect(mocks.disconnectConnection).toHaveBeenCalledWith(USER_ID);
   });
 
-  it("dispatches Anthropic actions through the same route contract without exposing credentials", async () => {
+  it("keeps Anthropic hidden during Owner Preview even when globally released", async () => {
     const { POST } = await import("@/app/api/operator/connections/route");
     const base = "http://localhost/api/operator/connections";
     const started = await POST(
@@ -181,8 +220,8 @@ describe("Founder AI connection route", () => {
       undefined,
       { isAnthropicReleased: () => true },
     );
-    expect(started.status).toBe(200);
-    expect(mocks.startAnthropicAuthorization).toHaveBeenCalledWith(USER_ID);
+    expect(started.status).toBe(409);
+    expect(mocks.startAnthropicAuthorization).not.toHaveBeenCalled();
     const polled = await POST(
       new Request(base, {
         method: "POST",
@@ -195,9 +234,11 @@ describe("Founder AI connection route", () => {
       undefined,
       { isAnthropicReleased: () => true },
     );
-    expect(polled.status).toBe(200);
-    expect(mocks.pollAnthropicAuthorization).toHaveBeenCalledWith(USER_ID, "claude-session");
-    expect(JSON.stringify(await polled.json())).not.toMatch(/token|secret|setup-token|api.?key/i);
+    expect(polled.status).toBe(409);
+    expect(mocks.pollAnthropicAuthorization).not.toHaveBeenCalled();
+    await expect(polled.json()).resolves.toMatchObject({
+      error: { code: "owner_preview_capability_unavailable" },
+    });
   });
 
   it("fails closed before invoking Anthropic without exact acceptance", async () => {
@@ -219,12 +260,32 @@ describe("Founder AI connection route", () => {
     expect(start.status).toBe(409);
     await expect(start.json()).resolves.toEqual({
       error: {
-        code: "provider_not_released",
-        message: "Anthropic is unavailable until current Connected Acceptance passes.",
+        code: "owner_preview_capability_unavailable",
+        message: "Anthropic is unavailable during Owner Preview.",
       },
     });
     expect(mocks.recheckAnthropicConnection).not.toHaveBeenCalled();
     expect(mocks.startAnthropicAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("reads Anthropic state through the Anthropic recheck for General Release setup", async () => {
+    const { GET } = await import("@/app/api/operator/connections/route");
+    const response = await GET(
+      new Request("http://localhost/api/operator/connections?provider=anthropic"),
+      undefined,
+      {
+        hasGeneralReleaseSetupAccess: async () => true,
+        isAnthropicReleased: () => true,
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      connection: { provider: "anthropic" },
+    });
+    expect(mocks.recheckAnthropicConnection).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.getConnection).not.toHaveBeenCalled();
+    expect(mocks.recheckConnection).not.toHaveBeenCalled();
   });
 
   it("does not let missing Anthropic evidence block released OpenAI", async () => {
@@ -240,6 +301,32 @@ describe("Founder AI connection route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.startAuthorization).toHaveBeenCalledWith(USER_ID);
+    expect(mocks.startAnthropicAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("rejects an explicitly unsupported provider without invoking OpenAI", async () => {
+    const { GET, POST } = await import("@/app/api/operator/connections/route");
+    const read = await GET(
+      new Request("http://localhost/api/operator/connections?provider=unsupported"),
+    );
+    const start = await POST(
+      new Request("http://localhost/api/operator/connections", {
+        method: "POST",
+        body: JSON.stringify({ action: "start", provider: "unsupported" }),
+      }),
+    );
+
+    expect(read.status).toBe(400);
+    expect(start.status).toBe(400);
+    await expect(read.json()).resolves.toMatchObject({
+      error: { code: "validation_failed", message: "Choose a supported AI provider." },
+    });
+    await expect(start.json()).resolves.toMatchObject({
+      error: { code: "validation_failed", message: "Choose a supported AI provider." },
+    });
+    expect(mocks.getConnection).not.toHaveBeenCalled();
+    expect(mocks.startAuthorization).not.toHaveBeenCalled();
+    expect(mocks.recheckAnthropicConnection).not.toHaveBeenCalled();
     expect(mocks.startAnthropicAuthorization).not.toHaveBeenCalled();
   });
 

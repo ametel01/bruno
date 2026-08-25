@@ -1,0 +1,2 @@
+ALTER TABLE "founder_recovery_archives" ADD COLUMN "application_revision" text;--> statement-breakpoint
+ALTER TABLE "founder_recovery_archives" ADD CONSTRAINT "founder_recovery_archives_application_revision_check" CHECK ("founder_recovery_archives"."application_revision" IS NULL OR "founder_recovery_archives"."application_revision" ~ '^[a-f0-9]{40}$');

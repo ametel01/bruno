@@ -1,0 +1,792 @@
+import { describe, expect, it, vi } from "vitest";
+import { GET, POST } from "@/app/api/operator/general-release/route";
+import { buildTestAnthropicAcceptanceRelease } from "@/scripts/founder-anthropic-test-release";
+import { buildTestGoogleMailSendingAcceptanceRelease } from "@/scripts/founder-google-mail-sending-test-release";
+import { buildTestGoogleConnectedAcceptanceRelease } from "@/scripts/founder-google-test-release";
+import { buildTestOpenAiConnectedAcceptanceRelease } from "@/scripts/founder-openai-test-release";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import {
+  founderGeneralReleaseActivations,
+  founderReleaseDecisions,
+  operatorAiConnections,
+  operatorCalendarConnections,
+  operatorLimitedOperations,
+  operatorMorningBriefs,
+  operators,
+  runners,
+  users,
+} from "@/src/server/db/schema";
+import {
+  areFounderGeneralReleaseAiProvidersReleased,
+  confirmFounderGeneralReleaseEligibility,
+  createFounderGeneralReleaseOperator,
+  type FounderGeneralReleaseActivationDto,
+  FounderGeneralReleaseError,
+  founderGeneralReleaseSetupAuthorizesInTransaction,
+  getFounderGeneralReleaseActivationForUser,
+  hasFounderGeneralReleaseSetupAccessForUser,
+  reconcileFounderGeneralReleaseDeadlineForUser,
+} from "@/src/server/founder-product-contract/initial-general-release";
+
+const USER_ID = "00000000-0000-4000-8000-000000000381";
+const NOW = new Date("2026-08-23T08:00:00.000Z");
+const REVISION = "a".repeat(40);
+const RUNTIME_REVISION = "runtime-387";
+const GENERAL_RELEASE_ENV = {
+  VERCEL_GIT_COMMIT_SHA: REVISION,
+  BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION: RUNTIME_REVISION,
+  BRUNO_INITIAL_GENERAL_RELEASE_AVAILABILITY: "open",
+  BRUNO_INITIAL_GENERAL_RELEASE_GEOGRAPHIES: "PH",
+  BRUNO_INITIAL_GENERAL_RELEASE_PRICE_LABEL: "$30/month",
+  BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
+    NOW,
+    REVISION,
+  ),
+  BRUNO_ANTHROPIC_CONNECTED_ACCEPTANCE_RELEASE: buildTestAnthropicAcceptanceRelease(NOW, REVISION),
+  BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
+    "calendar_reading",
+    NOW,
+    REVISION,
+  ),
+  BRUNO_GOOGLE_MAIL_READING_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
+    "gmail_reading",
+    NOW,
+    REVISION,
+  ),
+  BRUNO_GOOGLE_MAIL_SENDING_CONNECTED_ACCEPTANCE_RELEASE:
+    buildTestGoogleMailSendingAcceptanceRelease(NOW, REVISION),
+};
+
+describe("public Initial General Release application boundary", () => {
+  it("requires current exact-revision releases for both OpenAI and Anthropic", () => {
+    const revision = "a".repeat(40);
+    const env = {
+      VERCEL_GIT_COMMIT_SHA: revision,
+      BRUNO_OPENAI_CONNECTED_ACCEPTANCE_RELEASE: buildTestOpenAiConnectedAcceptanceRelease(
+        NOW,
+        revision,
+      ),
+      BRUNO_ANTHROPIC_CONNECTED_ACCEPTANCE_RELEASE: buildTestAnthropicAcceptanceRelease(
+        NOW,
+        revision,
+      ),
+    };
+    expect(areFounderGeneralReleaseAiProvidersReleased(env, NOW)).toBe(true);
+    expect(
+      areFounderGeneralReleaseAiProvidersReleased(
+        { ...env, BRUNO_ANTHROPIC_CONNECTED_ACCEPTANCE_RELEASE: undefined },
+        NOW,
+      ),
+    ).toBe(false);
+    expect(
+      areFounderGeneralReleaseAiProvidersReleased(
+        { ...env, VERCEL_GIT_COMMIT_SHA: "b".repeat(40) },
+        NOW,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a zero-cost published label instead of creating a permanent free tier", async () => {
+    const connection = createDatabaseConnection();
+    try {
+      await seedApplicantAndGeneralReleaseAuthority(connection);
+      await expect(
+        confirmFounderGeneralReleaseEligibility(
+          {
+            userId: USER_ID,
+            serviceBusinessConfirmed: true,
+            geographyCode: "PH",
+            now: NOW,
+          },
+          {
+            createConnection: () => connection,
+            env: { ...GENERAL_RELEASE_ENV, BRUNO_INITIAL_GENERAL_RELEASE_PRICE_LABEL: "$0/month" },
+          },
+        ),
+      ).rejects.toMatchObject({
+        code: "general_release_price_invalid",
+        status: 503,
+      });
+    } finally {
+      await connection.client.unsafe("truncate table users restart identity cascade");
+      await connection.client.unsafe(
+        "truncate table founder_release_decisions restart identity cascade",
+      );
+      await connection.close();
+    }
+  });
+
+  it("admits nobody when availability is open but the persisted decision is absent", async () => {
+    await expect(
+      confirmFounderGeneralReleaseEligibility(
+        {
+          userId: USER_ID,
+          serviceBusinessConfirmed: true,
+          geographyCode: "PH",
+          now: NOW,
+        },
+        { env: GENERAL_RELEASE_ENV },
+      ),
+    ).rejects.toMatchObject({ code: "general_release_decision_required", status: 503 });
+  });
+
+  it("requires Clerk authentication and exposes no-cache capacity and price facts", async () => {
+    const unauthorized = await GET(
+      new Request("https://bruno.example/api/operator/general-release"),
+      undefined,
+      { requireUser: async () => ({ ok: false, status: 401, code: "unauthenticated" }) },
+    );
+    expect(unauthorized.status).toBe(401);
+
+    const getStatus = vi.fn(async () => status());
+    const response = await GET(
+      new Request("https://bruno.example/api/operator/general-release"),
+      undefined,
+      {
+        requireUser: async () => ({ ok: true, userId: USER_ID }),
+        getStatus,
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toMatchObject({
+      generalRelease: {
+        admission: { publicSelfServe: true, personalSelection: false, capacity: "available" },
+        offer: {
+          priceLabel: "$30/month",
+          brunoPriceSeparateFromAiProviderCosts: true,
+          aiProviderCosts: "Paid separately to OpenAI or Anthropic",
+          freeTier: false,
+          betaConversion: false,
+        },
+      },
+    });
+    expect(getStatus).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it("accepts public eligibility before explicit creation and preserves each decision", async () => {
+    const confirmEligibility = vi.fn(async () => status());
+    const createOperator = vi.fn(async () => status({ state: "activation_pending" }));
+    const declineOffer = vi.fn(async () => undefined);
+    const getStatus = vi.fn(async () => status({ state: "retirement_due" }));
+    const dependencies = {
+      requireUser: async () => ({ ok: true as const, userId: USER_ID }),
+      confirmEligibility,
+      createOperator,
+      declineOffer,
+      getStatus,
+      now: () => NOW,
+    };
+
+    const eligibility = await POST(
+      request({
+        action: "confirm_eligibility",
+        serviceBusinessConfirmed: true,
+        geographyCode: "ph",
+      }),
+      undefined,
+      dependencies,
+    );
+    expect(eligibility.status).toBe(200);
+    expect(confirmEligibility).toHaveBeenCalledWith({
+      userId: USER_ID,
+      serviceBusinessConfirmed: true,
+      geographyCode: "ph",
+      now: NOW,
+    });
+    expect(createOperator).not.toHaveBeenCalled();
+
+    const creation = await POST(request({ action: "create_operator" }), undefined, dependencies);
+    expect(creation.status).toBe(201);
+    expect(createOperator).toHaveBeenCalledWith({ userId: USER_ID, now: NOW });
+
+    const decline = await POST(request({ action: "decline_offer" }), undefined, dependencies);
+    expect(decline.status).toBe(200);
+    expect(declineOffer).toHaveBeenCalledWith(USER_ID, NOW);
+    expect(getStatus).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it("fails closed when required setup or capacity evidence is unavailable", async () => {
+    const response = await POST(request({ action: "create_operator" }), undefined, {
+      requireUser: async () => ({ ok: true, userId: USER_ID }),
+      createOperator: async () => {
+        throw new FounderGeneralReleaseError(
+          "connections_not_ready",
+          "Ready AI, Company Connections, and consent are required.",
+        );
+      },
+      now: () => NOW,
+    });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "connections_not_ready",
+        message: "Ready AI, Company Connections, and consent are required.",
+      },
+    });
+  });
+
+  it("reconciles an idempotently reused runner after a provisioning response is lost", async () => {
+    const connection = createDatabaseConnection();
+    try {
+      const decisionId = await seedApplicantAndGeneralReleaseAuthority(connection);
+      const [operator] = await connection.db.select().from(operators);
+      const [runner] = await connection.db
+        .insert(runners)
+        .values({
+          userId: USER_ID,
+          name: "General Release recovered provision",
+          kind: "digitalocean",
+          status: "online",
+          provider: "digitalocean",
+          providerResourceId: "droplet-recovered-387",
+          region: "sgp1",
+          sizeSlug: "s-1vcpu-1gb",
+          image: "ubuntu-24-04-x64",
+          provisioningStatus: "ready",
+          provisioningOperationKey: `bruno-deploy-${"f".repeat(32)}`,
+          provisioningStartedAt: NOW,
+          provisioningCompletedAt: NOW,
+          createdAt: NOW,
+          updatedAt: NOW,
+        })
+        .returning();
+      if (!operator || !runner) throw new Error("Recovered provisioning fixture is unavailable.");
+      await connection.db.insert(founderGeneralReleaseActivations).values({
+        userId: USER_ID,
+        operatorId: operator.id,
+        releaseDecisionId: decisionId,
+        status: "provisioning",
+        serviceBusinessConfirmedAt: NOW,
+        geographyCode: "PH",
+        admissionState: "eligible",
+        admissionReason: "Public capacity is available.",
+        publishedPriceLabel: "$30/month",
+        capacityObservedAt: NOW,
+        createConfirmedAt: NOW,
+        setupEvidenceDigest: `sha256:${"f".repeat(64)}`,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      const provisionRunner = vi.fn(async () => ({
+        ok: true as const,
+        duplicate: true,
+        runner: {
+          id: runner.id,
+          name: runner.name,
+          kind: "digitalocean" as const,
+          status: "online",
+          provider: "digitalocean" as const,
+          providerResourceId: runner.providerResourceId,
+          region: "sgp1",
+          sizeSlug: "s-1vcpu-1gb",
+          image: "ubuntu-24-04-x64",
+          provisioning: {
+            status: "ready" as const,
+            error: null,
+            startedAt: NOW.toISOString(),
+            completedAt: NOW.toISOString(),
+            phases: [
+              {
+                phase: "creating" as const,
+                status: "completed" as const,
+                message: "Authoritative Droplet creation confirmed.",
+                metadata: { providerCreatedAt: NOW.toISOString() },
+                createdAt: NOW.toISOString(),
+              },
+            ],
+          },
+        },
+      }));
+
+      await expect(
+        createFounderGeneralReleaseOperator(
+          { userId: USER_ID, now: NOW },
+          {
+            createConnection: () => connection,
+            env: {
+              ...GENERAL_RELEASE_ENV,
+              BRUNO_INITIAL_GENERAL_RELEASE_AVAILABILITY: "waitlist",
+            },
+            provisionRunner,
+          },
+        ),
+      ).resolves.toMatchObject({ state: "activation_pending" });
+      expect(provisionRunner).toHaveBeenCalledTimes(1);
+      await expect(connection.db.select().from(founderGeneralReleaseActivations)).resolves.toEqual([
+        expect.objectContaining({
+          status: "activation_pending",
+          runnerId: runner.id,
+          dropletCreatedAt: NOW,
+        }),
+      ]);
+    } finally {
+      await connection.client.unsafe("truncate table users restart identity cascade");
+      await connection.close();
+    }
+  });
+
+  it("uses a fresh same-candidate global Resume after the bound Enter expires", async () => {
+    const connection = createDatabaseConnection();
+    const resumedAt = new Date(NOW.valueOf() + 25 * 60 * 60 * 1_000);
+    try {
+      const enterId = await seedApplicantAndGeneralReleaseAuthority(connection);
+      const [operator] = await connection.db.select().from(operators);
+      if (!operator) throw new Error("Resume fixture operator is unavailable.");
+      await connection.db.insert(founderGeneralReleaseActivations).values({
+        userId: USER_ID,
+        operatorId: operator.id,
+        releaseDecisionId: enterId,
+        status: "provisioning",
+        serviceBusinessConfirmedAt: NOW,
+        geographyCode: "PH",
+        admissionState: "eligible",
+        admissionReason: "Public capacity is available.",
+        publishedPriceLabel: "$30/month",
+        capacityObservedAt: NOW,
+        createConfirmedAt: NOW,
+        setupEvidenceDigest: `sha256:${"e".repeat(64)}`,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      const [resume] = await connection.db
+        .insert(founderReleaseDecisions)
+        .values({
+          stage: "initial_general_release",
+          outcome: "resume",
+          applicationRevision: REVISION,
+          runtimeRevision: RUNTIME_REVISION,
+          capabilityManifest: [
+            "openai",
+            "anthropic",
+            "calendar_reading",
+            "gmail_reading",
+            "gmail_sending",
+          ],
+          evidenceDigests: Array.from(
+            { length: 12 },
+            (_, index) => `sha256:${(index + 1).toString(16).repeat(64)}`,
+          ),
+          authorityExpiresAt: new Date(resumedAt.valueOf() + 24 * 60 * 60 * 1_000),
+          decidedAt: resumedAt,
+          createdAt: resumedAt,
+        })
+        .returning({ id: founderReleaseDecisions.id });
+      if (!resume) throw new Error("Resume fixture decision is unavailable.");
+
+      await expect(
+        connection.db.transaction((tx) =>
+          founderGeneralReleaseSetupAuthorizesInTransaction(
+            tx,
+            USER_ID,
+            resumedAt,
+            ["openai"],
+            GENERAL_RELEASE_ENV,
+          ),
+        ),
+      ).resolves.toBe(true);
+      await expect(
+        getFounderGeneralReleaseActivationForUser(USER_ID, {
+          createConnection: () => connection,
+          env: GENERAL_RELEASE_ENV,
+          now: () => resumedAt,
+        }),
+      ).resolves.toMatchObject({ state: "provisioning", release: { qualified: true } });
+
+      const provisionRunner = vi.fn(async () => {
+        throw new Error("provider retry reached");
+      });
+      await expect(
+        createFounderGeneralReleaseOperator(
+          { userId: USER_ID, now: resumedAt },
+          { createConnection: () => connection, env: GENERAL_RELEASE_ENV, provisionRunner },
+        ),
+      ).rejects.toThrow("provider retry reached");
+      expect(provisionRunner).toHaveBeenCalledTimes(1);
+      await expect(connection.db.select().from(founderGeneralReleaseActivations)).resolves.toEqual([
+        expect.objectContaining({ status: "provisioning", releaseDecisionId: resume.id }),
+      ]);
+    } finally {
+      await connection.client.unsafe("truncate table users restart identity cascade");
+      await connection.close();
+    }
+  });
+
+  it("requires setup eligibility to be reconfirmed before binding a same-candidate Resume", async () => {
+    const connection = createDatabaseConnection();
+    const resumedAt = new Date(NOW.valueOf() + 25 * 60 * 60 * 1_000);
+    try {
+      const enterId = await seedApplicantAndGeneralReleaseAuthority(connection);
+      const [operator] = await connection.db.select().from(operators);
+      if (!operator) throw new Error("Resume setup fixture operator is unavailable.");
+      await connection.db.insert(founderGeneralReleaseActivations).values({
+        userId: USER_ID,
+        operatorId: operator.id,
+        releaseDecisionId: enterId,
+        status: "setup",
+        serviceBusinessConfirmedAt: NOW,
+        geographyCode: "PH",
+        admissionState: "eligible",
+        admissionReason: "Public capacity is available.",
+        publishedPriceLabel: "$30/month",
+        capacityObservedAt: NOW,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      const [resume] = await connection.db
+        .insert(founderReleaseDecisions)
+        .values({
+          stage: "initial_general_release",
+          outcome: "resume",
+          applicationRevision: REVISION,
+          runtimeRevision: RUNTIME_REVISION,
+          capabilityManifest: [
+            "openai",
+            "anthropic",
+            "calendar_reading",
+            "gmail_reading",
+            "gmail_sending",
+          ],
+          evidenceDigests: Array.from(
+            { length: 12 },
+            (_, index) => `sha256:${(index + 1).toString(16).repeat(64)}`,
+          ),
+          authorityExpiresAt: new Date(resumedAt.valueOf() + 24 * 60 * 60 * 1_000),
+          decidedAt: resumedAt,
+          createdAt: resumedAt,
+        })
+        .returning({ id: founderReleaseDecisions.id });
+      if (!resume) throw new Error("Resume setup decision is unavailable.");
+
+      const provisionRunner = vi.fn();
+      await expect(
+        createFounderGeneralReleaseOperator(
+          { userId: USER_ID, now: resumedAt },
+          { createConnection: () => connection, env: GENERAL_RELEASE_ENV, provisionRunner },
+        ),
+      ).rejects.toMatchObject({ code: "eligibility_required" });
+      expect(provisionRunner).not.toHaveBeenCalled();
+      await expect(connection.db.select().from(founderGeneralReleaseActivations)).resolves.toEqual([
+        expect.objectContaining({ status: "setup", releaseDecisionId: enterId }),
+      ]);
+
+      await expect(
+        confirmFounderGeneralReleaseEligibility(
+          {
+            userId: USER_ID,
+            serviceBusinessConfirmed: true,
+            geographyCode: "PH",
+            now: resumedAt,
+          },
+          { createConnection: () => connection, env: GENERAL_RELEASE_ENV },
+        ),
+      ).resolves.toMatchObject({ state: "setup", setup: { requiresReleaseReconfirmation: false } });
+      await expect(connection.db.select().from(founderGeneralReleaseActivations)).resolves.toEqual([
+        expect.objectContaining({ status: "setup", releaseDecisionId: resume.id }),
+      ]);
+    } finally {
+      await connection.client.unsafe("truncate table users restart identity cascade");
+      await connection.close();
+    }
+  });
+
+  it("stops abandoned activation at 24 hours and makes retirement due within one hour", async () => {
+    const connection = createDatabaseConnection();
+    const activationDueAt = new Date("2026-08-24T08:00:00.000Z");
+    try {
+      await connection.db.insert(users).values({ id: USER_ID });
+      const [operator] = await connection.db
+        .insert(operators)
+        .values({ userId: USER_ID })
+        .returning();
+      const [runner] = await connection.db
+        .insert(runners)
+        .values({
+          userId: USER_ID,
+          name: "General Release deadline fixture",
+          kind: "digitalocean",
+          status: "online",
+          provider: "digitalocean",
+          providerResourceId: "droplet-general-release-deadline",
+          providerFirewallId: "firewall-general-release-deadline",
+          region: "sgp1",
+          sizeSlug: "s-1vcpu-1gb",
+          image: "ubuntu-24-04-x64",
+          provisioningStatus: "ready",
+          provisioningOperationKey: `bruno-deploy-${"c".repeat(32)}`,
+          provisioningStartedAt: NOW,
+          provisioningCompletedAt: NOW,
+          createdAt: NOW,
+          updatedAt: NOW,
+        })
+        .returning();
+      if (!operator || !runner) throw new Error("Deadline fixture could not be created.");
+      await connection.db.insert(founderGeneralReleaseActivations).values({
+        userId: USER_ID,
+        operatorId: operator.id,
+        runnerId: runner.id,
+        status: "activation_pending",
+        serviceBusinessConfirmedAt: NOW,
+        geographyCode: "PH",
+        admissionState: "eligible",
+        admissionReason: "Public capacity is available in this geography.",
+        publishedPriceLabel: "$30/month",
+        capacityObservedAt: NOW,
+        createConfirmedAt: NOW,
+        setupEvidenceDigest: `sha256:${"d".repeat(64)}`,
+        dropletCreatedAt: NOW,
+        activationDueAt,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+
+      expect(
+        await hasFounderGeneralReleaseSetupAccessForUser(USER_ID, {
+          createConnection: () => connection,
+          now: () => activationDueAt,
+        }),
+      ).toBe(false);
+      await expect(
+        connection.db.transaction((tx) =>
+          founderGeneralReleaseSetupAuthorizesInTransaction(tx, USER_ID, activationDueAt),
+        ),
+      ).resolves.toBe(false);
+
+      await reconcileFounderGeneralReleaseDeadlineForUser(USER_ID, activationDueAt, {
+        createConnection: () => connection,
+      });
+
+      expect(await connection.db.select().from(founderGeneralReleaseActivations)).toEqual([
+        expect.objectContaining({
+          status: "retirement_due",
+          workStoppedAt: activationDueAt,
+          retirementDueAt: new Date(activationDueAt.valueOf() + 60 * 60 * 1_000),
+        }),
+      ]);
+      expect(await connection.db.select().from(operators)).toEqual([
+        expect.objectContaining({
+          externalActionPause: true,
+          externalActionPausedAt: activationDueAt,
+        }),
+      ]);
+    } finally {
+      await connection.client.unsafe("truncate table users restart identity cascade");
+      await connection.close();
+    }
+  });
+
+  it("keeps the activation pause separate from the 24-hour purchase retirement deadline", async () => {
+    const connection = createDatabaseConnection();
+    const activatedAt = new Date("2026-08-23T09:00:00.000Z");
+    const entitlementDueAt = new Date("2026-08-24T09:00:00.000Z");
+    try {
+      await connection.db.insert(users).values({ id: USER_ID });
+      const [operator] = await connection.db
+        .insert(operators)
+        .values({
+          userId: USER_ID,
+          externalActionPause: true,
+          externalActionPauseReason: "Founder Activation awaits verified Product Entitlement.",
+          externalActionPausedAt: activatedAt,
+        })
+        .returning();
+      const [runner] = await connection.db
+        .insert(runners)
+        .values({
+          userId: USER_ID,
+          name: "General Release purchase deadline fixture",
+          kind: "digitalocean",
+          status: "online",
+          provider: "digitalocean",
+          providerResourceId: "droplet-general-release-purchase-deadline",
+          providerFirewallId: "firewall-general-release-purchase-deadline",
+          region: "sgp1",
+          sizeSlug: "s-1vcpu-1gb",
+          image: "ubuntu-24-04-x64",
+          provisioningStatus: "ready",
+          provisioningOperationKey: `bruno-deploy-${"e".repeat(32)}`,
+          provisioningStartedAt: NOW,
+          provisioningCompletedAt: NOW,
+          createdAt: NOW,
+          updatedAt: NOW,
+        })
+        .returning();
+      if (!operator || !runner) throw new Error("Purchase deadline fixture could not be created.");
+      const [aiConnection] = await connection.db
+        .insert(operatorAiConnections)
+        .values({ operatorId: operator.id })
+        .returning();
+      const [calendarConnection] = await connection.db
+        .insert(operatorCalendarConnections)
+        .values({ operatorId: operator.id })
+        .returning();
+      if (!aiConnection || !calendarConnection) {
+        throw new Error("Purchase deadline connections could not be created.");
+      }
+      const [operation] = await connection.db
+        .insert(operatorLimitedOperations)
+        .values({
+          operatorId: operator.id,
+          aiConnectionId: aiConnection.id,
+          calendarConnectionId: calendarConnection.id,
+        })
+        .returning();
+      if (!operation) throw new Error("Purchase deadline operation could not be created.");
+      const [brief] = await connection.db
+        .insert(operatorMorningBriefs)
+        .values({
+          operatorId: operator.id,
+          operationId: operation.id,
+          generation: 1,
+          status: "opened",
+          evidenceState: "current",
+          quiet: true,
+          attentionCount: 0,
+          content: "Nothing needs attention right now. This is a verified quiet brief.",
+          evidenceDigest: `sha256:${"a".repeat(64)}`,
+          evidenceWatermark: `sha256:${"a".repeat(64)}`,
+          windowStartedAt: new Date("2026-08-23T08:00:00.000Z"),
+          windowEndedAt: activatedAt,
+          generatedAt: activatedAt,
+          openedAt: activatedAt,
+        })
+        .returning();
+      if (!brief) throw new Error("Purchase deadline brief could not be created.");
+      await connection.db.insert(founderGeneralReleaseActivations).values({
+        userId: USER_ID,
+        operatorId: operator.id,
+        runnerId: runner.id,
+        status: "activated",
+        serviceBusinessConfirmedAt: NOW,
+        geographyCode: "PH",
+        admissionState: "eligible",
+        admissionReason: "Public capacity is available in this geography.",
+        publishedPriceLabel: "$30/month",
+        capacityObservedAt: NOW,
+        createConfirmedAt: NOW,
+        setupEvidenceDigest: `sha256:${"f".repeat(64)}`,
+        dropletCreatedAt: NOW,
+        activationDueAt: new Date("2026-08-24T08:00:00.000Z"),
+        firstBriefId: brief.id,
+        activationEvidenceDigest: `sha256:${"b".repeat(64)}`,
+        activatedAt,
+        entitlementDueAt,
+        workStoppedAt: activatedAt,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+
+      await reconcileFounderGeneralReleaseDeadlineForUser(USER_ID, entitlementDueAt, {
+        createConnection: () => connection,
+      });
+
+      expect(await connection.db.select().from(founderGeneralReleaseActivations)).toEqual([
+        expect.objectContaining({
+          status: "retirement_due",
+          workStoppedAt: activatedAt,
+          retirementDueAt: entitlementDueAt,
+        }),
+      ]);
+      expect(await connection.db.select().from(operators)).toEqual([
+        expect.objectContaining({
+          externalActionPause: true,
+          externalActionPausedAt: activatedAt,
+        }),
+      ]);
+    } finally {
+      await connection.client.unsafe("truncate table users restart identity cascade");
+      await connection.close();
+    }
+  });
+});
+
+function request(body: object): Request {
+  return new Request("https://bruno.example/api/operator/general-release", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+async function seedApplicantAndGeneralReleaseAuthority(
+  connection: DatabaseConnection,
+): Promise<string> {
+  await connection.db.insert(users).values({ id: USER_ID });
+  await connection.db.insert(operators).values({ userId: USER_ID });
+  const [decision] = await connection.db
+    .insert(founderReleaseDecisions)
+    .values({
+      stage: "initial_general_release",
+      outcome: "enter",
+      applicationRevision: REVISION,
+      runtimeRevision: RUNTIME_REVISION,
+      capabilityManifest: [
+        "openai",
+        "anthropic",
+        "calendar_reading",
+        "gmail_reading",
+        "gmail_sending",
+      ],
+      evidenceDigests: Array.from(
+        { length: 12 },
+        (_, index) => `sha256:${index.toString(16).repeat(64)}`,
+      ),
+      authorityExpiresAt: new Date(NOW.valueOf() + 24 * 60 * 60 * 1_000),
+      decidedAt: NOW,
+      createdAt: NOW,
+    })
+    .returning({ id: founderReleaseDecisions.id });
+  if (!decision) throw new Error("General Release authority fixture could not be created.");
+  return decision.id;
+}
+
+function status(
+  override: Partial<FounderGeneralReleaseActivationDto> = {},
+): FounderGeneralReleaseActivationDto {
+  return {
+    state: "setup",
+    admission: {
+      publicSelfServe: true,
+      personalSelection: false,
+      geographyCode: "PH",
+      capacity: "available",
+      reason: "Public capacity is available in this geography.",
+    },
+    release: {
+      qualified: true,
+      decisionState: "approved",
+      capabilities: [
+        { id: "openai", label: "OpenAI", state: "available" },
+        { id: "anthropic", label: "Anthropic", state: "available" },
+        { id: "calendar_reading", label: "Calendar reading", state: "available" },
+        { id: "gmail_reading", label: "Gmail reading", state: "available" },
+        { id: "gmail_sending", label: "One-to-one Gmail sending", state: "available" },
+      ],
+      providerChoice: "OpenAI, Anthropic, or both",
+      sending: "Off",
+      supportBoundary: "Ordinary product support",
+    },
+    setup: {
+      authenticated: true,
+      serviceBusinessConfirmed: true,
+      readyAiConnection: true,
+      selectedCompanyConnections: true,
+      processingConsent: true,
+      explicitCreateConfirmed: false,
+      requiresReleaseReconfirmation: false,
+      canCreate: true,
+    },
+    activation: { dropletCreatedAt: null, dueAt: null, activatedAt: null },
+    offer: {
+      available: false,
+      priceLabel: "$30/month",
+      brunoPriceSeparateFromAiProviderCosts: true,
+      aiProviderCosts: "Paid separately to OpenAI or Anthropic",
+      freeTier: false,
+      betaConversion: false,
+      decisionDueAt: null,
+    },
+    retirement: { dueAt: null, workStoppedAt: null },
+    ...override,
+  };
+}

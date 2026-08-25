@@ -1,10 +1,15 @@
 import {
+  founderOperatorAccessErrorResponse,
+  requireFounderOperatorWorkspaceAccess,
+} from "@/app/api/operator/_shared/owner-preview-access";
+import { FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS } from "@/src/server/founder-product-contract/preview-qualification";
+import {
   createFounderProposedActionForUser,
+  type FounderActionFamily,
+  type FounderProposedActionDraft,
   FounderProposedActionError,
   getFounderProposedActionsForUser,
   reviseFounderProposedActionForUser,
-  type FounderActionFamily,
-  type FounderProposedActionDraft,
 } from "@/src/server/operators/founder-proposed-actions";
 import type { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 import { requireConfiguredApplicationUser as defaultRequireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
@@ -27,6 +32,12 @@ export async function GET(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    "workspace",
+    { allowGeneralReleaseSetup: true },
+  );
+  if (accessFailure) return accessFailure;
   const actions = await (dependencies.getActions ?? getFounderProposedActionsForUser)(
     applicationUser.userId,
   );
@@ -42,6 +53,12 @@ export async function POST(
     dependencies.requireApplicationUser ?? defaultRequireConfiguredApplicationUser
   )();
   if (!applicationUser.ok) return authenticationResponse(applicationUser.status);
+  const accessFailure = await requireFounderOperatorWorkspaceAccess(
+    applicationUser.userId,
+    FOUNDER_OWNER_PREVIEW_WORK_REQUIREMENTS.conversation,
+    { allowGeneralReleaseSetup: true },
+  );
+  if (accessFailure) return accessFailure;
   let payload: unknown;
   try {
     payload = await request.json();
@@ -77,6 +94,8 @@ export async function POST(
     );
     return Response.json({ action }, { status: 201, headers: noStoreHeaders() });
   } catch (error) {
+    const accessResponse = founderOperatorAccessErrorResponse(error);
+    if (accessResponse) return accessResponse;
     if (error instanceof FounderProposedActionError) {
       return Response.json(
         { error: { code: error.code, message: error.message } },

@@ -70,7 +70,14 @@ BRUNO_OPERATOR_PASSWORD=replace-with-strong-operator-password
 Operator mode is explicit and fails closed when the password is absent or blank. It does not enable
 Clerk pages, sessions, or automatic legacy-user claiming. The production cutover replaces this mode
 with `clerk`; the operator password and Basic-auth code are removed only after hosted Clerk and
-ownership acceptance passes.
+ownership acceptance passes. Both `operator` and `clerk` production modes enforce persisted Release
+Decision and Recovery Archive access boundaries; only explicit development mode uses the local
+bypass. Authentication alone is not admission: the first qualified Owner Preview entry binds one
+internal user as the Bruno.Ai Owner, later Owner candidates fail closed, and runtime preparation
+never creates an Owner Preview decision without the Owner's explicit entry action. Trusted Preview
+additionally requires Clerk, one of three identity-bound invitations issued under the current
+exact-revision cohort decision, and a participant-specific admission decision. A Clerk session
+without that invitation authority cannot open a Founder workspace.
 
 ## Clerk mode
 
@@ -86,6 +93,57 @@ CLERK_SECRET_KEY=replace-with-development-secret-key
 Both Clerk variables are required and are read only from the server environment. Never commit,
 print, or copy their values into diagnostics. `NODE_ENV`, request `Host`, and forwarded-host headers
 cannot downgrade a production or custom deployment to development mode.
+
+### Founder identity recovery
+
+Configure Clerk's `user.deleted` webhook to the exact public endpoint
+`/api/webhooks/clerk` and keep its signing secret in server-only hosted secret storage:
+
+```dotenv
+CLERK_WEBHOOK_SIGNING_SECRET=replace-with-dedicated-clerk-webhook-secret
+BRUNO_IDENTITY_RECOVERY_SIGNING_SECRET=replace-with-generated-secret-at-least-32-characters
+```
+
+Bruno verifies the webhook signature before recording a pending Identity Recovery against the
+existing internal Owner. A verified `user.deleted` event records deletion; a verified
+`user.updated` event whose Clerk user is banned records provider-confirmed identity loss. While that
+recovery is pending, the old Clerk subject is denied at the application-user boundary. The webhook
+records identity loss only: it does not cancel Lemon Squeezy, change Product Entitlement, start a
+refund, begin Infrastructure Retirement, delete Recovery Archives, begin Bruno Data Deletion, or
+request Account Closure.
+
+Before identity loss, the recently reauthenticated Founder creates a one-time, high-entropy
+Identity Recovery code from the Privacy Center. In Clerk mode, "recently reauthenticated" means
+Clerk's server-side strict reverification check succeeds; JWT issuance or session refresh time is
+never accepted as credential verification. Bruno shows the code once, stores only its digest,
+and replaces any earlier code. The `/identity-recovery` surface accepts that code only while it is
+unused, unrevoked, unexpired, and bound to the pending recovery for the same internal Owner. The
+server then issues a short-lived assertion bound to that recovery, the prior and exact replacement
+Clerk-subject digests, and the credential evidence digest. A checkout email, a new Clerk ID, or
+possession of a browser session cannot claim an existing workspace. Bruno stores only digests and
+the distinct `identity_loss_recorded`, `recovery_denied`, and `identity_rebound` receipts; it does
+not retain the raw code, assertion, email, Clerk profile, or session material.
+
+Identity Recovery only restores the Owner mapping. The existing recently reauthenticated Account
+Closure control remains the sole coordinator of external-action pause, Lemon Squeezy subscription
+cancellation, connection revocation, Bruno Data Deletion, and its own receipts. Refunds remain a
+separate commerce-policy decision. Do not issue a recovery proof from browser-visible state or
+after weak email-only verification.
+
+The deterministic Founder Product Contract exercises these same public HTTP routes without a live
+Clerk mutation. Its local Identity Provider double signs an opaque subject, exact run and source
+revision, and five-minute validity window with the scenario-ledger secret. Bruno accepts that
+envelope only in deterministic development mode on loopback, with no Vercel environment; invalid,
+expired, tampered, preview, production, or Clerk-mode envelopes fail closed. The contract still
+passes the deletion event through Clerk's real webhook verifier. This automated seam is not hosted
+Clerk qualification or attended production evidence.
+
+Initial General Release additionally requires the exact-candidate attended Clerk qualification in
+[`CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md`](acceptance/CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md).
+A configured Clerk instance, successful local login, hosted test, or deterministic lifecycle pass
+does not satisfy it. Retained release evidence contains only the fixed result/checklist fields,
+exact application/runtime revisions and times, and a sanitized digest; it never contains a Clerk
+subject, identity, session material, credentials, or unrestricted webhook payload.
 
 ## Protected preview opt-in
 

@@ -1,0 +1,71 @@
+.card {
+  max-width: 42rem;
+  padding: 2rem;
+  border: 1px solid var(--border-subtle, #d8d4cc);
+  border-radius: 1.25rem;
+  background: var(--surface, #fff);
+  box-shadow: 0 1rem 3rem rgb(28 25 23 / 8%);
+}
+
+.card h2 {
+  margin: 0.35rem 0 0.75rem;
+  font-size: clamp(1.65rem, 4vw, 2.25rem);
+  line-height: 1.1;
+}
+
+.card p {
+  max-width: 60ch;
+  line-height: 1.6;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #765a35;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.muted {
+  color: #6b665e;
+}
+
+.primary {
+  display: inline-flex;
+  justify-content: center;
+  margin-top: 0.75rem;
+  padding: 0.8rem 1.1rem;
+  border: 0;
+  border-radius: 999px;
+  background: #21201d;
+  color: #fff;
+  font: inherit;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.primary:focus-visible {
+  outline: 3px solid #c99544;
+  outline-offset: 3px;
+}
+
+.secondary {
+  display: inline-flex;
+  justify-content: center;
+  margin-top: 0.75rem;
+  padding: 0.8rem 1.1rem;
+  border: 1px solid #6b665e;
+  border-radius: 999px;
+  background: #fff;
+  color: #21201d;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.secondary:focus-visible {
+  outline: 3px solid #c99544;
+  outline-offset: 3px;
+}

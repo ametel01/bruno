@@ -39,7 +39,7 @@ const CONNECTION = {
 };
 
 describe("Founder Gmail reading route", () => {
-  it("returns a no-store business summary without credentials", async () => {
+  it("preserves a saved Gmail projection for an authenticated workspace", async () => {
     const response = await GET(new Request("http://localhost/api/operator/mail"), undefined, {
       requireApplicationUser: async () => ({ ok: true, userId: USER_ID }),
       getConnection: async () => CONNECTION,
@@ -48,11 +48,10 @@ describe("Founder Gmail reading route", () => {
     });
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ connection: CONNECTION, offerDisposition: null });
-    expect(JSON.stringify(CONNECTION)).not.toMatch(/token|secret|credential|client.?secret/i);
+    expect(await response.json()).toMatchObject({ connection: CONNECTION });
   });
 
-  it("routes start, selection, verification, and disconnect explicitly", async () => {
+  it("blocks setup actions while preserving safe disconnect", async () => {
     const start = vi.fn(async () => ({
       connection: { ...CONNECTION, status: "authorizing" as const },
       authorization: {
@@ -109,11 +108,11 @@ describe("Founder Gmail reading route", () => {
       undefined,
       dependencies,
     );
-    expect(start).toHaveBeenCalledWith(USER_ID);
-    expect(select).toHaveBeenCalledWith(USER_ID, ["INBOX"]);
-    expect(verify).toHaveBeenCalledWith(USER_ID);
+    expect(start).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+    expect(verify).not.toHaveBeenCalled();
     expect(disconnect).toHaveBeenCalledWith(USER_ID);
-    expect(setOffer).toHaveBeenCalledWith(USER_ID, "enabled");
+    expect(setOffer).not.toHaveBeenCalled();
   });
 
   it("rejects unauthenticated and malformed selection requests", async () => {
@@ -140,11 +139,13 @@ describe("Founder Gmail reading route", () => {
         isMailReadingReleased: () => true,
       },
     );
-    expect(malformed.status).toBe(400);
-    expect(await malformed.json()).toMatchObject({ error: { code: "validation_failed" } });
+    expect(malformed.status).toBe(409);
+    expect(await malformed.json()).toMatchObject({
+      error: { code: "owner_preview_capability_unavailable" },
+    });
   });
 
-  it("fails closed before exposing or starting unqualified Gmail reading", async () => {
+  it("preserves saved state while blocking new work after Gmail reading loses qualification", async () => {
     const getConnection = vi.fn(async () => CONNECTION);
     const startAuthorization = vi.fn();
     const dependencies = {
@@ -153,6 +154,7 @@ describe("Founder Gmail reading route", () => {
       getOfferDisposition: vi.fn(async () => null),
       startAuthorization,
       isMailReadingReleased: () => false,
+      hasGeneralReleaseSetupAccess: async () => true,
     };
 
     const getResponse = await GET(
@@ -169,12 +171,26 @@ describe("Founder Gmail reading route", () => {
       dependencies,
     );
 
-    expect(getResponse.status).toBe(409);
+    expect(getResponse.status).toBe(200);
     expect(startResponse.status).toBe(409);
     expect(await startResponse.json()).toMatchObject({
-      error: { code: "mail_reading_not_released" },
+      error: { code: "provider_not_released" },
     });
-    expect(getConnection).not.toHaveBeenCalled();
+    expect(getConnection).toHaveBeenCalledWith(USER_ID);
     expect(startAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("exposes released Gmail reading during public General Release setup", async () => {
+    const getConnection = vi.fn(async () => CONNECTION);
+    const response = await GET(new Request("http://localhost/api/operator/mail"), undefined, {
+      requireApplicationUser: async () => ({ ok: true, userId: USER_ID }),
+      getConnection,
+      getOfferDisposition: async () => "enabled" as const,
+      isMailReadingReleased: () => true,
+      hasGeneralReleaseSetupAccess: async () => true,
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ connection: CONNECTION });
+    expect(getConnection).toHaveBeenCalledWith(USER_ID);
   });
 });

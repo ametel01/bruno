@@ -1,10 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 
 const mocks = vi.hoisted(() => ({
   requireApplicationUser: vi.fn(),
   getConversation: vi.fn(),
   sendMessage: vi.fn(),
   resumeWork: vi.fn(),
+  requireWorkspaceAccess: vi.fn(),
+  accessErrorResponse: vi.fn(),
+}));
+
+vi.mock("@/app/api/operator/_shared/owner-preview-access", () => ({
+  requireFounderOperatorWorkspaceAccess: mocks.requireWorkspaceAccess,
+  founderOperatorAccessErrorResponse: mocks.accessErrorResponse,
 }));
 
 vi.mock("@/src/server/users/configured-application-user", () => ({
@@ -47,6 +55,8 @@ describe("Founder Conversation route", () => {
     mocks.getConversation.mockResolvedValue(CONVERSATION);
     mocks.sendMessage.mockResolvedValue(CONVERSATION);
     mocks.resumeWork.mockResolvedValue(CONVERSATION);
+    mocks.requireWorkspaceAccess.mockResolvedValue(null);
+    mocks.accessErrorResponse.mockReturnValue(null);
   });
 
   afterEach(() => vi.clearAllMocks());
@@ -59,6 +69,49 @@ describe("Founder Conversation route", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ conversation: CONVERSATION });
     expect(mocks.getConversation).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it("denies the workspace when Owner Preview was never admitted", async () => {
+    mocks.requireWorkspaceAccess.mockResolvedValue(
+      Response.json(
+        { error: { code: "owner_preview_access_required" } },
+        { status: 403, headers: { "Cache-Control": "no-store" } },
+      ),
+    );
+    const { GET } = await import("@/app/api/operator/conversation/route");
+    const response = await GET(new Request("http://localhost/api/operator/conversation"));
+
+    expect(response.status).toBe(403);
+    expect(mocks.requireWorkspaceAccess).toHaveBeenCalledWith(USER_ID, "workspace", {
+      allowGeneralReleaseSetup: true,
+    });
+    expect(mocks.getConversation).not.toHaveBeenCalled();
+  });
+
+  it("preserves safe reads while current protection blocks new work", async () => {
+    const blocked = Response.json(
+      { error: { code: "owner_preview_access_required" } },
+      { status: 403 },
+    );
+    mocks.requireWorkspaceAccess.mockImplementation(
+      async (_userId: string, requirement?: "workspace" | "work") =>
+        requirement === "workspace" ? null : blocked,
+    );
+    const { GET, POST } = await import("@/app/api/operator/conversation/route");
+
+    await expect(
+      GET(new Request("http://localhost/api/operator/conversation")),
+    ).resolves.toMatchObject({ status: 200 });
+    await expect(
+      POST(
+        new Request("http://localhost/api/operator/conversation", {
+          method: "POST",
+          body: JSON.stringify({ message: "Start new work" }),
+        }),
+      ),
+    ).resolves.toMatchObject({ status: 403 });
+    expect(mocks.getConversation).toHaveBeenCalledOnce();
+    expect(mocks.sendMessage).not.toHaveBeenCalled();
   });
 
   it("passes the Founder message and idempotency key to the application seam", async () => {
@@ -87,6 +140,36 @@ describe("Founder Conversation route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.resumeWork).toHaveBeenCalledWith(USER_ID, "work-1");
+  });
+
+  it.each([
+    "send",
+    "resume",
+  ])("returns a sanitized denial when protection expires inside the %s transaction", async (action) => {
+    const accessError = new FounderReleaseStageAccessError();
+    const denied = Response.json(
+      { error: { code: "owner_preview_access_required" } },
+      { status: 403, headers: { "Cache-Control": "no-store" } },
+    );
+    if (action === "send") mocks.sendMessage.mockRejectedValueOnce(accessError);
+    else mocks.resumeWork.mockRejectedValueOnce(accessError);
+    mocks.accessErrorResponse.mockImplementationOnce((error) =>
+      error === accessError ? denied : null,
+    );
+    const { POST } = await import("@/app/api/operator/conversation/route");
+    const response = await POST(
+      new Request("http://localhost/api/operator/conversation", {
+        method: "POST",
+        body: JSON.stringify(
+          action === "send"
+            ? { message: "Start protected work" }
+            : { action: "resume", workId: "work-1" },
+        ),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
   it.each([

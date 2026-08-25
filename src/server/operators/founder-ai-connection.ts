@@ -744,6 +744,8 @@ export async function disconnectFounderOpenAiForUser(
       selectConnection(tx, operator.id, true, "openai"),
     );
     if (!current) return null;
+    if (current.connection.authorizationState === "revoked")
+      return toConnectionDto(current.connection, current.receipt);
     const revocation = await adapter.revokeAuthorization({
       operatorId: operator.id,
       userId,
@@ -1161,6 +1163,8 @@ export async function disconnectFounderAnthropicForUser(
       selectConnection(tx, operator.id, true, ANTHROPIC_PROVIDER),
     );
     if (!current) return null;
+    if (current.connection.authorizationState === "revoked")
+      return toConnectionDto(current.connection, current.receipt);
     const revocation = await adapter.revokeAuthorization({
       operatorId: operator.id,
       userId,

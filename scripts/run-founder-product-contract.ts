@@ -1,13 +1,26 @@
 import { spawn } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   buildFounderInitialGeneralReleaseDecision,
+  parseFounderGeneralReleaseOperationalSummary,
   parseFounderModeratedSummary,
   parseFounderProviderDecisionSummary,
 } from "@/scripts/create-founder-general-release-decision";
 import { createFounderProductContractEvidence } from "@/scripts/create-founder-product-contract-evidence";
+import {
+  parseFounderProductionProviderLiveTargetAuthority,
+  parseFounderProductionProviderQualificationSummary,
+} from "@/scripts/create-founder-production-provider-qualification";
+import { parseFounderAttendedAccessibilitySummary } from "@/scripts/founder-attended-accessibility-summary";
 import { FOUNDER_PRODUCT_CONTRACT_UNIT_FILES } from "@/src/shared/founder-product-contract";
+import { buildDeterministicFounderGeneralReleaseAuthorityFixture } from "@/src/testing/founder-general-release-authority";
+import {
+  FOUNDER_PRODUCT_CONTRACT_SCENARIO_SIGNING_SECRET_ENV,
+  parseFounderProductContractScenarioLedger,
+} from "@/src/testing/founder-product-contract";
+import { buildTestAnthropicAcceptanceRelease } from "./founder-anthropic-test-release";
 import { buildTestGoogleMailSendingAcceptanceRelease } from "./founder-google-mail-sending-test-release";
 import { buildTestGoogleConnectedAcceptanceRelease } from "./founder-google-test-release";
 import { buildTestOpenAiConnectedAcceptanceRelease } from "./founder-openai-test-release";
@@ -22,12 +35,50 @@ const generalReleaseDecisionPath = join(
   "founder-initial-general-release-decision.json",
 );
 const mode = process.env.BRUNO_FOUNDER_CONTRACT_MODE === "release" ? "release" : "ci";
+const deterministicConnectionSecret = createHash("sha256")
+  .update("founder-contract-connection-secret-v1")
+  .digest("base64url");
 
 await mkdir(artifactDirectory, { recursive: true });
 await rm(evidencePath, { force: true });
 await rm(generalReleaseDecisionPath, { force: true });
 const sourceRevision = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION");
+const runtimeRevision = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION");
+const observedAt = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_OBSERVED_AT");
+const runId = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID");
+const providerFailureRunId = `fpct-failure:${createHash("sha256").update(runId).digest("hex")}`;
+const runAttempt = requiredPositiveIntegerEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ATTEMPT");
+const scenarioSigningSecret = requiredEnvironment(
+  FOUNDER_PRODUCT_CONTRACT_SCENARIO_SIGNING_SECRET_ENV,
+);
+const scenarioLedgerPath = requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH");
+await rm(browserResultPath, { force: true });
+await rm(unitResultPath, { force: true });
+await rm(scenarioLedgerPath, { force: true });
 const deterministicProviderEnvironment = {
+  BRUNO_FOUNDER_CONTRACT_PROVIDER_MODE: "deterministic",
+  BRUNO_FOUNDER_CONTRACT_COMMERCE_WEBHOOK_SECRET: "founder-contract-lemon-test-secret-v1",
+  BRUNO_INITIAL_GENERAL_RELEASE_AVAILABILITY: "open",
+  BRUNO_INITIAL_GENERAL_RELEASE_GEOGRAPHIES: "PH",
+  BRUNO_INITIAL_GENERAL_RELEASE_AVAILABILITY_MESSAGE:
+    "Public contract capacity is available in this geography.",
+  BRUNO_INITIAL_GENERAL_RELEASE_PRICE_LABEL: "$30/month",
+  BRUNO_INITIAL_GENERAL_RELEASE_DECISION: buildDeterministicFounderGeneralReleaseAuthorityFixture({
+    sourceRevision,
+    runtimeRevision,
+    decidedAt: new Date(observedAt),
+  }),
+  BRUNO_FOUNDER_RELEASE_RUNTIME_REVISION: runtimeRevision,
+  BRUNO_FOUNDER_CONTRACT_IDENTITY_RECOVERY_SIGNING_SECRET:
+    "founder-contract-identity-recovery-signing-secret-v1",
+  BRUNO_IDENTITY_RECOVERY_SIGNING_SECRET: "founder-contract-identity-recovery-signing-secret-v1",
+  CLERK_WEBHOOK_SIGNING_SECRET: `whsec_${createHash("sha256")
+    .update("founder-contract-clerk-webhook-signing-secret-v1")
+    .digest("base64")}`,
+  BRUNO_CONNECTION_SECRET_ACTIVE_KEY_VERSION: "founder-contract-v1",
+  BRUNO_CONNECTION_SECRET_KEYS_JSON: JSON.stringify({
+    "founder-contract-v1": deterministicConnectionSecret,
+  }),
   BRUNO_GOOGLE_CALENDAR_CONNECTED_ACCEPTANCE_RELEASE: buildTestGoogleConnectedAcceptanceRelease(
     "calendar_reading",
     new Date(),
@@ -44,7 +95,17 @@ const deterministicProviderEnvironment = {
     new Date(),
     sourceRevision,
   ),
+  BRUNO_ANTHROPIC_CONNECTED_ACCEPTANCE_RELEASE: buildTestAnthropicAcceptanceRelease(
+    new Date(),
+    sourceRevision,
+  ),
   VERCEL_GIT_COMMIT_SHA: sourceRevision,
+  BRUNO_FOUNDER_CONTRACT_SCENARIO_SIGNING_SECRET: scenarioSigningSecret,
+  BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH: scenarioLedgerPath,
+  BRUNO_FOUNDER_CONTRACT_SOURCE_REVISION: sourceRevision,
+  BRUNO_FOUNDER_CONTRACT_RUNTIME_REVISION: runtimeRevision,
+  BRUNO_FOUNDER_CONTRACT_RUN_ID: runId,
+  BRUNO_FOUNDER_CONTRACT_OBSERVED_AT: observedAt,
 };
 
 await run(
@@ -66,6 +127,29 @@ await run(
   [
     "node_modules/.bin/playwright",
     "test",
+    "tests/e2e/founder-product-contract-failure.spec.ts",
+    "--config=playwright.founder-contract-lifecycle.config.ts",
+  ],
+  {
+    ...deterministicProviderEnvironment,
+    BRUNO_FOUNDER_CONTRACT_RUN_ID: providerFailureRunId,
+  },
+);
+
+await run(
+  [
+    "node_modules/.bin/playwright",
+    "test",
+    "tests/e2e/founder-product-contract-lifecycle.spec.ts",
+    "--config=playwright.founder-contract-lifecycle.config.ts",
+  ],
+  deterministicProviderEnvironment,
+);
+
+await run(
+  [
+    "node_modules/.bin/playwright",
+    "test",
     "tests/e2e/founder-product-contract.spec.ts",
     "--config=playwright.founder-contract.config.ts",
   ],
@@ -75,25 +159,38 @@ await run(
   },
 );
 
-const voiceOverDigest = process.env.BRUNO_FOUNDER_CONTRACT_VOICEOVER_DIGEST;
-const voiceOverOsVersion = process.env.BRUNO_FOUNDER_CONTRACT_VOICEOVER_OS_VERSION;
-const voiceOverBrowserVersion = process.env.BRUNO_FOUNDER_CONTRACT_VOICEOVER_BROWSER_VERSION;
-const talkBackDigest = process.env.BRUNO_FOUNDER_CONTRACT_TALKBACK_DIGEST;
-const talkBackOsVersion = process.env.BRUNO_FOUNDER_CONTRACT_TALKBACK_OS_VERSION;
-const talkBackBrowserVersion = process.env.BRUNO_FOUNDER_CONTRACT_TALKBACK_BROWSER_VERSION;
+const scenarioLedger = parseFounderProductContractScenarioLedger({
+  value: await readFile(requiredEnvironment("BRUNO_FOUNDER_CONTRACT_SCENARIO_LEDGER_PATH"), "utf8"),
+  sourceRevision,
+  runtimeRevision,
+  runId,
+  observedAt,
+  signingSecret: scenarioSigningSecret,
+});
+
+const voiceOverSummary = parseFounderAttendedAccessibilitySummary({
+  raw: process.env.BRUNO_FOUNDER_CONTRACT_VOICEOVER_ATTENDED_SUMMARY_JSON,
+  assistiveTechnology: "VoiceOver",
+  browser: "Safari",
+});
+const talkBackSummary = parseFounderAttendedAccessibilitySummary({
+  raw: process.env.BRUNO_FOUNDER_CONTRACT_TALKBACK_ATTENDED_SUMMARY_JSON,
+  assistiveTechnology: "TalkBack",
+  browser: "Chrome",
+});
 const evidence = await createFounderProductContractEvidence({
   browserResultPath,
   unitResultPath,
   sourceRevision,
-  runId: requiredEnvironment("BRUNO_FOUNDER_CONTRACT_RUN_ID"),
+  runtimeRevision,
+  runId,
+  runAttempt,
   mode,
-  observedAt: requiredEnvironment("BRUNO_FOUNDER_CONTRACT_OBSERVED_AT"),
-  ...(voiceOverDigest ? { voiceOverDigest } : {}),
-  ...(voiceOverOsVersion ? { voiceOverOsVersion } : {}),
-  ...(voiceOverBrowserVersion ? { voiceOverBrowserVersion } : {}),
-  ...(talkBackDigest ? { talkBackDigest } : {}),
-  ...(talkBackOsVersion ? { talkBackOsVersion } : {}),
-  ...(talkBackBrowserVersion ? { talkBackBrowserVersion } : {}),
+  observedAt,
+  ...(voiceOverSummary ? { voiceOverSummary } : {}),
+  ...(talkBackSummary ? { talkBackSummary } : {}),
+  scenarioLedger,
+  scenarioSigningSecret,
 });
 
 await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
@@ -103,6 +200,17 @@ const generalReleaseDecision = buildFounderInitialGeneralReleaseDecision({
   providerSummary: parseFounderProviderDecisionSummary(
     process.env.BRUNO_FOUNDER_PROVIDER_DECISION_SUMMARY_JSON,
   ),
+  productionProviderQualificationSummary: parseFounderProductionProviderQualificationSummary(
+    process.env.BRUNO_FOUNDER_PRODUCTION_PROVIDER_QUALIFICATION_SUMMARY_JSON,
+  ),
+  productionProviderLiveTargetAuthority: parseFounderProductionProviderLiveTargetAuthority({
+    storeDigest: process.env.BRUNO_FOUNDER_EXPECTED_LIVE_STORE_DIGEST,
+    productDigest: process.env.BRUNO_FOUNDER_EXPECTED_LIVE_PRODUCT_DIGEST,
+  }),
+  operationalSummary: parseFounderGeneralReleaseOperationalSummary(
+    process.env.BRUNO_FOUNDER_GENERAL_RELEASE_OPERATIONAL_SUMMARY_JSON,
+  ),
+  decisionTime: new Date(),
 });
 await writeFile(generalReleaseDecisionPath, `${JSON.stringify(generalReleaseDecision, null, 2)}\n`);
 console.info(
@@ -135,4 +243,12 @@ function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required.`);
   return value;
+}
+
+function requiredPositiveIntegerEnvironment(name: string): number {
+  const value = requiredEnvironment(name);
+  if (!/^[1-9][0-9]*$/.test(value)) throw new Error(`${name} must be a positive integer.`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new Error(`${name} must be a safe integer.`);
+  return parsed;
 }

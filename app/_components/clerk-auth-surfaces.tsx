@@ -55,24 +55,44 @@ export function AccountControls() {
   );
 }
 
-export function SignInSurface() {
+export function SignInSurface({ identityRecovery = false }: { identityRecovery?: boolean } = {}) {
+  const destination = identityRecovery ? "/identity-recovery" : "/operator";
   return (
     <AuthSurface
       description="Use your Bruno.Ai account to continue to your always-on operator."
       title="Sign in to Bruno.Ai"
     >
-      <SignIn fallbackRedirectUrl="/operator" path="/sign-in" routing="path" signUpUrl="/sign-up" />
+      <SignIn
+        {...(identityRecovery
+          ? { forceRedirectUrl: destination }
+          : { fallbackRedirectUrl: destination })}
+        path="/sign-in"
+        routing="path"
+        signUpUrl={identityRecovery ? "/sign-up?continue=identity-recovery" : "/sign-up"}
+      />
+      <p className="auth-state-message">
+        Lost access to the original identity? Use the separate{" "}
+        <Link href="/identity-recovery">identity recovery</Link> path.
+      </p>
     </AuthSurface>
   );
 }
 
-export function SignUpSurface() {
+export function SignUpSurface({ identityRecovery = false }: { identityRecovery?: boolean } = {}) {
+  const destination = identityRecovery ? "/identity-recovery" : "/operator";
   return (
     <AuthSurface
       description="Create a Bruno.Ai account to start an always-on agent that learns how you run your one-person company."
       title="Create your Bruno.Ai account"
     >
-      <SignUp fallbackRedirectUrl="/operator" path="/sign-up" routing="path" signInUrl="/sign-in" />
+      <SignUp
+        {...(identityRecovery
+          ? { forceRedirectUrl: destination }
+          : { fallbackRedirectUrl: destination })}
+        path="/sign-up"
+        routing="path"
+        signInUrl={identityRecovery ? "/sign-in?continue=identity-recovery" : "/sign-in"}
+      />
     </AuthSurface>
   );
 }

@@ -79,10 +79,26 @@ history, cancellation, and eligible resumption. Initial General Release does not
 switching or customer-initiated subscription pausing until their Product Entitlement consequences
 are separately released.
 
+The application requests a fresh signed portal URL only after authenticating the internal Owner and
+checking a current `verified`, in-window `past_due`, or paid-through `cancelled` Product Entitlement.
+It rechecks that authority before redirecting and records only an immutable digest plus portal expiry,
+never the signed URL. The Lemon Squeezy Customer Portal configuration for Initial General Release
+must expose payment methods, billing history, cancellation, and eligible resumption while leaving
+plan switching and customer-initiated pausing disabled.
+
 Losing or deleting a Clerk identity does not cancel commerce or delete Bruno.Ai data. It creates an
 identity-recovery problem. Only recently reauthenticated Account Closure coordinates external-action
 pause, Lemon Squeezy cancellation, connection revocation, Bruno Data Deletion, and receipts; refunds
 remain a separate policy decision.
+
+A signature-verified Clerk `user.deleted` event records an `identity_loss_recorded` receipt and
+denies Operator access while the recovery is pending. Recovery requires a short-lived server-signed
+assertion bound to the same internal Owner plus exact prior and replacement Clerk-subject digests.
+Email, checkout metadata, possession of a new Clerk account, or an authenticated session are not
+ownership proof. Failed takeover attempts record `recovery_denied`; a successful same-Owner rebind
+records `identity_rebound`. These receipts never represent commerce cancellation, Product
+Entitlement change, refund, Infrastructure Retirement, Recovery Archive deletion, Bruno Data
+Deletion, or Account Closure.
 
 Before Initial General Release, billing qualification must prove live checkout, activation-timed
 charging, failed payment, cancellation, refund, entitlement reconciliation, duplicate and reordered
@@ -91,7 +107,9 @@ delivery, cross-device state, receipts, and payment-without-access recovery.
 Provider qualification also requires an attended production Clerk run plus Lemon Squeezy test-mode
 and live-mode runs. The live canary proves one real charge, signed webhook processing, Product
 Entitlement, Customer Portal access, cancellation, full refund, duplicate and reordered delivery,
-reconciliation, and sanitized cleanup. Existing provider accounts do not satisfy these gates.
+reconciliation, and sanitized cleanup. Existing provider accounts do not satisfy these gates. The
+allowlisted evidence handoff and exact application/runtime binding are defined in
+[`CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md`](CLERK_LEMON_SQUEEZY_PRODUCTION_QUALIFICATION.md).
 
 ## Entitlement expiry and infrastructure cost
 
@@ -106,6 +124,22 @@ Bruno.Ai's infrastructure cost. Product Entitlement transitions therefore use ex
   Retirement within 24 hours; and
 - duplicate, delayed, or reordered commerce events never restart or extend a retirement clock.
 
+Founder surfaces project these states separately: payment recovery with its exact deadline,
+cancelled-through with the paid `ends_at`, stopped new work with retirement due or in progress, and
+completed Infrastructure Retirement after provider absence is verified. Cancellation and full
+refund create immutable Commerce Lifecycle Receipts; Infrastructure Retirement and Account Closure
+continue to use their own decisions and receipts.
+
+The deterministic Founder Product Contract includes required `subscription_lifecycle` and
+`identity_recovery_lifecycle` scenarios. The subscription scenario exercises the signed hosted
+portal boundary and its exact allowed/forbidden actions, all recovery and terminal deadlines,
+cancellation through paid `ends_at`, and the rule that reordered active events cannot restart
+terminal clocks. The identity scenario proves loss denial, takeover denial, same-Owner rebound,
+separate truthful receipts, unchanged commerce/Product Entitlement/infrastructure/archive state,
+and a later explicit Account Closure as the sole destructive coordinator. Deterministic evidence
+does not prove live Clerk or Lemon Squeezy configuration; attended provider qualification remains
+required before release.
+
 Before retirement, Bruno.Ai creates and verifies an encrypted off-Droplet Recovery Archive containing
 the minimum durable Operator state needed to rebuild. It excludes raw provider credentials, expires
 after 30 days, and is distinct from a manual backup manifest or a billable DigitalOcean snapshot.
@@ -118,7 +152,11 @@ Infrastructure Retirement verifies the exact owned resource set, disables runtim
 deletes the firewall and Droplet, and rechecks authoritative provider absence. An Infrastructure
 Retirement Receipt remains in progress until no billable runtime resource remains. Ambiguous identity,
 unknown provider outcome, and failed cleanup retry idempotently against the same exact resource and
-never broaden deletion scope.
+never broaden deletion scope. The receipt freezes the complete provider identity before deletion,
+records work stoppage and the emergency archive outcome, and measures the billable interval from
+DigitalOcean's resource creation time through the final authoritative absence observation. Local
+assignment, idle, stopped, or powered-off state does not end that interval while the Droplet remains
+present at DigitalOcean.
 
 If no valid Recovery Archive can be produced by the hard deadline, Bruno.Ai still destroys the
 Droplet and records a critical preservation failure truthfully. During the 30-day retention window,
@@ -178,8 +216,29 @@ not contain message bodies, calendar content, recipients, prompts, provider resp
 unrestricted metadata.
 
 Recordings require separate opt-in and deletion within 30 days. Beta Compact acceptance grants no
-testimonial, identity, logo, quotation, case-study, or other marketing consent; each use requires a
-separate specific decision and cannot be presented as General Release proof.
+feedback, testimonial, identity, name, logo, quotation, case-study, or other marketing consent; each
+use requires a separate specific decision and cannot be presented as General Release proof.
+
+The product starts External Beta measurement opted out. It accepts only six static event shapes:
+activation completion, allowlisted journey completion or timing, allowlisted capability state,
+allowlisted safe failure category, and support duration. It rejects unknown event names and
+properties before persistence; no autocapture, session replay, person profile, shared participant
+identity, message or Calendar content, recipient, prompt, provider response, credential, or
+unrestricted metadata path is permitted. Every accepted fact remains bound to the admitted
+participant, Operator, and invitation workspace and is permanently classified as product-hardening
+evidence.
+
+Measurement, recording, testimonial, identity, name, logo, quotation, and case-study purposes each
+have their own append-only consent decision. Refusal or withdrawal changes only that purpose and
+cannot change External Beta admission or its 14-day window. Recording deletion stays pending until
+the configured object provider verifies absence no later than the exact 30-day deadline. The
+retention worker records a verified late deletion as a terminal `deleted_late` breach receipt and
+fails its scheduled run for operator attention; a retry can never strand a provider-deleted artifact
+in active state merely because the deadline has passed. Recording cleanup and Infrastructure
+Retirement run independently, and the internal scheduler reports both outcomes when either fails.
+Founder-visible External Beta privacy controls show the allowlist and exclusions, permit every
+purpose to be allowed, refused, or withdrawn separately, and provide a bounded privacy export and
+measurement deletion.
 
 Every External Beta surface must identify the stage and show the remaining access window, available
 and unavailable capabilities, support boundary, and withdrawal, export, and deletion controls.
@@ -195,6 +254,13 @@ Preview Qualification never bypasses a provider gate and cannot be consumed as C
 or Founder Acceptance Evidence. Gmail reading and Gmail sending qualify independently. Anthropic is
 hidden during Owner Preview and Trusted Preview, but both Anthropic and OpenAI must qualify for
 External Beta and pass Connected Acceptance before Initial General Release.
+
+The External Beta boundary persists one record per capability with the named cohort, exact
+application and runtime revisions, sanitized evidence digest, observation time, and expiry. The
+admission manifest is all-or-nothing, while post-admission capability status remains independent so
+one lost qualification can pause only its affected work. Founder-facing status uses Available and
+Paused labels and does not expose candidate revisions, evidence digests, provider internals, or
+runtime configuration.
 
 ## Promotion authority
 
@@ -254,6 +320,8 @@ Initial General Release requires both OpenAI and Anthropic to be available, but 
 either or both. Bruno.Ai routes only among explicitly connected providers and never silently enrolls
 a provider or uses Bruno-funded capacity.
 
-After Initial General Release, loss of one provider's qualification hides or suspends only that
-provider. Existing work remains at Safe Work Checkpoints, unaffected capabilities stay available,
-and new Founders may choose an available provider or wait for the affected provider to return.
+After Initial General Release, loss of one provider's qualification appends an immutable Hold scoped
+to that provider's dependent capability. Existing work remains at Safe Work Checkpoints and
+unaffected capabilities stay available to already bound, entitled Founders. New public admission is
+closed until a fresh complete exact-candidate decision appends an explicit Resume; provider
+configuration recovering by itself never erases the Hold.

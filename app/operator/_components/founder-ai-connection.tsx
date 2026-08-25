@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { FounderAiConnectionDto } from "@/src/server/operators/founder-ai-connection";
-import { FounderRecoveryStatus } from "./founder-recovery-status";
 import styles from "./founder-ai-connection.module.css";
+import { FounderRecoveryStatus } from "./founder-recovery-status";
 
 type Authorization = {
   sessionId: string;
@@ -12,7 +12,11 @@ type Authorization = {
   expiresAt: string;
 };
 
-export function FounderAiConnection() {
+type FounderAiProvider = "openai" | "anthropic";
+
+export function FounderAiConnection({ provider = "openai" }: { provider?: FounderAiProvider }) {
+  const providerName = provider === "anthropic" ? "Anthropic" : "OpenAI";
+  const providerQuery = `?provider=${provider}`;
   const [connection, setConnection] = useState<FounderAiConnectionDto | null>(null);
   const [authorization, setAuthorization] = useState<Authorization | null>(null);
   const [busy, setBusy] = useState(false);
@@ -20,7 +24,7 @@ export function FounderAiConnection() {
 
   useEffect(() => {
     let cancelled = false;
-    void fetch("/api/operator/connections", { credentials: "same-origin" })
+    void fetch(`/api/operator/connections${providerQuery}`, { credentials: "same-origin" })
       .then(async (response) =>
         response.ok
           ? ((await response.json()) as { connection: FounderAiConnectionDto | null })
@@ -33,7 +37,7 @@ export function FounderAiConnection() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [providerQuery]);
 
   useEffect(() => {
     if (!authorization) return;
@@ -42,7 +46,11 @@ export function FounderAiConnection() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ action: "poll", sessionId: authorization.sessionId }),
+        body: JSON.stringify({
+          action: "poll",
+          provider,
+          sessionId: authorization.sessionId,
+        }),
       })
         .then(async (response) =>
           response.ok ? ((await response.json()) as { connection: FounderAiConnectionDto }) : null,
@@ -55,7 +63,7 @@ export function FounderAiConnection() {
         .catch(() => undefined);
     }, 2500);
     return () => window.clearInterval(poll);
-  }, [authorization]);
+  }, [authorization, provider]);
 
   async function startAuthorization() {
     setBusy(true);
@@ -65,7 +73,7 @@ export function FounderAiConnection() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ action: "start" }),
+        body: JSON.stringify({ action: "start", provider }),
       });
       const body = (await response.json()) as
         | { connection: FounderAiConnectionDto; authorization: Authorization | null }
@@ -73,8 +81,8 @@ export function FounderAiConnection() {
       if (!response.ok || !("connection" in body)) {
         throw new Error(
           "error" in body
-            ? (body.error?.message ?? "We could not start OpenAI authorization.")
-            : "We could not start OpenAI authorization.",
+            ? (body.error?.message ?? `We could not start ${providerName} authorization.`)
+            : `We could not start ${providerName} authorization.`,
         );
       }
       setConnection(body.connection);
@@ -83,7 +91,7 @@ export function FounderAiConnection() {
       setError(
         submissionError instanceof Error
           ? submissionError.message
-          : "We could not start OpenAI authorization.",
+          : `We could not start ${providerName} authorization.`,
       );
     } finally {
       setBusy(false);
@@ -98,7 +106,7 @@ export function FounderAiConnection() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ action: actionName }),
+        body: JSON.stringify({ action: actionName, provider }),
       });
       const body = (await response.json()) as {
         connection?: FounderAiConnectionDto;
@@ -123,19 +131,27 @@ export function FounderAiConnection() {
   const needsAction = connection && !ready && !disconnected && connection.status !== "authorizing";
 
   return (
-    <section className={styles.card} id="connections" aria-labelledby="ai-connection-title">
+    <section
+      className={styles.card}
+      id={`connections-${provider}`}
+      aria-labelledby={`ai-connection-title-${provider}`}
+    >
       <div className={styles.heading}>
         <div>
           <p className={styles.kicker}>Your AI Connection</p>
-          <h3 id="ai-connection-title">
-            {ready ? "OpenAI is ready" : disconnected ? "OpenAI is disconnected" : "Connect OpenAI"}
+          <h3 id={`ai-connection-title-${provider}`}>
+            {ready
+              ? `${providerName} is ready`
+              : disconnected
+                ? `${providerName} is disconnected`
+                : `Connect ${providerName}`}
           </h3>
         </div>
         {ready ? <span className={styles.badge}>Ready</span> : null}
       </div>
       <p className={styles.copy}>
-        Bruno uses the OpenAI account you attend and connect. Bruno does not ask for an API key or
-        silently fund another account.
+        Bruno uses the {providerName} account you attend and connect. Bruno does not ask for an API
+        key or silently fund another account.
       </p>
       {connection?.accountLabel ? (
         <p className={styles.account}>{connection.accountLabel}</p>
@@ -148,9 +164,9 @@ export function FounderAiConnection() {
       ) : null}
       {authorization ? (
         <div className={styles.authorization} role="status">
-          <p>Open the OpenAI page, enter this one-time code, then return here.</p>
+          <p>Open the {providerName} page, enter this one-time code, then return here.</p>
           <a href={authorization.authorizationUrl} target="_blank" rel="noreferrer">
-            Open OpenAI authorization
+            Open {providerName} authorization
           </a>
           <strong>{authorization.userCode}</strong>
         </div>
@@ -163,7 +179,11 @@ export function FounderAiConnection() {
             onClick={() => void startAuthorization()}
             disabled={busy}
           >
-            {busy ? "Starting…" : disconnected ? "Reconnect OpenAI" : "Connect OpenAI"}
+            {busy
+              ? "Starting…"
+              : disconnected
+                ? `Reconnect ${providerName}`
+                : `Connect ${providerName}`}
           </button>
         ) : null}
         {needsAction ? (
@@ -183,7 +203,7 @@ export function FounderAiConnection() {
             onClick={() => void action("disconnect")}
             disabled={busy}
           >
-            Disconnect OpenAI
+            Disconnect {providerName}
           </button>
         ) : null}
       </div>

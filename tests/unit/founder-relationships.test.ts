@@ -1,17 +1,18 @@
-import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq, sql } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   operatorCalendarConnections,
+  operatorMailConnections,
+  operatorPreparations,
   operatorRelationshipCorrections,
   operatorRelationshipEvidence,
   operatorRelationshipRecords,
   operatorRuntimes,
-  operatorPreparations,
-  operatorMailConnections,
   operators,
   users,
 } from "@/src/server/db/schema";
+import { FounderReleaseStageAccessError } from "@/src/server/founder-product-contract/release-stage-access";
 import {
   confirmFounderRelationshipCandidateForUser,
   getFounderRelationshipsForUser,
@@ -22,6 +23,7 @@ import {
 const OWNER_ID = "00000000-0000-4000-8000-000000003451";
 const OTHER_OWNER_ID = "00000000-0000-4000-8000-000000003452";
 const NOW = new Date("2026-08-19T02:00:00.000Z");
+const ALLOW_RELEASE_STAGE_ACCESS = async () => undefined;
 
 describe("Founder Relationship Records", () => {
   let connection: DatabaseConnection;
@@ -74,12 +76,20 @@ describe("Founder Relationship Records", () => {
           "mail",
         ),
       ],
-      { createConnection: () => connection, now: () => NOW },
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        requireReleaseStageAccess: ALLOW_RELEASE_STAGE_ACCESS,
+      },
     );
     await ingestFounderRelationshipEvidenceForUser(
       OWNER_ID,
       [observation(owner.calendarId, "calendar-event-1", { email: "ari@northstar.example" })],
-      { createConnection: () => connection, now: () => NOW },
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        requireReleaseStageAccess: ALLOW_RELEASE_STAGE_ACCESS,
+      },
     );
 
     const projected = await getFounderRelationshipsForUser(OWNER_ID, {
@@ -126,7 +136,11 @@ describe("Founder Relationship Records", () => {
           "mail",
         ),
       ],
-      { createConnection: () => connection, now: () => NOW },
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        requireReleaseStageAccess: ALLOW_RELEASE_STAGE_ACCESS,
+      },
     );
     const before = await getFounderRelationshipsForUser(OWNER_ID, {
       createConnection: () => connection,
@@ -142,6 +156,7 @@ describe("Founder Relationship Records", () => {
     const confirmed = await confirmFounderRelationshipCandidateForUser(OWNER_ID, candidateId, {
       createConnection: () => connection,
       now: () => NOW,
+      requireReleaseStageAccess: ALLOW_RELEASE_STAGE_ACCESS,
     });
     expect(confirmed.records).toHaveLength(1);
     expect(confirmed.candidates[0]).toMatchObject({
@@ -158,7 +173,11 @@ describe("Founder Relationship Records", () => {
           domain: "acme-advisory.example",
         }),
       ],
-      { createConnection: () => connection, now: () => NOW },
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        requireReleaseStageAccess: ALLOW_RELEASE_STAGE_ACCESS,
+      },
     );
     const withLaterEvidence = await getFounderRelationshipsForUser(OWNER_ID, {
       createConnection: () => connection,
@@ -180,7 +199,11 @@ describe("Founder Relationship Records", () => {
         commitments: ["Founder will send proposal", "Morgan will review by Friday"],
         status: "closed",
       },
-      { createConnection: () => connection, now: () => new Date(NOW.getTime() + 1000) },
+      {
+        createConnection: () => connection,
+        now: () => new Date(NOW.getTime() + 1000),
+        requireReleaseStageAccess: ALLOW_RELEASE_STAGE_ACCESS,
+      },
     );
     expect(updated.records[0]).toMatchObject({
       relationshipState: "client",
@@ -206,7 +229,11 @@ describe("Founder Relationship Records", () => {
     await ingestFounderRelationshipEvidenceForUser(
       OWNER_ID,
       [observation(owner.calendarId, "calendar-degraded-1", { email: "disconnect@example.com" })],
-      { createConnection: () => connection, now: () => NOW },
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        requireReleaseStageAccess: ALLOW_RELEASE_STAGE_ACCESS,
+      },
     );
     await connection.db
       .update(operatorCalendarConnections)
@@ -240,9 +267,53 @@ describe("Founder Relationship Records", () => {
         OTHER_OWNER_ID,
         "00000000-0000-4000-8000-000000003462",
         { nextAction: "Should not cross owners" },
-        { createConnection: () => connection, now: () => NOW },
+        {
+          createConnection: () => connection,
+          now: () => NOW,
+          requireReleaseStageAccess: ALLOW_RELEASE_STAGE_ACCESS,
+        },
       ),
     ).rejects.toMatchObject({ code: "relationship_not_found", status: 404 });
+  });
+
+  it("checks Gmail capability inside the Mail-evidence write transaction", async () => {
+    const owner = await ownerIds(connection, OWNER_ID);
+    const competingConnection = createDatabaseConnection();
+    const requireReleaseStageAccess = vi.fn(async (_tx, input) => {
+      const rows = await competingConnection.db.execute<{ acquired: boolean }>(
+        sql`select pg_try_advisory_xact_lock(hashtextextended(${`bruno:founder-lifecycle:${OWNER_ID}`}, 0)) as acquired`,
+      );
+      expect(rows[0]?.acquired).toBe(false);
+      if (
+        Array.isArray(input.requiredCapabilities) &&
+        input.requiredCapabilities.includes("gmail_reading")
+      ) {
+        throw new FounderReleaseStageAccessError();
+      }
+    });
+
+    await expect(
+      ingestFounderRelationshipEvidenceForUser(
+        OWNER_ID,
+        [observation(owner.mailId, "mail-forbidden-1", { email: "blocked@example.com" }, "mail")],
+        {
+          createConnection: () => connection,
+          env: { VERCEL_GIT_COMMIT_SHA: "a".repeat(40) },
+          now: () => NOW,
+          requireReleaseStageAccess,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "owner_preview_access_required" });
+    expect(requireReleaseStageAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userId: OWNER_ID,
+        applicationRevision: "a".repeat(40),
+        requiredCapabilities: ["gmail_reading"],
+      }),
+    );
+    await expect(connection.db.select().from(operatorRelationshipEvidence)).resolves.toEqual([]);
+    await competingConnection.close();
   });
 });
 
